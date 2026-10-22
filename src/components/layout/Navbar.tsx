@@ -95,44 +95,49 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
           </Link>
         </div>
 
-        {/* Center: Navigation links */}
+        {/* Center: Dynamic Role-Specific Navigation links */}
         <div className={styles.navLinks}>
-          <Link 
-            to="/dashboard" 
-            className={`${styles.navLink} ${location.pathname === '/' || location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}
-          >
-            Home
-          </Link>
-          <Link 
-            to="/discover" 
-            className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}
-          >
-            Discover
-          </Link>
-          <Link 
-            to="/donations" 
-            className={`${styles.navLink} ${location.pathname === '/donations' ? styles.navLinkActive : ''}`}
-          >
-            Donations
-          </Link>
-          <Link 
-            to="/impact-dashboard" 
-            className={`${styles.navLink} ${location.pathname === '/impact' || location.pathname === '/impact-dashboard' ? styles.navLinkActive : ''}`}
-          >
-            Impact
-          </Link>
-          <Link 
-            to="/about" 
-            className={`${styles.navLink} ${location.pathname === '/about' ? styles.navLinkActive : ''}`}
-          >
-            About
-          </Link>
-          <Link 
-            to="/partners" 
-            className={`${styles.navLink} ${location.pathname === '/partners' ? styles.navLinkActive : ''}`}
-          >
-            Partners
-          </Link>
+          {!user ? (
+            <>
+              <Link to="/" className={`${styles.navLink} ${location.pathname === '/' ? styles.navLinkActive : ''}`}>Home</Link>
+              <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Discover</Link>
+              <Link to="/impact" className={`${styles.navLink} ${location.pathname === '/impact' ? styles.navLinkActive : ''}`}>Impact</Link>
+              <Link to="/about" className={`${styles.navLink} ${location.pathname === '/about' ? styles.navLinkActive : ''}`}>About</Link>
+              <Link to="/partners" className={`${styles.navLink} ${location.pathname === '/partners' ? styles.navLinkActive : ''}`}>Partners</Link>
+            </>
+          ) : user.role === 'rider' || user.role === 'volunteer' ? (
+            <>
+              <Link to="/dashboard" className={`${styles.navLink} ${location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}>Rider Home</Link>
+              <Link to="/rider-dashboard" className={`${styles.navLink} ${location.pathname === '/rider-dashboard' ? styles.navLinkActive : ''}`}>Available Jobs</Link>
+              <Link to="/map" className={`${styles.navLink} ${location.pathname === '/map' ? styles.navLinkActive : ''}`}>Live Map</Link>
+              <Link to="/chat" className={`${styles.navLink} ${location.pathname === '/chat' ? styles.navLinkActive : ''}`}>Messages</Link>
+              <Link to="/impact-dashboard" className={`${styles.navLink} ${location.pathname === '/impact-dashboard' ? styles.navLinkActive : ''}`}>Fleet Stats</Link>
+            </>
+          ) : user.role === 'ngo' || user.role === 'receiver' || user.role === 'acceptor' ? (
+            <>
+              <Link to="/dashboard" className={`${styles.navLink} ${location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}>NGO Hub</Link>
+              <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Claim Food</Link>
+              <Link to="/my-claims" className={`${styles.navLink} ${location.pathname === '/my-claims' ? styles.navLinkActive : ''}`}>Incoming Deliveries</Link>
+              <Link to="/requests" className={`${styles.navLink} ${location.pathname === '/requests' ? styles.navLinkActive : ''}`}>Distribution Log</Link>
+              <Link to="/chat" className={`${styles.navLink} ${location.pathname === '/chat' ? styles.navLinkActive : ''}`}>Chat</Link>
+            </>
+          ) : user.role === 'community' ? (
+            <>
+              <Link to="/dashboard" className={`${styles.navLink} ${location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}>Community Home</Link>
+              <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Find Free Meals</Link>
+              <Link to="/requests" className={`${styles.navLink} ${location.pathname === '/requests' ? styles.navLinkActive : ''}`}>My Requests</Link>
+              <Link to="/map" className={`${styles.navLink} ${location.pathname === '/map' ? styles.navLinkActive : ''}`}>Distribution Centers</Link>
+            </>
+          ) : (
+            /* Donor / Partner Default */
+            <>
+              <Link to="/dashboard" className={`${styles.navLink} ${location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}>Donor Dashboard</Link>
+              <Link to="/donations/new" className={`${styles.navLink} ${location.pathname === '/donations/new' ? styles.navLinkActive : ''}`} style={{ color: '#ea580c', fontWeight: 700 }}>+ Donate Food</Link>
+              <Link to="/donor-donations" className={`${styles.navLink} ${location.pathname === '/donor-donations' ? styles.navLinkActive : ''}`}>Track Deliveries</Link>
+              <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Network</Link>
+              <Link to="/chat" className={`${styles.navLink} ${location.pathname === '/chat' ? styles.navLinkActive : ''}`}>Chat</Link>
+            </>
+          )}
         </div>
 
         {/* Right: Search, Notifications, Auth */}

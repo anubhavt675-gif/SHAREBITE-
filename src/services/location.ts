@@ -89,6 +89,32 @@ export class LocationService {
   }
 
   /**
+   * Zomato-style realistic city delivery ETA estimate based on distance
+   */
+  static calculateEta(distanceKm: number, avgSpeedKmh = 25): { minutes: number; text: string } {
+    if (distanceKm <= 0.1) {
+      return { minutes: 1, text: 'Arriving now' };
+    }
+    // Urban motorbike transit with signal/traffic overhead (+2 min buffer)
+    const rawMinutes = (distanceKm / avgSpeedKmh) * 60 + 2;
+    const minutes = Math.max(2, Math.round(rawMinutes));
+    const text = minutes < 60 ? `${minutes} mins` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+    return { minutes, text };
+  }
+
+  static calculateEtaBetween(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+    avgSpeedKmh = 25
+  ): { distanceKm: number; minutes: number; text: string } {
+    const distanceKm = LocationService.calculateDistance(lat1, lon1, lat2, lon2);
+    const { minutes, text } = LocationService.calculateEta(distanceKm, avgSpeedKmh);
+    return { distanceKm, minutes, text };
+  }
+
+  /**
    * Broadcast rider location to database and realtime subscribers
    */
   static async updateRiderLocation(params: {

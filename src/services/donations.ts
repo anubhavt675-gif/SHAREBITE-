@@ -188,6 +188,106 @@ export const DonationService = {
       });
     } catch {}
 
+    // ── Zomato-Style Delivery Pipeline: Create delivery task & notify available riders ──
+    try {
+      const pickupCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const dropoffCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const taskId = crypto.randomUUID();
+
+      // Find an NGO or default recipient
+      const { data: ngoProfiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, organization_name, address, latitude, longitude')
+        .eq('role', 'ngo')
+        .limit(1);
+
+      const targetNgo = ngoProfiles?.[0];
+      const ngoId = targetNgo?.id || donorId;
+
+      const taskPayload = {
+        id: taskId,
+        food_listing_id: listing.id,
+        donor_id: donorId,
+        ngo_id: ngoId,
+        food_title: listing.title,
+        pickup_address: listing.pickup_address,
+        pickup_lat: listing.latitude,
+        pickup_lng: listing.longitude,
+        dropoff_address: targetNgo?.address || (listing.city ? `${listing.city} Community Food Bank` : 'Central Relief Hub'),
+        dropoff_lat: targetNgo?.latitude || null,
+        dropoff_lng: targetNgo?.longitude || null,
+        servings_required: form.servings,
+        quantity_unit: form.quantityUnit || 'servings',
+        pickup_window_start: form.availableFrom,
+        pickup_window_end: form.availableUntil,
+        collection_deadline: form.availableUntil,
+        instructions: form.specialInstructions || fullDescription,
+        status: 'awaiting_rider',
+        pickup_code: pickupCode,
+        dropoff_code: dropoffCode,
+      };
+
+      // 1. Persist to delivery_tasks in database
+      await supabase.from('delivery_tasks').insert(taskPayload);
+
+      // 2. Also populate local delivery tasks cache for instantaneous UI feedback
+      try {
+        const LS_TASKS_KEY = 'sharebite_tasks_store_v1';
+        const raw = localStorage.getItem(LS_TASKS_KEY);
+        const existingTasks = raw ? JSON.parse(raw) : [];
+        const localTask = {
+          id: taskId,
+          foodListingId: listing.id,
+          donorId: donorId,
+          ngoId: ngoId,
+          foodTitle: listing.title,
+          foodType: listing.food_type,
+          foodCategory: listing.category,
+          foodImageUrl: listing.image_url,
+          donorName: listing.donor?.full_name || 'Food Donor',
+          pickupAddress: listing.pickup_address,
+          pickupLat: listing.latitude,
+          pickupLng: listing.longitude,
+          dropoffAddress: taskPayload.dropoff_address,
+          dropoffLat: taskPayload.dropoff_lat,
+          dropoffLng: taskPayload.dropoff_lng,
+          servingsRequired: form.servings,
+          quantityUnit: taskPayload.quantity_unit,
+          collectionDeadline: listing.available_until,
+          status: 'awaiting_rider',
+          pickupCode: pickupCode,
+          dropoffCode: dropoffCode,
+          incidentReported: false,
+          instructions: taskPayload.instructions,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        localStorage.setItem(LS_TASKS_KEY, JSON.stringify([localTask, ...existingTasks]));
+      } catch {}
+
+      // 3. Notify eligible online delivery riders
+      try {
+        const { data: onlineRiders } = await supabase
+          .from('riders')
+          .select('user_id')
+          .eq('is_online', true);
+
+        if (onlineRiders && onlineRiders.length > 0) {
+          const riderNotifs = onlineRiders.map((r: any) => ({
+            user_id: r.user_id,
+            type: 'claim_received',
+            title: '🚴 New Food Delivery Job Available!',
+            message: `${listing.servings} servings of "${listing.title}" are ready for pickup at ${listing.pickup_address}.`,
+            data: { food_listing_id: listing.id, task_id: taskId },
+            action_url: '/rider-dashboard',
+          }));
+          await supabase.from('notifications').insert(riderNotifs);
+        }
+      } catch {}
+    } catch (deliveryTaskErr) {
+      console.warn('Auto-delivery task creation notice:', deliveryTaskErr);
+    }
+
     return mapListingToFood(listing);
   },
 

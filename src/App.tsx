@@ -23,7 +23,10 @@ const ResetPasswordPage = lazy(() => import('./pages/auth/ResetPasswordPage'));
 
 // App layout & pages
 const AppShell = lazy(() => import('./components/layout/AppShell'));
-const DashboardPage = lazy(() => import('./pages/app/DashboardPage'));
+const RoleBasedDashboard = lazy(() => import('./components/layout/RoleBasedDashboard'));
+const RoleRouteGuard = lazy(() => import('./components/layout/RoleRouteGuard'));
+const DonorDashboardPage = lazy(() => import('./pages/app/DonorDashboardPage'));
+const BeneficiaryDashboardPage = lazy(() => import('./pages/app/BeneficiaryDashboardPage'));
 const DonationsPage = lazy(() => import('./pages/app/DonationsPage'));
 const CreateDonationPage = lazy(() => import('./pages/app/CreateDonationPage'));
 const DonationDetailPage = lazy(() => import('./pages/app/DonationDetailPage'));
@@ -124,12 +127,29 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
 
-        {/* Protected App */}
+        {/* Protected App with Role-Based Separation & Route Guards */}
         <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
-          <Route path="/dashboard" element={<DashboardPage />} />
+          {/* Universal root dashboard: auto-renders the role-specific dashboard */}
+          <Route path="/dashboard" element={<RoleBasedDashboard />} />
+
+          {/* Role 1: Food Donor Experience */}
+          <Route path="/donor-dashboard" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'admin']} fallbackPath="/dashboard"><DonorDashboardPage /></RoleRouteGuard>} />
+          <Route path="/donations/new" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'admin']} fallbackPath="/dashboard"><CreateDonationPage /></RoleRouteGuard>} />
+          <Route path="/donor-donations" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'admin']} fallbackPath="/dashboard"><DonorDonationsStatus /></RoleRouteGuard>} />
           <Route path="/donations" element={<DonationsPage />} />
-          <Route path="/donations/new" element={<CreateDonationPage />} />
           <Route path="/donations/:id" element={<DonationDetailPage />} />
+
+          {/* Role 2: Logistics / Delivery Rider Experience */}
+          <Route path="/rider-dashboard" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']} fallbackPath="/dashboard"><RiderDashboardPage /></RoleRouteGuard>} />
+
+          {/* Role 3: NGO / Community Acceptor Experience */}
+          <Route path="/my-claims" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']} fallbackPath="/dashboard"><NGOClaimsDashboard /></RoleRouteGuard>} />
+          <Route path="/ngo-dashboard" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']} fallbackPath="/dashboard"><NGOClaimsDashboard /></RoleRouteGuard>} />
+
+          {/* Role 4: Beneficiary / Community Member Experience */}
+          <Route path="/community-dashboard" element={<RoleRouteGuard allowedRoles={['community', 'receiver', 'admin']} fallbackPath="/dashboard"><BeneficiaryDashboardPage /></RoleRouteGuard>} />
+
+          {/* Shared Authorized Modules */}
           <Route path="/discover" element={<DiscoverPage />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/requests" element={<RequestsPage />} />
@@ -138,11 +158,7 @@ function AppRoutes() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/verification" element={<VerificationPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-          {/* Phase 2-14: New workflow routes */}
-          <Route path="/rider-dashboard" element={<RiderDashboardPage />} />
-          <Route path="/my-claims" element={<NGOClaimsDashboard />} />
-          <Route path="/donor-donations" element={<DonorDonationsStatus />} />
+          <Route path="/admin" element={<RoleRouteGuard allowedRoles={['admin']} fallbackPath="/dashboard"><AdminPage /></RoleRouteGuard>} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/chat/:conversationId" element={<ChatPage />} />
         </Route>

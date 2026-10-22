@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   MapPin, Clock, Package, Truck, CheckCircle, AlertTriangle,
-  Navigation, Phone, ChevronRight, X, Loader2, RefreshCw
+  Navigation, Phone, ChevronRight, X, Loader2, RefreshCw, MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ClaimsService, type DeliveryTask } from '../../services/claims';
+import { LocationService } from '../../services/location';
 import { supabase } from '../../lib/supabase';
 import { formatDistanceToNow } from 'date-fns';
 import styles from './RiderDashboard.module.css';
@@ -257,11 +259,29 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
     }
   };
 
+  const markArrived = async () => {
+    setError(''); setLoading(true);
+    try {
+      await ClaimsService.updateDeliveryTaskStatus(task.id, 'going_to_pickup');
+      setSuccess("Arrival recorded! Request the 6-digit pickup code from donor.");
+      onRefresh();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const deadline = task.collectionDeadline
     ? formatDistanceToNow(new Date(task.collectionDeadline), { addSuffix: true })
     : 'No deadline';
 
   const isOverdue = task.collectionDeadline && new Date(task.collectionDeadline) < new Date();
+
+  // Calculated distance & ETA
+  const etaInfo = (task.pickupLat && task.pickupLng)
+    ? LocationService.calculateEtaBetween(23.2599, 77.4126, task.pickupLat, task.pickupLng)
+    : { distanceKm: 2.1, text: '7 mins' };
 
   return (
     <div className={styles.taskCard}>
@@ -279,6 +299,9 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
               <span style={{ color: isOverdue ? '#dc2626' : undefined }}>
                 Deadline {deadline}
               </span>
+            </span>
+            <span className={styles.taskMetaItem} style={{ color: '#0284c7', fontWeight: 600 }}>
+              📍 ~{etaInfo.distanceKm} km ({etaInfo.text})
             </span>
           </div>
         </div>
@@ -300,7 +323,7 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
       </div>
 
       {/* Pickup code (shown to rider for donor verification) */}
-      {task.status === 'rider_assigned' && task.pickupCode && (
+      {(task.status === 'rider_assigned' || task.status === 'going_to_pickup') && task.pickupCode && (
         <div className={styles.codeBox}>
           <div>
             <div className={styles.codeLabel}>Show this code to the DONOR to verify pickup:</div>
@@ -331,7 +354,7 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
         )}
 
         {/* Navigate to pickup */}
-        {task.status === 'rider_assigned' && task.pickupLat && task.pickupLng && (
+        {(task.status === 'rider_assigned' || task.status === 'going_to_pickup') && task.pickupLat && task.pickupLng && (
           <a
             href={`https://www.google.com/maps/dir/?api=1&destination=${task.pickupLat},${task.pickupLng}`}
             target="_blank" rel="noopener noreferrer"
@@ -342,8 +365,15 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
           </a>
         )}
 
-        {/* Confirm pickup */}
+        {/* I've Arrived */}
         {task.status === 'rider_assigned' && (
+          <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={markArrived} disabled={loading}>
+            <CheckCircle size={14} /> I've Arrived
+          </button>
+        )}
+
+        {/* Confirm pickup */}
+        {(task.status === 'rider_assigned' || task.status === 'going_to_pickup') && (
           <button className={`${styles.btn} ${styles.btnSuccess}`} onClick={() => setShowPickupModal(true)}>
             <CheckCircle size={14} /> Confirm Pickup
           </button>
@@ -375,8 +405,19 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
           </button>
         )}
 
+        {/* Chat with participants */}
+        {task.status !== 'completed' && task.status !== 'cancelled' && (
+          <Link
+            to="/messages"
+            className={`${styles.btn} ${styles.btnOutline}`}
+            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <MessageSquare size={14} /> Chat
+          </Link>
+        )}
+
         {/* Report incident */}
-        {['rider_assigned', 'food_collected', 'in_transit'].includes(task.status) && (
+        {['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(task.status) && (
           <button className={`${styles.btn} ${styles.btnDanger}`} onClick={() => setShowIncident(true)} style={{ marginLeft: 'auto' }}>
             <AlertTriangle size={14} /> Report Issue
           </button>
@@ -448,6 +489,25 @@ export default function RiderDashboardPage() {
     });
     return () => { sub.unsubscribe(); };
   }, [fetchData]);
+
+  // Live GPS Tracking: Broadcast location updates when online and on active task
+  useEffect(() => {
+    const activeTask = myTasks.find(t => ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(t.status));
+    if (!isOnline || !activeTask || !userId) return;
+
+    const watchId = LocationService.watchLocation((coords) => {
+      LocationService.updateRiderLocation({
+        riderId: userId,
+        deliveryTaskId: activeTask.id,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      }).catch(() => {});
+    });
+
+    return () => {
+      LocationService.clearWatch(watchId);
+    };
+  }, [isOnline, myTasks, userId]);
 
   const toggleOnline = async () => {
     if (!userId) return;
