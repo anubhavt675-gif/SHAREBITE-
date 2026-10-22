@@ -1,0 +1,641 @@
+/* ============================================================
+   SHAREBITE — FOOD DONOR REGISTER PAGE
+   Ultra-high-fidelity recreation — FULL VIEWPORT FIT (NO SCROLL)
+   Navbar height: 62px (compact). Card fits 768px–900px screens.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@400;500;600;700;800&display=swap');
+
+/* ─── CSS CUSTOM PROPERTIES ─── */
+:root {
+  --nav-h: 62px;
+  --card-w: 390px;
+  --page-bg: #FAF8EF;
+  --orange: #FF521C;
+  --green: #064E3B;
+}
+
+/* ─── PAGE — fixed 100vh, no scroll ─── */
+.page {
+  height: 100vh;
+  max-height: 100vh;
+  background-color: var(--page-bg);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ─── BOTANICAL LEAVES ─── */
+.leafTopLeft {
+  position: absolute;
+  top: 0; left: 0;
+  width: 130px;
+  max-width: 10vw;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.88;
+}
+.leafBottomLeft {
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 150px;
+  max-width: 11vw;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.82;
+}
+.leafTopRight {
+  position: absolute;
+  top: 0; right: 0;
+  width: 140px;
+  max-width: 10vw;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.82;
+}
+
+/* ─── NAVBAR — compact 62px ─── */
+.navbar {
+  position: relative;
+  z-index: 10;
+  background: rgba(255,255,255,0.97);
+  border-bottom: 1px solid #EDE9DF;
+  backdrop-filter: blur(8px);
+  flex-shrink: 0;
+  height: var(--nav-h);
+}
+.navInner {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 0 40px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+.navLogo { text-decoration: none; flex-shrink: 0; }
+.navLinks {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  flex: 1;
+  justify-content: center;
+}
+.navLink {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #374151;
+  text-decoration: none;
+  position: relative;
+  transition: color 0.2s;
+  white-space: nowrap;
+}
+.navLink:hover { color: var(--green); }
+.navLinkActive { color: var(--orange) !important; }
+.navLinkActive::after {
+  content: '';
+  position: absolute;
+  bottom: -3px; left: 0;
+  width: 100%; height: 2px;
+  background: var(--orange);
+  border-radius: 999px;
+}
+.navRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.navLeafIcon { flex-shrink: 0; }
+.navHungerText {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+/* ─── LOGO ─── */
+.logoFull { display: flex; align-items: center; gap: 9px; }
+.logoIcon {
+  width: 38px; height: 38px;
+  background: var(--orange);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(255,82,28,0.28);
+  flex-shrink: 0;
+}
+.logoText { display: flex; flex-direction: column; }
+.logoName {
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.4px;
+}
+.logoShareDark { color: var(--green); }
+.logoBiteOrange { color: var(--orange); }
+.logoTagline {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #6B7280;
+  margin-top: 1px;
+}
+
+/* ─── MAIN — fills remainder of viewport, no overflow ─── */
+.main {
+  flex: 1;
+  height: calc(100vh - var(--nav-h));
+  max-height: calc(100vh - var(--nav-h));
+  display: flex;
+  align-items: stretch;
+  max-width: 1560px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 0 40px;
+  gap: 0;
+  position: relative;
+  z-index: 5;
+  overflow: hidden;
+}
+
+/* ─────────────────────────────────────
+   LEFT HERO
+───────────────────────────────────── */
+.hero {
+  flex: 1;
+  min-width: 0;
+  padding-top: 32px;
+  padding-bottom: 20px;
+  position: relative;
+  max-width: calc(63% - 20px);
+}
+
+/* FOOD DONOR badge */
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #D1FAE5;
+  border: 1px solid #A7F3D0;
+  color: var(--green);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  padding: 6px 15px;
+  border-radius: 999px;
+  margin-bottom: 18px;
+}
+
+/* Headline */
+.heroTitle {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(2.8rem, 4vw, 3.8rem);
+  font-weight: 800;
+  line-height: 1.05;
+  margin: 0 0 16px 0;
+  letter-spacing: -1.5px;
+  max-width: 310px;
+}
+.heroTitleGreen { color: var(--green); display: block; }
+.heroTitleOrange { color: var(--orange); display: block; }
+
+/* Para */
+.heroPara {
+  font-size: 0.9rem;
+  color: #374151;
+  line-height: 1.6;
+  max-width: 290px;
+  margin-bottom: 22px;
+}
+
+/* Impact row */
+.impactRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.impactItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--green);
+  text-align: center;
+  max-width: 75px;
+}
+.impactIcon {
+  width: 36px; height: 36px;
+  background: #D1FAE5;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Chef photo */
+.chefPhotoContainer {
+  position: absolute;
+  top: 10px;
+  left: 260px;
+  width: 420px;
+  height: 420px;
+  pointer-events: none;
+}
+.chefPhotoBgBlob {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, #E8F5E9 0%, #F4EDE4 60%, transparent 80%);
+  transform: scale(1.18);
+  z-index: 0;
+}
+.chefPhotoCircle {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 340px; height: 340px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 4px solid rgba(255,255,255,0.88);
+  box-shadow: 0 16px 50px rgba(0,0,0,0.13), 0 4px 16px rgba(0,0,0,0.07);
+  z-index: 2;
+  pointer-events: all;
+}
+.chefPhotoImg {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+
+/* Decorative elements */
+.decLeaf1 {
+  position: absolute;
+  top: -8px; right: 55px;
+  z-index: 3;
+  filter: drop-shadow(2px 3px 5px rgba(0,0,0,0.1));
+}
+.decLeaf2 {
+  position: absolute;
+  bottom: 28px; right: -8px;
+  z-index: 3;
+  filter: drop-shadow(2px 3px 5px rgba(0,0,0,0.08));
+}
+.decArrow1 { position: absolute; top: 80px; left: 14px; z-index: 4; opacity: 0.8; }
+.decArrow2 { position: absolute; bottom: 70px; left: 28px; z-index: 4; opacity: 0.7; transform: rotate(40deg); }
+.decHeart  { position: absolute; top: 148px; left: 64px; z-index: 4; }
+
+/* Handwritten note */
+.handwrittenNote { position: relative; z-index: 4; margin-top: 4px; }
+.handwrittenSvg {
+  overflow: visible;
+  filter: drop-shadow(1px 2px 3px rgba(0,0,0,0.05));
+}
+
+/* ─────────────────────────────────────
+   RIGHT CARD — must fit 100% of available height
+───────────────────────────────────── */
+.card {
+  width: var(--card-w);
+  min-width: 340px;
+  max-width: var(--card-w);
+  flex-shrink: 0;
+  /* fill the full height of .main, with vertical padding */
+  height: 100%;
+  padding: 12px 0 14px 0;
+  display: flex;
+  flex-direction: column;
+  margin-left: auto;
+}
+
+.cardInner {
+  flex: 1;
+  background: #FFFFFF;
+  border-radius: 20px;
+  border: 1px solid #EDE9DF;
+  box-shadow: 0 8px 36px rgba(0,0,0,0.07), 0 2px 10px rgba(0,0,0,0.04);
+  /* distribute vertical space evenly across all children */
+  padding: 18px 22px 16px 22px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;   /* clip nothing — just prevent internal overflow */
+}
+
+/* A. Card Logo */
+.cardLogo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+/* override logo size inside card */
+.cardLogo .logoIcon { width: 32px !important; height: 32px !important; border-radius: 8px !important; }
+.cardLogo .logoName { font-size: 1.18rem !important; }
+.cardLogo .logoTagline { font-size: 0.65rem !important; }
+
+/* B. Card badge */
+.cardBadge {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 5px;
+  background: #ECFDF5;
+  border: 1px solid #A7F3D0;
+  color: var(--green);
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  padding: 4px 11px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+/* C. Card title */
+.cardTitle {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(1.3rem, 1.6vw, 1.58rem);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.3px;
+  margin: 0 0 4px 0;
+  flex-shrink: 0;
+}
+.cardTitleGreen { color: var(--green); }
+.cardTitleOrange { color: var(--orange); }
+
+/* D. Subtitle */
+.cardSubtitle {
+  font-size: 0.82rem;
+  color: #6B7280;
+  margin: 0 0 10px 0;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+/* Error / Success */
+.errorBox {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 12px;
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-radius: 8px;
+  color: #B91C1C;
+  font-size: 0.78rem;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+.successBox {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px 14px;
+  background: #F0FDF4;
+  border: 1px solid #BBF7D0;
+  border-radius: 8px;
+  color: #15803D;
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+.proceedBtn {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 10px;
+  background: #16A34A;
+  color: #FFFFFF;
+  border-radius: 5px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+}
+
+/* E. Form — flex-col, uses remaining space */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+  min-height: 0;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.fieldLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #374151;
+  letter-spacing: 0.1px;
+}
+
+.inputWrap {
+  display: flex;
+  align-items: center;
+  background: #FFFFFF;
+  border: 1.5px solid #E5E7EB;
+  border-radius: 9px;
+  padding: 0 10px;
+  height: 38px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  position: relative;
+}
+.inputWrap:focus-within {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 2.5px rgba(255,82,28,0.10);
+}
+
+.inputIcon { color: #9CA3AF; margin-right: 8px; flex-shrink: 0; }
+
+.input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.83rem;
+  color: #111827;
+  outline: none;
+}
+.input::placeholder { color: #9CA3AF; font-size: 0.79rem; }
+
+.eyeBtn {
+  background: transparent;
+  border: none;
+  color: #9CA3AF;
+  cursor: pointer;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  border-radius: 5px;
+  transition: color 0.15s;
+}
+.eyeBtn:hover { color: #374151; }
+
+/* F. CTA Button */
+.ctaBtn {
+  width: 100%;
+  height: 44px;
+  background: linear-gradient(135deg, #FF6B3C 0%, #FF521C 60%, #E84A16 100%);
+  border: none;
+  border-radius: 11px;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: 0 5px 16px rgba(255,82,28,0.32);
+  transition: all 0.2s ease;
+  margin-top: 4px;
+  letter-spacing: 0.15px;
+  flex-shrink: 0;
+}
+.ctaBtn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #FF7A4E 0%, #FF6130 60%, #F0581E 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 7px 20px rgba(255,82,28,0.40);
+}
+.ctaBtn:disabled { opacity: 0.65; cursor: not-allowed; }
+
+.spinner { animation: spin 0.7s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* G. Divider */
+.dividerRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 7px 0 4px 0;
+  flex-shrink: 0;
+}
+.dividerLine { flex: 1; height: 1px; background: #E5E7EB; }
+.dividerText { font-size: 0.73rem; color: #9CA3AF; font-weight: 500; white-space: nowrap; }
+
+/* H. Google button */
+.googleBtn {
+  width: 100%;
+  height: 40px;
+  background: #FFFFFF;
+  border: 1.5px solid #E5E7EB;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+.googleBtn:hover {
+  background: #F9FAFB;
+  border-color: #D1D5DB;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+
+/* I. Footer */
+.cardFooter {
+  text-align: center;
+  font-size: 0.79rem;
+  color: var(--green);
+  margin-top: 10px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+.cardFooterLink {
+  color: var(--orange);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cardFooterLink:hover { color: #E84A16; }
+
+/* ─── RESPONSIVE ─── */
+
+/* 1366×768 and tighter desktops */
+@media (max-height: 800px) {
+  :root { --nav-h: 56px; --card-w: 370px; }
+  .cardInner { padding: 14px 20px 12px 20px; }
+  .cardLogo { margin-bottom: 7px; }
+  .cardBadge { margin-bottom: 6px; padding: 3px 10px; font-size: 0.63rem; }
+  .cardTitle { font-size: 1.25rem; margin-bottom: 3px; }
+  .cardSubtitle { font-size: 0.77rem; margin-bottom: 7px; }
+  .form { gap: 5px; }
+  .fieldGroup { gap: 1px; }
+  .fieldLabel { font-size: 0.68rem; }
+  .inputWrap { height: 34px; padding: 0 9px; }
+  .input { font-size: 0.78rem; }
+  .input::placeholder { font-size: 0.74rem; }
+  .ctaBtn { height: 40px; font-size: 0.86rem; margin-top: 3px; }
+  .dividerRow { margin: 5px 0 3px 0; }
+  .dividerText { font-size: 0.68rem; }
+  .googleBtn { height: 36px; font-size: 0.8rem; }
+  .cardFooter { font-size: 0.74rem; margin-top: 7px; }
+}
+
+/* Very short screens — 720px and below */
+@media (max-height: 740px) {
+  :root { --nav-h: 52px; --card-w: 360px; }
+  .navInner { height: var(--nav-h); }
+  .cardInner { padding: 11px 18px 10px 18px; border-radius: 16px; }
+  .cardLogo { margin-bottom: 5px; }
+  .cardBadge { margin-bottom: 5px; padding: 3px 9px; }
+  .cardTitle { font-size: 1.15rem; }
+  .cardSubtitle { margin-bottom: 5px; font-size: 0.72rem; }
+  .form { gap: 4px; }
+  .inputWrap { height: 32px; border-radius: 7px; }
+  .input { font-size: 0.75rem; }
+  .ctaBtn { height: 37px; font-size: 0.82rem; border-radius: 9px; }
+  .googleBtn { height: 33px; font-size: 0.76rem; border-radius: 9px; }
+  .dividerRow { margin: 4px 0 2px 0; }
+  .cardFooter { margin-top: 6px; font-size: 0.7rem; }
+}
+
+/* Narrow widths */
+@media (max-width: 1200px) {
+  .main {
+    height: auto;
+    max-height: none;
+    overflow-y: auto;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 24px 60px 24px;
+  }
+  .hero { width: 100%; max-width: 640px; max-width: 100%; padding-bottom: 20px; }
+  .chefPhotoContainer { position: relative; top: auto; left: auto; width: 320px; height: 320px; margin: 16px auto 0 auto; }
+  .chefPhotoCircle { width: 260px; height: 260px; }
+  .card {
+    width: 100%; max-width: 480px;
+    height: auto; padding: 0 0 20px 0;
+  }
+  .cardInner { flex: none; }
+  .heroTitle { font-size: 3rem; }
+}
+
+@media (max-width: 640px) {
+  .navLinks { display: none; }
+  .heroTitle { font-size: 2.4rem; letter-spacing: -0.8px; }
+  .navInner { padding: 0 18px; }
+}
