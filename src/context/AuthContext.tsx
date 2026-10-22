@@ -79,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async (intendedRole: 'donor' | 'acceptor' | 'rider') => {
     await AuthService.signInWithGoogle(intendedRole);
+    await refreshUser();
   };
 
   const handleOAuthCallback = async () => {

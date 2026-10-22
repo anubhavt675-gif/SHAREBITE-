@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   User, Phone, Mail, MapPin, Lock, Eye, EyeOff,
   ArrowRight, Loader2, CheckCircle2, AlertCircle,
@@ -43,9 +43,13 @@ function ShareBiteLogoFull({ dark = false }: { dark?: boolean }) {
   );
 }
 
-export default function DonorRegisterPage() {
+export default function DonorRegisterPage({ initialMode }: { initialMode?: 'register' | 'login' } = {}) {
   const navigate = useNavigate();
-  const { signup } = useAuth();
+  const location = useLocation();
+  const { login, signup, signInWithGoogle } = useAuth();
+
+  const isLoginRoute = initialMode === 'login' || location.pathname.startsWith('/login');
+  const [mode, setMode] = useState<'register' | 'login'>(isLoginRoute ? 'login' : 'register');
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
@@ -58,9 +62,40 @@ export default function DonorRegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await signInWithGoogle('donor');
+    } catch (err: any) {
+      setError(err.message || 'Google sign-in failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (mode === 'login') {
+      if (!email.trim() || !password) {
+        setError('Please enter your email and password.');
+        return;
+      }
+      setLoading(true);
+      try {
+        await login(email.trim(), password, 'donor');
+        navigate('/dashboard', { replace: true });
+      } catch (err: any) {
+        setError(err.message || 'Login failed. Please check your credentials.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Register mode
     if (!fullName.trim() || !email.trim() || !password) {
       setError('Please fill in all required fields.');
       return;
@@ -79,9 +114,18 @@ export default function DonorRegisterPage() {
         password,
         address: address.trim() || undefined,
       });
+
       if (res.sessionExists) {
         navigate('/dashboard', { replace: true });
-      } else {
+        return;
+      }
+
+      // Try automatic login
+      try {
+        await login(email.trim(), password, 'donor');
+        navigate('/dashboard', { replace: true });
+        return;
+      } catch {
         setSuccess(true);
       }
     } catch (err: any) {
@@ -271,14 +315,26 @@ export default function DonorRegisterPage() {
 
             {/* C. Heading */}
             <h2 className={styles.cardTitle}>
-              <span className={styles.cardTitleGreen}>Create Your </span>
-              <span className={styles.cardTitleOrange}>Donor</span>
-              <span className={styles.cardTitleGreen}> Account</span>
+              {mode === 'login' ? (
+                <>
+                  <span className={styles.cardTitleGreen}>Log In to </span>
+                  <span className={styles.cardTitleOrange}>Donor</span>
+                  <span className={styles.cardTitleGreen}> Account</span>
+                </>
+              ) : (
+                <>
+                  <span className={styles.cardTitleGreen}>Create Your </span>
+                  <span className={styles.cardTitleOrange}>Donor</span>
+                  <span className={styles.cardTitleGreen}> Account</span>
+                </>
+              )}
             </h2>
 
             {/* D. Subtitle */}
             <p className={styles.cardSubtitle}>
-              Join hands with us and help reduce food waste.
+              {mode === 'login'
+                ? 'Welcome back! Enter your email and password to continue.'
+                : 'Join hands with us and help reduce food waste.'}
             </p>
 
             {/* Error */}
@@ -296,14 +352,17 @@ export default function DonorRegisterPage() {
                 <div>
                   <strong>Account Created!</strong>
                   <p style={{ marginTop: 4, fontSize: '0.82rem' }}>
-                    Registration successful. Please check your email and then log in.
+                    Registration successful. Please check your email and then log in right here.
                   </p>
                   <button
                     type="button"
-                    onClick={() => navigate('/login/donor')}
+                    onClick={() => {
+                      setSuccess(false);
+                      setMode('login');
+                    }}
                     className={styles.proceedBtn}
                   >
-                    Go to Log In →
+                    Log In Here →
                   </button>
                 </div>
               </div>
@@ -312,38 +371,43 @@ export default function DonorRegisterPage() {
 
                 {/* E. Form fields */}
 
-                {/* Full Name */}
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Full Name</label>
-                  <div className={styles.inputWrap}>
-                    <User size={16} className={styles.inputIcon} />
-                    <input
-                      type="text"
-                      placeholder="Enter your full name"
-                      value={fullName}
-                      onChange={e => setFullName(e.target.value)}
-                      className={styles.input}
-                      required
-                    />
-                  </div>
-                </div>
+                {/* Register Mode Specific Fields */}
+                {mode === 'register' && (
+                  <>
+                    {/* Full Name */}
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>Full Name</label>
+                      <div className={styles.inputWrap}>
+                        <User size={16} className={styles.inputIcon} />
+                        <input
+                          type="text"
+                          placeholder="Enter your full name"
+                          value={fullName}
+                          onChange={e => setFullName(e.target.value)}
+                          className={styles.input}
+                          required
+                        />
+                      </div>
+                    </div>
 
-                {/* Mobile */}
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Mobile Number</label>
-                  <div className={styles.inputWrap}>
-                    <Phone size={16} className={styles.inputIcon} />
-                    <input
-                      type="tel"
-                      placeholder="Enter 10 digit mobile number"
-                      value={phone}
-                      onChange={e => setPhone(e.target.value)}
-                      className={styles.input}
-                    />
-                  </div>
-                </div>
+                    {/* Mobile */}
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>Mobile Number</label>
+                      <div className={styles.inputWrap}>
+                        <Phone size={16} className={styles.inputIcon} />
+                        <input
+                          type="tel"
+                          placeholder="Enter 10 digit mobile number"
+                          value={phone}
+                          onChange={e => setPhone(e.target.value)}
+                          className={styles.input}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
 
-                {/* Email */}
+                {/* Email (Shown in both Register & Login) */}
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Email Address</label>
                   <div className={styles.inputWrap}>
@@ -359,29 +423,31 @@ export default function DonorRegisterPage() {
                   </div>
                 </div>
 
-                {/* Address */}
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Address</label>
-                  <div className={styles.inputWrap}>
-                    <MapPin size={16} className={styles.inputIcon} />
-                    <input
-                      type="text"
-                      placeholder="Enter your complete address"
-                      value={address}
-                      onChange={e => setAddress(e.target.value)}
-                      className={styles.input}
-                    />
+                {/* Address (Only in Register mode) */}
+                {mode === 'register' && (
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.fieldLabel}>Address</label>
+                    <div className={styles.inputWrap}>
+                      <MapPin size={16} className={styles.inputIcon} />
+                      <input
+                        type="text"
+                        placeholder="Enter your complete address"
+                        value={address}
+                        onChange={e => setAddress(e.target.value)}
+                        className={styles.input}
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Password */}
+                {/* Password (Shown in both) */}
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Password</label>
                   <div className={styles.inputWrap}>
                     <Lock size={16} className={styles.inputIcon} />
                     <input
                       type={showPassword ? 'text' : 'password'}
-                      placeholder="Create a strong password"
+                      placeholder={mode === 'login' ? 'Enter your password' : 'Create a strong password'}
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       className={styles.input}
@@ -408,7 +474,7 @@ export default function DonorRegisterPage() {
                     <Loader2 size={18} className={styles.spinner} />
                   ) : (
                     <>
-                      <span>Register as Food Donor</span>
+                      <span>{mode === 'login' ? 'Log In as Food Donor' : 'Register as Food Donor'}</span>
                       <ArrowRight size={18} />
                     </>
                   )}
@@ -422,7 +488,12 @@ export default function DonorRegisterPage() {
                 </div>
 
                 {/* H. Google button */}
-                <button type="button" className={styles.googleBtn}>
+                <button
+                  type="button"
+                  className={styles.googleBtn}
+                  onClick={handleGoogleSignIn}
+                  disabled={loading}
+                >
                   <GoogleIcon />
                   <span>Continue with Google</span>
                 </button>
@@ -432,8 +503,37 @@ export default function DonorRegisterPage() {
 
             {/* I. Bottom account prompt */}
             <p className={styles.cardFooter}>
-              Already have an account?{' '}
-              <Link to="/login/donor" className={styles.cardFooterLink}>Log in</Link>
+              {mode === 'login' ? (
+                <>
+                  Don't have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('register');
+                      setError(null);
+                    }}
+                    className={styles.cardFooterLink}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                  >
+                    Register
+                  </button>
+                </>
+              ) : (
+                <>
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError(null);
+                    }}
+                    className={styles.cardFooterLink}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                  >
+                    Log in
+                  </button>
+                </>
+              )}
             </p>
 
           </div>

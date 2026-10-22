@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Building2, User, Phone, FileText,
+  Building2, User, Phone, FileText, Mail, Lock, Eye, EyeOff,
   ArrowRight, Loader2, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -10,6 +10,17 @@ import leafTopLeft from '../../assets/leaf_top_left.png';
 import leafBottomLeft from '../../assets/leaf_bottom_left.png';
 import authLeavesTopRight from '../../assets/auth_leaves_top_right.png';
 import styles from './AcceptorRegister.module.css';
+
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+    </svg>
+  );
+}
 
 /* ─── Feed Your Community Logo (matches reference) ─── */
 function FYCLogoIcon({ size = 36 }: { size?: number }) {
@@ -43,41 +54,93 @@ function FYCLogoFull({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export default function AcceptorRegisterPage() {
+export default function AcceptorRegisterPage({ initialMode }: { initialMode?: 'register' | 'login' } = {}) {
   const navigate = useNavigate();
-  const { signup } = useAuth();
+  const location = useLocation();
+  const { login, signup, signInWithGoogle } = useAuth();
+
+  const isLoginRoute = initialMode === 'login' || location.pathname.startsWith('/login');
+  const [mode, setMode] = useState<'register' | 'login'>(isLoginRoute ? 'login' : 'register');
 
   const [orgName, setOrgName]     = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [phone, setPhone]         = useState('');
+  const [email, setEmail]         = useState('');
   const [regNumber, setRegNumber] = useState('');
+  const [password, setPassword]   = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [success, setSuccess]   = useState(false);
 
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await signInWithGoogle('acceptor');
+    } catch (err: any) {
+      setError(err.message || 'Google sign-in failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!orgName.trim() || !ownerName.trim() || !phone.trim()) {
+
+    if (mode === 'login') {
+      if (!email.trim() || !password) {
+        setError('Please enter your email and password.');
+        return;
+      }
+      setLoading(true);
+      try {
+        await login(email.trim(), password, 'acceptor');
+        navigate('/dashboard', { replace: true });
+      } catch (err: any) {
+        setError(err.message || 'Login failed. Please check your credentials.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Register mode
+    if (!orgName.trim() || !ownerName.trim() || !phone.trim() || !email.trim() || !password) {
       setError('Please fill in all required fields.');
       return;
     }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
     setLoading(true);
     try {
-      /* use orgName as the display name and generate a temp email */
-      const tempEmail = `ngo_${Date.now()}@sharebite.app`;
       const res = await signup({
         name: ownerName.trim(),
         phone: phone.trim(),
-        email: tempEmail,
+        email: email.trim(),
         role: 'ngo',
-        password: `SB_${Date.now()}`,
+        password,
+        organizationName: orgName.trim(),
+        registrationNumber: regNumber.trim() || undefined,
         address: orgName.trim(),
       });
+
       if (res.sessionExists) {
         navigate('/dashboard', { replace: true });
-      } else {
+        return;
+      }
+
+      // Try automatic login
+      try {
+        await login(email.trim(), password, 'acceptor');
+        navigate('/dashboard', { replace: true });
+        return;
+      } catch {
         setSuccess(true);
       }
     } catch (err: any) {
@@ -266,13 +329,24 @@ export default function AcceptorRegisterPage() {
 
             {/* C. Heading */}
             <h2 className={styles.cardTitle}>
-              <span className={styles.ctGreen}>Register Your </span>
-              <span className={styles.ctOrange}>NGO / Shelter</span>
+              {mode === 'login' ? (
+                <>
+                  <span className={styles.ctGreen}>Log In to </span>
+                  <span className={styles.ctOrange}>NGO / Shelter</span>
+                </>
+              ) : (
+                <>
+                  <span className={styles.ctGreen}>Register Your </span>
+                  <span className={styles.ctOrange}>NGO / Shelter</span>
+                </>
+              )}
             </h2>
 
             {/* D. Subtitle */}
             <p className={styles.cardSubtitle}>
-              Join hands with us to provide food, shelter and essential support to those in need.
+              {mode === 'login'
+                ? 'Welcome back! Enter your email and password to manage food claims.'
+                : 'Join hands with us to provide food, shelter and essential support to those in need.'}
             </p>
 
             {/* Error / Success */}
@@ -288,58 +362,105 @@ export default function AcceptorRegisterPage() {
                 <CheckCircle2 size={16} />
                 <div>
                   <strong>Registered!</strong>
-                  <p style={{ marginTop: 3, fontSize: '0.8rem' }}>Your NGO has been registered. Please check your email to verify.</p>
-                  <button onClick={() => navigate('/login/acceptor')} className={styles.proceedBtn}>
-                    Go to Log In →
+                  <p style={{ marginTop: 3, fontSize: '0.8rem' }}>Your NGO has been registered. Please check your email to verify, then log in right here.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuccess(false);
+                      setMode('login');
+                    }}
+                    className={styles.proceedBtn}
+                  >
+                    Log In Here →
                   </button>
                 </div>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className={styles.form} noValidate>
 
-                {/* E. 4 Fields */}
+                {/* E. Fields */}
+                {mode === 'register' && (
+                  <>
+                    {/* 1. Organisation Name */}
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>Organisation Name</label>
+                      <div className={styles.inputWrap}>
+                        <Building2 size={15} className={styles.inputIcon} />
+                        <input type="text" placeholder="Enter organisation name"
+                          value={orgName} onChange={e => setOrgName(e.target.value)}
+                          className={styles.input} required />
+                      </div>
+                    </div>
 
-                {/* 1. Organisation Name */}
+                    {/* 2. Owner Name */}
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>Owner Name</label>
+                      <div className={styles.inputWrap}>
+                        <User size={15} className={styles.inputIcon} />
+                        <input type="text" placeholder="Enter owner name"
+                          value={ownerName} onChange={e => setOwnerName(e.target.value)}
+                          className={styles.input} required />
+                      </div>
+                    </div>
+
+                    {/* 3. Owner Mobile Number */}
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>Owner Mobile Number</label>
+                      <div className={styles.inputWrap}>
+                        <Phone size={15} className={styles.inputIcon} />
+                        <input type="tel" placeholder="Enter 10 digit mobile number"
+                          value={phone} onChange={e => setPhone(e.target.value)}
+                          className={styles.input} required />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Email Address (Both modes) */}
                 <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Organisation Name</label>
+                  <label className={styles.fieldLabel}>Email Address</label>
                   <div className={styles.inputWrap}>
-                    <Building2 size={15} className={styles.inputIcon} />
-                    <input type="text" placeholder="Enter organisation name"
-                      value={orgName} onChange={e => setOrgName(e.target.value)}
+                    <Mail size={15} className={styles.inputIcon} />
+                    <input type="email" placeholder="Enter your email address"
+                      value={email} onChange={e => setEmail(e.target.value)}
                       className={styles.input} required />
                   </div>
                 </div>
 
-                {/* 2. Owner Name */}
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Owner Name</label>
-                  <div className={styles.inputWrap}>
-                    <User size={15} className={styles.inputIcon} />
-                    <input type="text" placeholder="Enter owner name"
-                      value={ownerName} onChange={e => setOwnerName(e.target.value)}
-                      className={styles.input} required />
+                {mode === 'register' && (
+                  /* 4. Registration Number */
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.fieldLabel}>Registration Number</label>
+                    <div className={styles.inputWrap}>
+                      <FileText size={15} className={styles.inputIcon} />
+                      <input type="text" placeholder="Enter registration number"
+                        value={regNumber} onChange={e => setRegNumber(e.target.value)}
+                        className={styles.input} />
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* 3. Owner Mobile Number */}
+                {/* Password (Both modes) */}
                 <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Owner Mobile Number</label>
+                  <label className={styles.fieldLabel}>Password</label>
                   <div className={styles.inputWrap}>
-                    <Phone size={15} className={styles.inputIcon} />
-                    <input type="tel" placeholder="Enter 10 digit mobile number"
-                      value={phone} onChange={e => setPhone(e.target.value)}
-                      className={styles.input} required />
-                  </div>
-                </div>
-
-                {/* 4. Registration Number */}
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Registration Number</label>
-                  <div className={styles.inputWrap}>
-                    <FileText size={15} className={styles.inputIcon} />
-                    <input type="text" placeholder="Enter registration number"
-                      value={regNumber} onChange={e => setRegNumber(e.target.value)}
-                      className={styles.input} />
+                    <Lock size={15} className={styles.inputIcon} />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder={mode === 'login' ? 'Enter your password' : 'Create a strong password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      className={styles.input}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className={styles.eyeBtn}
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
                   </div>
                 </div>
 
@@ -347,24 +468,64 @@ export default function AcceptorRegisterPage() {
                 <button type="submit" disabled={loading} className={styles.ctaBtn}>
                   {loading
                     ? <Loader2 size={17} className={styles.spinner} />
-                    : (<><span>Register as NGO / Shelter</span><ArrowRight size={17} /></>)
+                    : (<><span>{mode === 'login' ? 'Log In as NGO / Shelter' : 'Register as NGO / Shelter'}</span><ArrowRight size={17} /></>)
                   }
                 </button>
 
-                {/* G. Divider — NO Google button per reference */}
+                {/* G. Divider */}
                 <div className={styles.dividerRow}>
                   <div className={styles.dividerLine} />
                   <span className={styles.dividerText}>Or continue with</span>
                   <div className={styles.dividerLine} />
                 </div>
 
+                {/* Google Sign-in Button */}
+                <button
+                  type="button"
+                  className={styles.googleBtn}
+                  onClick={handleGoogleSignIn}
+                  disabled={loading}
+                >
+                  <GoogleIcon />
+                  <span>Continue with Google</span>
+                </button>
+
               </form>
             )}
 
             {/* H. Login link */}
             <p className={styles.cardFooter}>
-              Already have an account?{' '}
-              <Link to="/login/acceptor" className={styles.cardFooterLink}>Log in</Link>
+              {mode === 'login' ? (
+                <>
+                  Don't have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('register');
+                      setError(null);
+                    }}
+                    className={styles.cardFooterLink}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                  >
+                    Register
+                  </button>
+                </>
+              ) : (
+                <>
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError(null);
+                    }}
+                    className={styles.cardFooterLink}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                  >
+                    Log in
+                  </button>
+                </>
+              )}
             </p>
 
           </div>

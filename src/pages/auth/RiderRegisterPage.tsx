@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   User, Phone, Mail, MapPin, FileText, Lock, Eye, EyeOff,
   ArrowRight, Loader2, CheckCircle2, AlertCircle,
@@ -59,9 +59,13 @@ function ShareBiteLogo({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export default function RiderRegisterPage() {
+export default function RiderRegisterPage({ initialMode }: { initialMode?: 'register' | 'login' } = {}) {
   const navigate = useNavigate();
-  const { signup, signInWithGoogle } = useAuth();
+  const location = useLocation();
+  const { login, signup, signInWithGoogle } = useAuth();
+
+  const isLoginRoute = initialMode === 'login' || location.pathname.startsWith('/login');
+  const [mode, setMode] = useState<'register' | 'login'>(isLoginRoute ? 'login' : 'register');
 
   // 6 Form fields as defined in the reference screenshot
   const [fullName, setFullName] = useState('');
@@ -80,6 +84,24 @@ export default function RiderRegisterPage() {
     e.preventDefault();
     setError(null);
 
+    if (mode === 'login') {
+      if (!email.trim() || !password) {
+        setError('Please enter your email and password.');
+        return;
+      }
+      setLoading(true);
+      try {
+        await login(email.trim(), password, 'rider');
+        navigate('/dashboard', { replace: true });
+      } catch (err: any) {
+        setError(err.message || 'Login failed. Please check your credentials.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Register mode
     if (!fullName.trim() || !phone.trim() || !email.trim() || !password) {
       setError('Please fill in all required fields.');
       return;
@@ -110,7 +132,15 @@ export default function RiderRegisterPage() {
 
       if (res.sessionExists) {
         navigate('/dashboard', { replace: true });
-      } else {
+        return;
+      }
+
+      // Try automatic login
+      try {
+        await login(email.trim(), password, 'rider');
+        navigate('/dashboard', { replace: true });
+        return;
+      } catch {
         setSuccess(true);
       }
     } catch (err: any) {
@@ -122,10 +152,13 @@ export default function RiderRegisterPage() {
 
   const handleGoogleSignIn = async () => {
     setError(null);
+    setLoading(true);
     try {
       await signInWithGoogle('rider');
     } catch (err: any) {
       setError(err.message || 'Google sign-in failed. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -339,14 +372,26 @@ export default function RiderRegisterPage() {
 
             {/* C. Registration Heading */}
             <h2 className={styles.cardHeading}>
-              <span className={styles.cardHeadingGreen}>Register Your </span>
-              <span className={styles.cardHeadingOrange}>Rider </span>
-              <span className={styles.cardHeadingGreen}>Account</span>
+              {mode === 'login' ? (
+                <>
+                  <span className={styles.cardHeadingGreen}>Log In to </span>
+                  <span className={styles.cardHeadingOrange}>Rider </span>
+                  <span className={styles.cardHeadingGreen}>Account</span>
+                </>
+              ) : (
+                <>
+                  <span className={styles.cardHeadingGreen}>Register Your </span>
+                  <span className={styles.cardHeadingOrange}>Rider </span>
+                  <span className={styles.cardHeadingGreen}>Account</span>
+                </>
+              )}
             </h2>
 
             {/* D. Subtitle */}
             <p className={styles.cardSubtitle}>
-              Join hands with us and help deliver food to those in need.
+              {mode === 'login'
+                ? 'Welcome back! Enter your email and password to start delivering.'
+                : 'Join hands with us and help deliver food to those in need.'}
             </p>
 
             {/* Error & Success States */}
@@ -359,47 +404,75 @@ export default function RiderRegisterPage() {
             {success && (
               <div className={styles.alertSuccess} role="status">
                 <CheckCircle2 size={15} />
-                <span>Account created! Please check your email to confirm.</span>
+                <div>
+                  <span>Account created! Please check your email to confirm, then log in here.</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuccess(false);
+                      setMode('login');
+                    }}
+                    style={{
+                      display: 'block',
+                      marginTop: 4,
+                      background: '#15803D',
+                      color: '#FFF',
+                      border: 'none',
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      fontSize: '0.72rem',
+                      cursor: 'pointer',
+                      fontWeight: 700,
+                    }}
+                  >
+                    Log In Here →
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* E. 6-Field Registration Form */}
+            {/* E. Form */}
             <form onSubmit={handleSubmit} className={styles.form} noValidate>
-              {/* Field 1: Full Name */}
-              <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="rider-fullName">Full Name</label>
-                <div className={styles.inputWrap}>
-                  <User size={14} className={styles.inputIcon} />
-                  <input
-                    id="rider-fullName"
-                    type="text"
-                    className={styles.input}
-                    placeholder="Enter your full name"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
+              {/* Register Mode Only Fields */}
+              {mode === 'register' && (
+                <>
+                  {/* Field 1: Full Name */}
+                  <div className={styles.field}>
+                    <label className={styles.fieldLabel} htmlFor="rider-fullName">Full Name</label>
+                    <div className={styles.inputWrap}>
+                      <User size={14} className={styles.inputIcon} />
+                      <input
+                        id="rider-fullName"
+                        type="text"
+                        className={styles.input}
+                        placeholder="Enter your full name"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
 
-              {/* Field 2: Mobile Number */}
-              <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="rider-phone">Mobile Number</label>
-                <div className={styles.inputWrap}>
-                  <Phone size={14} className={styles.inputIcon} />
-                  <input
-                    id="rider-phone"
-                    type="tel"
-                    className={styles.input}
-                    placeholder="Enter 10 digit mobile number"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
+                  {/* Field 2: Mobile Number */}
+                  <div className={styles.field}>
+                    <label className={styles.fieldLabel} htmlFor="rider-phone">Mobile Number</label>
+                    <div className={styles.inputWrap}>
+                      <Phone size={14} className={styles.inputIcon} />
+                      <input
+                        id="rider-phone"
+                        type="tel"
+                        className={styles.input}
+                        placeholder="Enter 10 digit mobile number"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
-              {/* Field 3: Email Address */}
+              {/* Field 3: Email Address (Both modes) */}
               <div className={styles.field}>
                 <label className={styles.fieldLabel} htmlFor="rider-email">Email Address</label>
                 <div className={styles.inputWrap}>
@@ -416,39 +489,43 @@ export default function RiderRegisterPage() {
                 </div>
               </div>
 
-              {/* Field 4: Address */}
-              <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="rider-address">Address</label>
-                <div className={styles.inputWrap}>
-                  <MapPin size={14} className={styles.inputIcon} />
-                  <input
-                    id="rider-address"
-                    type="text"
-                    className={styles.input}
-                    placeholder="Enter your complete address"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                  />
-                </div>
-              </div>
+              {mode === 'register' && (
+                <>
+                  {/* Field 4: Address */}
+                  <div className={styles.field}>
+                    <label className={styles.fieldLabel} htmlFor="rider-address">Address</label>
+                    <div className={styles.inputWrap}>
+                      <MapPin size={14} className={styles.inputIcon} />
+                      <input
+                        id="rider-address"
+                        type="text"
+                        className={styles.input}
+                        placeholder="Enter your complete address"
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              {/* Field 5: Registration Number */}
-              <div className={styles.field}>
-                <label className={styles.fieldLabel} htmlFor="rider-reg">Registration Number</label>
-                <div className={styles.inputWrap}>
-                  <FileText size={14} className={styles.inputIcon} />
-                  <input
-                    id="rider-reg"
-                    type="text"
-                    className={styles.input}
-                    placeholder="Enter your registration number"
-                    value={regNumber}
-                    onChange={(e) => setRegNumber(e.target.value)}
-                  />
-                </div>
-              </div>
+                  {/* Field 5: Registration Number */}
+                  <div className={styles.field}>
+                    <label className={styles.fieldLabel} htmlFor="rider-reg">Registration Number</label>
+                    <div className={styles.inputWrap}>
+                      <FileText size={14} className={styles.inputIcon} />
+                      <input
+                        id="rider-reg"
+                        type="text"
+                        className={styles.input}
+                        placeholder="Enter your registration number"
+                        value={regNumber}
+                        onChange={(e) => setRegNumber(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
-              {/* Field 6: Password */}
+              {/* Field 6: Password (Both modes) */}
               <div className={styles.field}>
                 <label className={styles.fieldLabel} htmlFor="rider-pass">Password</label>
                 <div className={styles.inputWrap}>
@@ -457,7 +534,7 @@ export default function RiderRegisterPage() {
                     id="rider-pass"
                     type={showPassword ? 'text' : 'password'}
                     className={styles.input}
-                    placeholder="Create a strong password"
+                    placeholder={mode === 'login' ? 'Enter your password' : 'Create a strong password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
@@ -483,7 +560,7 @@ export default function RiderRegisterPage() {
                   <Loader2 size={16} className={styles.spinner} />
                 ) : (
                   <>
-                    <span>Register as Rider</span>
+                    <span>{mode === 'login' ? 'Log In as Rider' : 'Register as Rider'}</span>
                     <ArrowRight size={15} strokeWidth={2.4} />
                   </>
                 )}
@@ -501,6 +578,7 @@ export default function RiderRegisterPage() {
                 type="button"
                 className={styles.btnGoogle}
                 onClick={handleGoogleSignIn}
+                disabled={loading}
               >
                 <GoogleIcon />
                 <span>Continue with Google</span>
@@ -509,10 +587,37 @@ export default function RiderRegisterPage() {
 
             {/* 8. Bottom Login Link */}
             <div className={styles.cardFooter}>
-              <span>Already have an account? </span>
-              <Link to="/login/rider" className={styles.loginLink}>
-                Log in
-              </Link>
+              {mode === 'login' ? (
+                <>
+                  <span>Don't have an account? </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('register');
+                      setError(null);
+                    }}
+                    className={styles.loginLink}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                  >
+                    Register
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>Already have an account? </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError(null);
+                    }}
+                    className={styles.loginLink}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', padding: 0 }}
+                  >
+                    Log in
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </aside>

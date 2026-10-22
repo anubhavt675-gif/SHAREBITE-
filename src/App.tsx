@@ -54,7 +54,7 @@ const queryClient = new QueryClient({
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <AppLoading />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/register" replace />;
   return <>{children}</>;
 }
 
@@ -93,15 +93,22 @@ function AppRoutes() {
 
         {/* Role-Based Auth Routes: First Select Role -> Then Dedicated Single Form */}
         <Route path="/register" element={<PublicOnlyRoute><RoleSelectPage initialMode="signup" /></PublicOnlyRoute>} />
-        {/* Ultra-HiFi dedicated pages per role */}
-        <Route path="/register/donor"    element={<PublicOnlyRoute><DonorRegisterPage /></PublicOnlyRoute>} />
-        <Route path="/register/acceptor" element={<PublicOnlyRoute><AcceptorRegisterPage /></PublicOnlyRoute>} />
-        <Route path="/register/ngo"      element={<PublicOnlyRoute><AcceptorRegisterPage /></PublicOnlyRoute>} />
-        <Route path="/register/rider"    element={<PublicOnlyRoute><RiderRegisterPage /></PublicOnlyRoute>} />
+        {/* Ultra-HiFi dedicated pages per role (Register mode) */}
+        <Route path="/register/donor"     element={<PublicOnlyRoute><DonorRegisterPage initialMode="register" /></PublicOnlyRoute>} />
+        <Route path="/register/acceptor"  element={<PublicOnlyRoute><AcceptorRegisterPage initialMode="register" /></PublicOnlyRoute>} />
+        <Route path="/register/ngo"       element={<PublicOnlyRoute><AcceptorRegisterPage initialMode="register" /></PublicOnlyRoute>} />
+        <Route path="/register/rider"     element={<PublicOnlyRoute><RiderRegisterPage initialMode="register" /></PublicOnlyRoute>} />
         <Route path="/register/community" element={<PublicOnlyRoute><SingleRoleAuthPage forcedRole="community" initialMode="signup" /></PublicOnlyRoute>} />
-        <Route path="/register/:role"    element={<PublicOnlyRoute><SingleRoleAuthPage initialMode="signup" /></PublicOnlyRoute>} />
-        <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
-        <Route path="/login/:role" element={<PublicOnlyRoute><SingleRoleAuthPage initialMode="login" /></PublicOnlyRoute>} />
+        <Route path="/register/:role"     element={<PublicOnlyRoute><SingleRoleAuthPage initialMode="signup" /></PublicOnlyRoute>} />
+
+        {/* Ultra-HiFi dedicated pages per role (Login mode) */}
+        <Route path="/login"              element={<Navigate to="/register" replace />} />
+        <Route path="/login/donor"        element={<PublicOnlyRoute><DonorRegisterPage initialMode="login" /></PublicOnlyRoute>} />
+        <Route path="/login/acceptor"     element={<PublicOnlyRoute><AcceptorRegisterPage initialMode="login" /></PublicOnlyRoute>} />
+        <Route path="/login/ngo"          element={<PublicOnlyRoute><AcceptorRegisterPage initialMode="login" /></PublicOnlyRoute>} />
+        <Route path="/login/rider"        element={<PublicOnlyRoute><RiderRegisterPage initialMode="login" /></PublicOnlyRoute>} />
+        <Route path="/login/community"    element={<PublicOnlyRoute><SingleRoleAuthPage forcedRole="community" initialMode="login" /></PublicOnlyRoute>} />
+        <Route path="/login/:role"        element={<PublicOnlyRoute><SingleRoleAuthPage initialMode="login" /></PublicOnlyRoute>} />
         <Route path="/signup" element={<Navigate to="/register" replace />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage /></PublicOnlyRoute>} />

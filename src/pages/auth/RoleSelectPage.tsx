@@ -226,13 +226,6 @@ export default function RoleSelectPage({ initialMode: _initialMode }: { initialM
           </div>
         </Link>
 
-        {/* Right side login access */}
-        <div className={styles.navRight}>
-          <span className={styles.loginPrompt}>Already have an account?</span>
-          <Link to="/login" className={styles.loginBtn}>
-            Log In
-          </Link>
-        </div>
       </header>
 
       {/* ─── MAIN HEADING ─── */}
