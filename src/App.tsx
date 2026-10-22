@@ -13,7 +13,6 @@ const PartnersPage = lazy(() => import('./pages/public/PartnersPage'));
 
 // Auth pages
 const RoleSelectPage = lazy(() => import('./pages/auth/RoleSelectPage'));
-const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
 const DonorRegisterPage = lazy(() => import('./pages/auth/DonorRegisterPage'));
 const AcceptorRegisterPage = lazy(() => import('./pages/auth/AcceptorRegisterPage'));
 const RiderRegisterPage = lazy(() => import('./pages/auth/RiderRegisterPage'));
