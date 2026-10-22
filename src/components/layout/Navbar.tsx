@@ -58,13 +58,15 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
     location.pathname.startsWith('/settings') ||
     location.pathname.startsWith('/admin');
 
+  const userId = user?.id;
+
   useEffect(() => {
-    if (user) {
-      NotificationsService.getUnreadCount(user.id).then(count => {
+    if (userId) {
+      NotificationsService.getUnreadCount(userId).then(count => {
         setUnreadCount(count > 0 ? count : 0);
       });
     }
-  }, [user]);
+  }, [userId]);
 
   const handleLogout = async () => {
     await logout();

@@ -406,20 +406,24 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
 
 export default function RiderDashboardPage() {
   const { user } = useAuth();
+  const userId = user?.id;
   const [tab, setTab] = useState<'available' | 'mine' | 'history'>('available');
   const [availableTasks, setAvailableTasks] = useState<DeliveryTask[]>([]);
   const [myTasks, setMyTasks] = useState<DeliveryTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
   const [togglingOnline, setTogglingOnline] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
+  const fetchData = useCallback(async (isSilent = false) => {
+    if (!userId) return;
+    if (!isSilent) setLoading(true);
+    else setRefreshing(true);
+
     try {
       const [available, mine] = await Promise.all([
         ClaimsService.getAvailableDeliveryTasks(),
-        ClaimsService.getMyDeliveryTasks(user.id),
+        ClaimsService.getMyDeliveryTasks(userId),
       ]);
       setAvailableTasks(available);
       setMyTasks(mine);
@@ -428,28 +432,31 @@ export default function RiderDashboardPage() {
       const { data: riderData } = await supabase
         .from('riders')
         .select('is_online')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .maybeSingle();
       if (riderData) setIsOnline(riderData.is_online);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
-    fetchData();
-    const sub = ClaimsService.subscribeToAvailableTasks(fetchData);
+    fetchData(false);
+    const sub = ClaimsService.subscribeToAvailableTasks(() => {
+      fetchData(true);
+    });
     return () => { sub.unsubscribe(); };
   }, [fetchData]);
 
   const toggleOnline = async () => {
-    if (!user) return;
+    if (!userId) return;
     setTogglingOnline(true);
     try {
       await supabase
         .from('riders')
         .update({ is_online: !isOnline, is_available: !isOnline })
-        .eq('user_id', user.id);
+        .eq('user_id', userId);
       setIsOnline(o => !o);
     } finally {
       setTogglingOnline(false);
@@ -493,8 +500,12 @@ export default function RiderDashboardPage() {
         <button className={`${styles.tab} ${tab === 'history' ? styles.tabActive : ''}`} onClick={() => setTab('history')}>
           History
         </button>
-        <button style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: '8px', color: '#6b7280' }} onClick={fetchData}>
-          <RefreshCw size={16} />
+        <button
+          style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: '8px', color: '#6b7280' }}
+          onClick={() => fetchData(false)}
+          title="Refresh tasks"
+        >
+          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
         </button>
       </div>
 

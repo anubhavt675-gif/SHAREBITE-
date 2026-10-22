@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Utensils, Users, Leaf, ArrowRight, Plus, MapPin,
   Clock, Bell, Search, BarChart2, Zap,
@@ -52,34 +52,44 @@ function MetricCard({
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [listings, setListings] = useState<FoodListing[]>([]);
   const [impact, setImpact] = useState<ImpactStats | null>(null);
   const [, setNotifs] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const isDonor = user?.role === 'donor' || user?.role === 'partner';
-  const isNGO = user?.role === 'ngo' || user?.role === 'receiver';
-  const isRider = user?.role === 'rider' || user?.role === 'volunteer';
+  const userId = user?.id;
+  const userRole = user?.role;
+  const isDonor = userRole === 'donor' || userRole === 'partner';
+  const isNGO = userRole === 'ngo' || userRole === 'receiver';
+  const isRider = userRole === 'rider' || userRole === 'volunteer';
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
 
+    let cancelled = false;
     const fetchAll = async () => {
       try {
         const [listingsData, impactData, notifsData] = await Promise.all([
-          isDonor ? DonationService.getMyListings(user.id) : DonationService.getActiveListings(),
-          ImpactService.getUserImpact(user.id, user.role),
-          NotificationsService.getNotifications(user.id),
+          isDonor ? DonationService.getMyListings(userId) : DonationService.getActiveListings(),
+          ImpactService.getUserImpact(userId, userRole || 'donor'),
+          NotificationsService.getNotifications(userId),
         ]);
-        setListings(listingsData.slice(0, 6));
-        setImpact(impactData);
-        setNotifs(notifsData.slice(0, 5));
+        if (!cancelled) {
+          setListings(listingsData.slice(0, 6));
+          setImpact(impactData);
+          setNotifs(notifsData.slice(0, 5));
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     fetchAll();
-  }, [user, isDonor]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, isDonor, userRole]);
 
   if (!user) return <PageLoader />;
 
@@ -272,7 +282,7 @@ export default function DashboardPage() {
                     <FoodCard
                       key={l.id}
                       listing={l}
-                      onClick={() => (window.location.href = `/donations/${l.id}`)}
+                      onClick={() => navigate(`/donations/${l.id}`)}
                       onClaim={
                         isNGO
                           ? async () => {

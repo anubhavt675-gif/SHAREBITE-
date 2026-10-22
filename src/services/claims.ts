@@ -495,7 +495,7 @@ export const ClaimsService = {
         .select('*')
         .eq('ngo_id', ngoId)
         .order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data.map(mapClaim);
+      if (!error && data) return data.map(mapClaim);
     } catch {}
 
     // Fallback: merge remote reservations with local claims
@@ -577,7 +577,7 @@ export const ClaimsService = {
         .select('*')
         .eq('status', 'awaiting_rider')
         .order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data.map(mapDeliveryTask);
+      if (!error && data) return data.map(mapDeliveryTask);
     } catch {}
 
     // Fallback: check delivery_tasks or local store
@@ -606,7 +606,7 @@ export const ClaimsService = {
         .select('*')
         .eq('rider_id', riderId)
         .order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data.map(mapDeliveryTask);
+      if (!error && data) return data.map(mapDeliveryTask);
     } catch {}
 
     return getLocalStore<DeliveryTask>(LS_TASKS_KEY).filter(t => t.riderId === riderUserId);
@@ -1015,7 +1015,7 @@ export const ClaimsService = {
         .select('*')
         .eq('donor_id', donorId)
         .order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data;
+      if (!error && data) return data;
     } catch {}
 
     // Fallback: query food_listings and merge with claims store
@@ -1058,13 +1058,14 @@ export const ClaimsService = {
     });
   },
 
-  // ── Real-time Subscriptions ────────────────────────────
+  // ── Real-time Subscriptions (Debounced \u0026 Channel-Cleaned) ────────────
   subscribeToDeliveryTask(
     taskId: string,
     callback: (task: DeliveryTask) => void
   ) {
-    return supabase
-      .channel(`delivery_task:${taskId}`)
+    const channelName = `delivery_task_${taskId}_${Date.now()}`;
+    const channel = supabase
+      .channel(channelName)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
@@ -1075,57 +1076,106 @@ export const ClaimsService = {
         if (updated) callback(updated);
       })
       .subscribe();
+
+    return {
+      unsubscribe: () => {
+        supabase.removeChannel(channel);
+      }
+    };
   },
 
   subscribeToMyClaims(ngoId: string, callback: () => void) {
-    return supabase
-      .channel(`ngo_claims:${ngoId}`)
+    let timeout: any = null;
+    const debounced = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        callback();
+      }, 800);
+    };
+
+    const channelName = `ngo_claims_${ngoId}_${Date.now()}`;
+    const channel = supabase
+      .channel(channelName)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'ngo_claims',
         filter: `ngo_id=eq.${ngoId}`,
-      }, () => callback())
+      }, debounced)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'reservations',
         filter: `user_id=eq.${ngoId}`,
-      }, () => callback())
+      }, debounced)
       .subscribe();
+
+    return {
+      unsubscribe: () => {
+        clearTimeout(timeout);
+        supabase.removeChannel(channel);
+      }
+    };
   },
 
   subscribeToAvailableTasks(callback: () => void) {
-    return supabase
-      .channel('delivery_tasks_available')
+    let timeout: any = null;
+    const debounced = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        callback();
+      }, 800);
+    };
+
+    const channelName = `tasks_avail_${Date.now()}`;
+    const channel = supabase
+      .channel(channelName)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'delivery_tasks',
-      }, () => callback())
+      }, debounced)
       .subscribe();
+
+    return {
+      unsubscribe: () => {
+        clearTimeout(timeout);
+        supabase.removeChannel(channel);
+      }
+    };
   },
 
   subscribeToDonorListings(donorId: string, callback: () => void) {
-    return supabase
-      .channel(`donor_listings:${donorId}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'ngo_claims',
-      }, () => callback())
+    let timeout: any = null;
+    const debounced = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        callback();
+      }, 800);
+    };
+
+    const channelName = `donor_listings_${donorId}_${Date.now()}`;
+    const channel = supabase
+      .channel(channelName)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'delivery_tasks',
         filter: `donor_id=eq.${donorId}`,
-      }, () => callback())
+      }, debounced)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'food_listings',
         filter: `donor_id=eq.${donorId}`,
-      }, () => callback())
+      }, debounced)
       .subscribe();
+
+    return {
+      unsubscribe: () => {
+        clearTimeout(timeout);
+        supabase.removeChannel(channel);
+      }
+    };
   },
 };

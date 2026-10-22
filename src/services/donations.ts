@@ -273,20 +273,29 @@ export const DonationService = {
   },
 
   subscribeToListings(callback: (listing: FoodListing) => void) {
-    return supabase
-      .channel('food_listings_changes')
+    const channelName = `listings_${Date.now()}`;
+    const channel = supabase
+      .channel(channelName)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'food_listings',
       }, async (payload) => {
-        const { data } = await supabase
-          .from('food_listings')
-          .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
-          .eq('id', payload.new.id)
-          .single();
-        if (data) callback(mapListingToFood(data));
+        try {
+          const { data } = await supabase
+            .from('food_listings')
+            .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
+            .eq('id', payload.new.id)
+            .single();
+          if (data) callback(mapListingToFood(data));
+        } catch {}
       })
       .subscribe();
+
+    return {
+      unsubscribe: () => {
+        supabase.removeChannel(channel);
+      }
+    };
   },
 };

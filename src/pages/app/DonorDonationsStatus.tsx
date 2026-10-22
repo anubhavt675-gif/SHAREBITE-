@@ -30,15 +30,19 @@ function getActiveStep(row: any): number {
 
 export default function DonorDonationsStatus() {
   const { user } = useAuth();
+  const userId = user?.id;
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
+  const fetchData = useCallback(async (isSilent = false) => {
+    if (!userId) return;
+    if (!isSilent) setLoading(true);
+    else setRefreshing(true);
+
     try {
       // Use the donor dashboard view
-      const data = await ClaimsService.getDonorDashboardListings(user.id);
+      const data = await ClaimsService.getDonorDashboardListings(userId);
       // Deduplicate by listing id (view may have multiple rows for multiple claims)
       const seen = new Set<string>();
       const deduped: any[] = [];
@@ -51,23 +55,26 @@ export default function DonorDonationsStatus() {
       setRows(deduped);
     } catch {
       // fallback: use donations service
-      const listings = await DonationService.getMyListings(user.id);
+      const listings = await DonationService.getMyListings(userId);
       setRows(listings.map(l => ({ ...l, id: l.id, title: l.title, status: l.status })));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
-    fetchData();
-    if (!user) return;
-    const sub = ClaimsService.subscribeToDonorListings(user.id, fetchData);
+    fetchData(false);
+    if (!userId) return;
+    const sub = ClaimsService.subscribeToDonorListings(userId, () => {
+      fetchData(true);
+    });
     return () => { sub.unsubscribe(); };
-  }, [fetchData, user]);
+  }, [fetchData, userId]);
 
   if (loading) return (
     <div style={{ textAlign: 'center', padding: 64 }}>
-      <Loader2 size={32} style={{ color: '#ea580c' }} />
+      <Loader2 size={32} className="animate-spin" style={{ color: '#ea580c' }} />
     </div>
   );
 
@@ -93,9 +100,10 @@ export default function DonorDonationsStatus() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}
-              onClick={fetchData}
+              onClick={() => fetchData(false)}
+              title="Refresh listings"
             >
-              <RefreshCw size={14} />
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
             </button>
             <Link to="/donations/new" className={styles.createBtn}><Plus size={16} /> New Donation</Link>
           </div>

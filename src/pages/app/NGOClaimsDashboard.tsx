@@ -435,26 +435,33 @@ function ClaimCard({ claim, onRefresh }: { claim: NgoClaim; onRefresh: () => voi
 
 export default function NGOClaimsDashboard() {
   const { user } = useAuth();
+  const userId = user?.id;
   const [tab, setTab] = useState<'active' | 'completed' | 'cancelled'>('active');
   const [claims, setClaims] = useState<NgoClaim[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchClaims = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
+  const fetchClaims = useCallback(async (isSilent = false) => {
+    if (!userId) return;
+    if (!isSilent) setLoading(true);
+    else setRefreshing(true);
+
     try {
-      const data = await ClaimsService.getMyClaims(user.id);
+      const data = await ClaimsService.getMyClaims(userId);
       setClaims(data);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
-    fetchClaims();
-    const sub = ClaimsService.subscribeToMyClaims(user?.id || '', fetchClaims);
+    fetchClaims(false);
+    const sub = ClaimsService.subscribeToMyClaims(userId || '', () => {
+      fetchClaims(true);
+    });
     return () => { sub.unsubscribe(); };
-  }, [fetchClaims, user?.id]);
+  }, [fetchClaims, userId]);
 
   const activeClaims = claims.filter(c => !['cancelled', 'expired', 'distributed'].includes(c.status));
   const completedClaims = claims.filter(c => c.status === 'distributed');
@@ -478,8 +485,12 @@ export default function NGOClaimsDashboard() {
         <button className={`${styles.tab} ${tab === 'cancelled' ? styles.tabActive : ''}`} onClick={() => setTab('cancelled')}>
           Cancelled/Expired
         </button>
-        <button style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: '8px', color: '#6b7280' }} onClick={fetchClaims}>
-          <RefreshCw size={16} />
+        <button
+          style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: '8px', color: '#6b7280' }}
+          onClick={() => fetchClaims(false)}
+          title="Refresh claims"
+        >
+          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
         </button>
       </div>
 

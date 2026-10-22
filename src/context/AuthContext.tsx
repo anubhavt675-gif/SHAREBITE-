@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { AuthService } from '../services/auth';
 import type { User, UserRole } from '../types';
 
@@ -34,33 +34,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Preserve referential identity if user data has not meaningfully changed
+  const setUserIfChanged = useCallback((newUser: User | null) => {
+    setUser(prev => {
+      if (!prev && !newUser) return null;
+      if (!prev || !newUser) return newUser;
+      if (
+        prev.id === newUser.id &&
+        prev.role === newUser.role &&
+        prev.isVerified === newUser.isVerified &&
+        prev.verificationStatus === newUser.verificationStatus &&
+        prev.name === newUser.name &&
+        prev.email === newUser.email &&
+        prev.updatedAt === newUser.updatedAt
+      ) {
+        return prev;
+      }
+      return newUser;
+    });
+  }, []);
+
   const refreshUser = useCallback(async () => {
     const currentUser = await AuthService.getCurrentUser();
-    setUser(currentUser);
-  }, []);
+    setUserIfChanged(currentUser);
+  }, [setUserIfChanged]);
 
   useEffect(() => {
     refreshUser().finally(() => setLoading(false));
 
-    const { data: { subscription } } = AuthService.onAuthStateChange(async (newUser) => {
-      setUser(newUser);
+    const { data: { subscription } } = AuthService.onAuthStateChange((newUser) => {
+      setUserIfChanged(newUser);
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
-  }, [refreshUser]);
+  }, [refreshUser, setUserIfChanged]);
 
-  const login = async (email: string, password?: string, expectedRole?: UserRole | 'acceptor') => {
+  const login = useCallback(async (email: string, password?: string, expectedRole?: UserRole | 'acceptor') => {
     const loggedInUser = await AuthService.login(email, password, expectedRole);
-    setUser(loggedInUser);
-  };
+    setUserIfChanged(loggedInUser);
+  }, [setUserIfChanged]);
 
-  const loginAsDemo = async (role: 'donor' | 'ngo' | 'volunteer' | 'admin') => {
+  const loginAsDemo = useCallback(async (role: 'donor' | 'ngo' | 'volunteer' | 'admin') => {
     const loggedInUser = AuthService.loginAsDemoRole(role);
-    setUser(loggedInUser);
-  };
+    setUserIfChanged(loggedInUser);
+  }, [setUserIfChanged]);
 
-  const signup = async (data: {
+  const signup = useCallback(async (data: {
     name: string;
     phone: string;
     email: string;
@@ -73,55 +93,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     dateOfBirth?: string;
   }) => {
     const result = await AuthService.signup(data);
-    if (result.sessionExists) setUser(result.user);
+    if (result.sessionExists) setUserIfChanged(result.user);
     return result;
-  };
+  }, [setUserIfChanged]);
 
-  const signInWithGoogle = async (intendedRole: 'donor' | 'acceptor' | 'rider') => {
+  const signInWithGoogle = useCallback(async (intendedRole: 'donor' | 'acceptor' | 'rider') => {
     await AuthService.signInWithGoogle(intendedRole);
     await refreshUser();
-  };
+  }, [refreshUser]);
 
-  const handleOAuthCallback = async () => {
+  const handleOAuthCallback = useCallback(async () => {
     const u = await AuthService.handleOAuthCallback();
-    setUser(u);
+    setUserIfChanged(u);
     return u;
-  };
+  }, [setUserIfChanged]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await AuthService.logout();
     setUser(null);
-  };
+  }, []);
 
-  const updateProfile = async (updates: Partial<User>) => {
+  const updateProfile = useCallback(async (updates: Partial<User>) => {
     if (!user) return;
     const updated = await AuthService.updateProfile(user.id, updates);
-    setUser(updated);
-  };
+    setUserIfChanged(updated);
+  }, [user, setUserIfChanged]);
 
-  const resetPasswordForEmail = async (email: string) => {
+  const resetPasswordForEmail = useCallback(async (email: string) => {
     await AuthService.resetPasswordForEmail(email);
-  };
+  }, []);
 
-  const updatePassword = async (password: string) => {
+  const updatePassword = useCallback(async (password: string) => {
     await AuthService.updatePassword(password);
-  };
+  }, []);
+
+  const contextValue = useMemo<AuthContextType>(() => ({
+    user,
+    loading,
+    login,
+    loginAsDemo,
+    signup,
+    signInWithGoogle,
+    handleOAuthCallback,
+    logout,
+    updateProfile,
+    resetPasswordForEmail,
+    updatePassword,
+    refreshUser,
+  }), [
+    user,
+    loading,
+    login,
+    loginAsDemo,
+    signup,
+    signInWithGoogle,
+    handleOAuthCallback,
+    logout,
+    updateProfile,
+    resetPasswordForEmail,
+    updatePassword,
+    refreshUser,
+  ]);
 
   return (
-    <AuthContext.Provider value={{
-      user,
-      loading,
-      login,
-      loginAsDemo,
-      signup,
-      signInWithGoogle,
-      handleOAuthCallback,
-      logout,
-      updateProfile,
-      resetPasswordForEmail,
-      updatePassword,
-      refreshUser,
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

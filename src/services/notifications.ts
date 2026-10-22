@@ -1,4 +1,4 @@
-﻿// ShareBite — Notifications Service (Web)
+// ShareBite — Notifications Service (Web)
 import { supabase } from '../lib/supabase';
 import type { AppNotification, NotificationType } from '../types';
 
@@ -40,8 +40,9 @@ export const NotificationsService = {
   },
 
   subscribeToNotifications(userId: string, onNotification: (n: AppNotification) => void) {
-    return supabase
-      .channel(`notifications:${userId}`)
+    const channelName = `notifs_${userId}_${Date.now()}`;
+    const channel = supabase
+      .channel(channelName)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -60,5 +61,11 @@ export const NotificationsService = {
         });
       })
       .subscribe();
+
+    return {
+      unsubscribe: () => {
+        supabase.removeChannel(channel);
+      }
+    };
   },
 };
