@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './index.css';
@@ -79,12 +79,23 @@ function AppLoading() {
   );
 }
 
+function RootRoute() {
+  const location = useLocation();
+
+  // If Supabase returned with an OAuth access_token in the hash or code in search params
+  if (location.hash.includes('access_token=') || location.search.includes('code=')) {
+    return <Navigate to={`/auth/callback${location.search}${location.hash}`} replace />;
+  }
+
+  return <LandingPage />;
+}
+
 function AppRoutes() {
   return (
     <Suspense fallback={<AppLoading />}>
       <Routes>
         {/* Public */}
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<RootRoute />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/how-it-works" element={<HowItWorksPage />} />
         <Route path="/impact" element={<PublicImpactPage />} />
