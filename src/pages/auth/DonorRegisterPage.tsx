@@ -243,37 +243,37 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
               </span>
             </div>
           </div>
-
-          {/* Central Circular Chef Photo with aura and leaves */}
-          <div className={styles.chefPhotoWrapper}>
-            <div className={styles.chefPhotoAura} />
-            
-            {/* Top-Right Decorative Floating Leaf */}
-            <div className={styles.floatingLeafTopRight}>
-              <svg width="44" height="58" viewBox="0 0 44 58" fill="none">
-                <path d="M22 2C12 10 6 24 8 38C10 52 20 57 28 55C36 53 41 41 39 27C37 13 29 4 22 2Z" fill="#3D704D" />
-                <path d="M22 2C22 2 20 30 12 54" stroke="#224831" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-
-            {/* Bottom-Right Decorative Floating Leaf */}
-            <div className={styles.floatingLeafBottomRight}>
-              <svg width="48" height="42" viewBox="0 0 48 42" fill="none">
-                <path d="M46 22C38 12 26 4 13 6C0 8 -4 20 4 28C12 36 26 40 38 34C44 30 46 24 46 22Z" fill="#528362" />
-                <path d="M46 22C46 22 18 20 2 34" stroke="#2B543A" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-
-            {/* Circular Photo */}
-            <div className={styles.chefPhotoCircle}>
-              <img
-                src={donorChefPhoto}
-                alt="Chef and volunteer preparing fresh food donation"
-                className={styles.chefPhotoImg}
-              />
-            </div>
-          </div>
         </section>
+
+        {/* ─────────────── CENTRAL CIRCULAR CHEF PHOTO (Center) ─────────────── */}
+        <div className={styles.chefPhotoWrapper}>
+          <div className={styles.chefPhotoAura} />
+          
+          {/* Top-Right Decorative Floating Leaf */}
+          <div className={styles.floatingLeafTopRight}>
+            <svg width="44" height="58" viewBox="0 0 44 58" fill="none">
+              <path d="M22 2C12 10 6 24 8 38C10 52 20 57 28 55C36 53 41 41 39 27C37 13 29 4 22 2Z" fill="#3D704D" />
+              <path d="M22 2C22 2 20 30 12 54" stroke="#224831" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
+
+          {/* Bottom-Right Decorative Floating Leaf */}
+          <div className={styles.floatingLeafBottomRight}>
+            <svg width="48" height="42" viewBox="0 0 48 42" fill="none">
+              <path d="M46 22C38 12 26 4 13 6C0 8 -4 20 4 28C12 36 26 40 38 34C44 30 46 24 46 22Z" fill="#528362" />
+              <path d="M46 22C46 22 18 20 2 34" stroke="#2B543A" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
+
+          {/* Circular Photo */}
+          <div className={styles.chefPhotoCircle}>
+            <img
+              src={donorChefPhoto}
+              alt="Chef and volunteer preparing fresh food donation"
+              className={styles.chefPhotoImg}
+            />
+          </div>
+        </div>
 
         {/* ─────────────── RIGHT FLOATING CARD ─────────────── */}
         <aside className={styles.cardContainer}>

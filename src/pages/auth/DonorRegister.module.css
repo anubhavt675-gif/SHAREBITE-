@@ -322,17 +322,14 @@
    HERO SECTION
 ───────────────────────────────────── */
 .heroSection {
-  flex: 1;
+  flex: 0 0 auto;
+  max-width: 350px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  min-width: 0;
+  flex-direction: column;
 }
 
 .heroContent {
-  max-width: 350px;
-  flex-shrink: 0;
+  width: 100%;
   position: relative;
   z-index: 2;
 }
@@ -468,12 +465,13 @@
 ───────────────────────────────────── */
 .chefPhotoWrapper {
   position: relative;
-  width: clamp(280px, 24vw, 340px);
-  height: clamp(280px, 24vw, 340px);
+  width: clamp(310px, 24vw, 360px);
+  height: clamp(310px, 24vw, 360px);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  margin: 0 auto;
 }
 
 .chefPhotoAura {
@@ -486,8 +484,8 @@
 
 .chefPhotoCircle {
   position: relative;
-  width: clamp(260px, 22vw, 310px);
-  height: clamp(260px, 22vw, 310px);
+  width: clamp(285px, 22vw, 330px);
+  height: clamp(285px, 22vw, 330px);
   border-radius: 50%;
   overflow: hidden;
   border: 4px solid #FFFFFF;
@@ -506,15 +504,15 @@
 /* Floating leaves around photo */
 .floatingLeafTopRight {
   position: absolute;
-  top: 10px;
-  right: -5px;
+  top: 12px;
+  right: -6px;
   z-index: 3;
   filter: drop-shadow(2px 3px 5px rgba(0, 0, 0, 0.10));
 }
 
 .floatingLeafBottomRight {
   position: absolute;
-  bottom: 20px;
+  bottom: 22px;
   right: -10px;
   z-index: 3;
   filter: drop-shadow(2px 3px 5px rgba(0, 0, 0, 0.08));
@@ -814,14 +812,14 @@
     --nav-height: 52px;
   }
   .main {
-    padding: 8px 32px 12px 32px;
+    padding: 6px 32px 10px 32px;
     gap: 16px;
   }
   .cardContainer {
     width: 390px;
   }
   .card {
-    padding: 13px 20px 11px 20px;
+    padding: 12px 20px 10px 20px;
     border-radius: 18px;
   }
   .cardHeader {
@@ -833,7 +831,7 @@
   }
   .cardSubtitle {
     font-size: 0.72rem;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
   }
   .form {
     gap: 4px;
@@ -903,12 +901,13 @@
     font-size: 1.25rem;
   }
   .chefPhotoWrapper {
-    width: 250px;
-    height: 250px;
+    width: 280px;
+    height: 280px;
+    margin: 0 auto;
   }
   .chefPhotoCircle {
-    width: 230px;
-    height: 230px;
+    width: 260px;
+    height: 260px;
   }
 }
 
@@ -917,12 +916,13 @@
 ───────────────────────────────────── */
 @media (max-width: 1200px) {
   .chefPhotoWrapper {
-    width: 260px;
-    height: 260px;
+    width: 280px;
+    height: 280px;
+    margin: 0 auto;
   }
   .chefPhotoCircle {
-    width: 240px;
-    height: 240px;
+    width: 260px;
+    height: 260px;
   }
   .cardContainer {
     width: 370px;
@@ -943,6 +943,7 @@
   }
   .heroSection {
     width: 100%;
+    max-width: 500px;
     align-items: center;
     text-align: center;
     flex-direction: column;
@@ -960,7 +961,7 @@
     justify-content: center;
   }
   .chefPhotoWrapper {
-    margin: 14px auto 18px auto;
+    margin: 18px auto 22px auto;
   }
   .cardContainer {
     width: 100%;
