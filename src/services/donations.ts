@@ -138,8 +138,8 @@ export const DonationService = {
       image_url: imageUrl,
       pickup_address: form.pickupAddress,
       city: form.city,
-      latitude: form.latitude || null,
-      longitude: form.longitude || null,
+      latitude: typeof form.latitude === 'number' && !isNaN(form.latitude) ? form.latitude : null,
+      longitude: typeof form.longitude === 'number' && !isNaN(form.longitude) ? form.longitude : null,
       available_from: form.availableFrom,
       available_until: form.availableUntil,
       status: 'available',
@@ -262,6 +262,69 @@ export const DonationService = {
       .update({ status: 'cancelled' })
       .eq('id', listingId);
     return !error;
+  },
+
+  async updateListing(listingId: string, form: Partial<CreateFoodListingForm>): Promise<FoodListing> {
+    const payload: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (form.title !== undefined) payload.title = form.title;
+    if (form.description !== undefined) payload.description = form.description;
+    if (form.category !== undefined) payload.category = form.category;
+    if (form.foodType !== undefined) payload.food_type = form.foodType;
+    if (form.servings !== undefined) {
+      payload.servings = form.servings;
+      payload.available_servings = form.servings;
+    }
+    if (form.pickupAddress !== undefined) payload.pickup_address = form.pickupAddress;
+    if (form.city !== undefined) payload.city = form.city;
+    if (form.latitude !== undefined) {
+      payload.latitude = typeof form.latitude === 'number' && !isNaN(form.latitude) ? form.latitude : null;
+    }
+    if (form.longitude !== undefined) {
+      payload.longitude = typeof form.longitude === 'number' && !isNaN(form.longitude) ? form.longitude : null;
+    }
+    if (form.availableFrom !== undefined) payload.available_from = form.availableFrom;
+    if (form.availableUntil !== undefined) payload.available_until = form.availableUntil;
+    if (form.isUrgent !== undefined) payload.is_urgent = form.isUrgent;
+    if (form.storageType !== undefined) payload.storage_type = form.storageType;
+    if (form.allergens !== undefined) payload.allergens = form.allergens;
+
+    if (form.imageFile) {
+      try {
+        const ext = form.imageFile.name.split('.').pop() || 'jpg';
+        const filename = `updates/${listingId}_${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from('food-images')
+          .upload(filename, form.imageFile, { upsert: true });
+
+        if (!uploadErr) {
+          const { data: { publicUrl } } = supabase.storage
+            .from('food-images')
+            .getPublicUrl(filename);
+          payload.image_url = publicUrl;
+        } else {
+          payload.image_url = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.readAsDataURL(form.imageFile!);
+          });
+        }
+      } catch (err) {
+        console.warn('Image storage handling error:', err);
+      }
+    }
+
+    const { data: listing, error } = await supabase
+      .from('food_listings')
+      .update(payload)
+      .eq('id', listingId)
+      .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
+      .single();
+
+    if (error || !listing) throw error || new Error('Failed to update food listing');
+    return mapListingToFood(listing);
   },
 
   async updateListingStatus(listingId: string, status: FoodStatus): Promise<boolean> {

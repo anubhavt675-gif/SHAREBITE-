@@ -1,4 +1,4 @@
-﻿.page { display: flex; flex-direction: column; gap: var(--space-6); max-width: 720px; margin: 0 auto; }
+.page { display: flex; flex-direction: column; gap: var(--space-6); max-width: 720px; margin: 0 auto; }
 
 .header { text-align: center; }
 .title { font-family: var(--font-heading); font-size: var(--text-3xl); font-weight: var(--font-bold); color: var(--color-text-primary); }
@@ -163,3 +163,58 @@
   .steps { gap: 0; }
   .stepLabel { display: none; }
 }
+
+.mapWrap {
+  margin-top: var(--space-3);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  border: 1.5px solid var(--color-border);
+  position: relative;
+  height: 280px;
+  background: var(--color-bg-alt);
+}
+
+.mapHintOverlay {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(4px);
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.mapCoordsBadge {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #4b5563;
+  font-family: monospace;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.addressStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.addressStatusSuccess { color: #16a34a; font-weight: 500; }
+.addressStatusLoading { color: #ea580c; font-weight: 500; }
+.addressStatusError { color: #dc2626; font-weight: 500; }
+

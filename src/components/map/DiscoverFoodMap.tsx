@@ -163,15 +163,35 @@ export default function DiscoverFoodMap({
   const [mapType, setMapType] = useState<'map' | 'satellite'>('map');
   const mapInstanceRef = useRef<L.Map | null>(null);
 
-  // Center logic: default Bhopal if no user coords or listings
-  const centerLat = userCoords?.latitude || (listings[0]?.latitude ?? 23.2599);
-  const centerLng = userCoords?.longitude || (listings[0]?.longitude ?? 77.4126);
+  // Center logic: prioritize valid user coordinates, then first valid listing, fallback to India center
+  const firstWithLocation = listings.find(
+    (l) =>
+      typeof l.latitude === 'number' &&
+      typeof l.longitude === 'number' &&
+      !isNaN(l.latitude) &&
+      !isNaN(l.longitude)
+  );
+
+  const centerLat =
+    typeof userCoords?.latitude === 'number' && !isNaN(userCoords.latitude)
+      ? userCoords.latitude
+      : (firstWithLocation?.latitude ?? 20.5937);
+
+  const centerLng =
+    typeof userCoords?.longitude === 'number' && !isNaN(userCoords.longitude)
+      ? userCoords.longitude
+      : (firstWithLocation?.longitude ?? 78.9629);
+
   const center: [number, number] = [centerLat, centerLng];
 
   // Selected item position
   const selectedListing = listings.find((l) => l.id === selectedListingId);
   const selectedCoord: [number, number] | null =
-    selectedListing?.latitude && selectedListing?.longitude
+    selectedListing &&
+    typeof selectedListing.latitude === 'number' &&
+    typeof selectedListing.longitude === 'number' &&
+    !isNaN(selectedListing.latitude) &&
+    !isNaN(selectedListing.longitude)
       ? [selectedListing.latitude, selectedListing.longitude]
       : null;
 

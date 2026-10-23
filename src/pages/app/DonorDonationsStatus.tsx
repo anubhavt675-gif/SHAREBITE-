@@ -210,6 +210,11 @@ export default function DonorDonationsStatus() {
                     View Details
                   </Link>
                   {['available', 'partially_reserved'].includes(status) && (
+                    <Link to={`/donations/${row.id}/edit`} className={`${styles.btn} ${styles.btnView}`}>
+                      Edit
+                    </Link>
+                  )}
+                  {['available', 'partially_reserved'].includes(status) && (
                     <button
                       className={`${styles.btn} ${styles.btnCancel}`}
                       onClick={async () => {

@@ -177,6 +177,8 @@ export interface CreateFoodListingForm {
   imageFile?: File;
   pickupAddress: string;
   city: string;
+  pickupDate?: string;
+  pickupTime?: string;
   latitude?: number;
   longitude?: number;
   availableFrom: string;

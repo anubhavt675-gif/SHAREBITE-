@@ -7,14 +7,187 @@ export interface Coordinates {
   city?: string;
 }
 
-// Default center (Bhopal, MP — matching the UI prototype)
+export interface GeocodeResult {
+  latitude: number;
+  longitude: number;
+  displayName: string;
+  city?: string;
+}
+
+export interface ReverseGeocodeResult {
+  address: string;
+  city?: string;
+  displayName?: string;
+}
+
+// In-memory geocoding caches to minimize redundant network requests
+const geocodeCache = new Map<string, GeocodeResult>();
+const reverseGeocodeCache = new Map<string, ReverseGeocodeResult>();
+
+// Default center (India center for broad view when location is unspecified)
 export const DEFAULT_COORDINATES: Coordinates = {
-  latitude: 23.2599,
-  longitude: 77.4126,
-  city: 'Bhopal',
+  latitude: 20.5937,
+  longitude: 78.9629,
+  city: 'India',
 };
 
 export class LocationService {
+  /**
+   * Geocode a human-entered street/area/city address to accurate latitude and longitude.
+   * Uses OpenStreetMap Nominatim with caching and fallback segment resolution.
+   */
+  static async geocodeAddress(
+    query: string,
+    signal?: AbortSignal
+  ): Promise<GeocodeResult | null> {
+    const trimmed = query.trim();
+    if (!trimmed || trimmed.length < 3) return null;
+
+    const cacheKey = trimmed.toLowerCase();
+    if (geocodeCache.has(cacheKey)) {
+      return geocodeCache.get(cacheKey)!;
+    }
+
+    const tryFetch = async (q: string): Promise<GeocodeResult | null> => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(q)}`;
+        const res = await fetch(url, {
+          signal,
+          headers: {
+            'Accept-Language': 'en',
+          },
+        });
+
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!Array.isArray(data) || data.length === 0) return null;
+
+        const first = data[0];
+        const latitude = parseFloat(first.lat);
+        const longitude = parseFloat(first.lon);
+
+        if (
+          isNaN(latitude) ||
+          isNaN(longitude) ||
+          latitude < -90 ||
+          latitude > 90 ||
+          longitude < -180 ||
+          longitude > 180
+        ) {
+          return null;
+        }
+
+        const addr = first.address || {};
+        const city =
+          addr.city ||
+          addr.town ||
+          addr.city_district ||
+          addr.state_district ||
+          addr.suburb ||
+          addr.county ||
+          '';
+
+        return {
+          latitude,
+          longitude,
+          displayName: first.display_name,
+          city,
+        };
+      } catch (err: any) {
+        if (err.name === 'AbortError') throw err;
+        return null;
+      }
+    };
+
+    // First attempt: exact query
+    let result = await tryFetch(trimmed);
+
+    // Second attempt: if specific unit/flat or number failed, try broader segments
+    if (!result && trimmed.includes(',')) {
+      const parts = trimmed.split(',').map((p) => p.trim()).filter(Boolean);
+      if (parts.length > 1) {
+        // Drop the first segment (often flat/office/shop number) and query the rest
+        const broader = parts.slice(1).join(', ');
+        result = await tryFetch(broader);
+      }
+    }
+
+    if (result) {
+      geocodeCache.set(cacheKey, result);
+    }
+    return result;
+  }
+
+  /**
+   * Reverse geocode coordinates to a readable address and city.
+   */
+  static async reverseGeocode(
+    latitude: number,
+    longitude: number,
+    signal?: AbortSignal
+  ): Promise<ReverseGeocodeResult | null> {
+    if (
+      isNaN(latitude) ||
+      isNaN(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return null;
+    }
+
+    const cacheKey = `${latitude.toFixed(5)},${longitude.toFixed(5)}`;
+    if (reverseGeocodeCache.has(cacheKey)) {
+      return reverseGeocodeCache.get(cacheKey)!;
+    }
+
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&lat=${latitude}&lon=${longitude}`;
+      const res = await fetch(url, {
+        signal,
+        headers: {
+          'Accept-Language': 'en',
+        },
+      });
+
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data || !data.display_name) return null;
+
+      const addr = data.address || {};
+      const city =
+        addr.city ||
+        addr.town ||
+        addr.city_district ||
+        addr.state_district ||
+        addr.suburb ||
+        addr.county ||
+        '';
+
+      // Build a concise human-readable address from address details if possible
+      const parts = [
+        addr.road || addr.pedestrian || addr.suburb,
+        addr.neighbourhood || addr.residential,
+        city,
+      ].filter(Boolean);
+
+      const cleanAddress = parts.length > 0 ? parts.join(', ') : data.display_name;
+
+      const result: ReverseGeocodeResult = {
+        address: cleanAddress,
+        city,
+        displayName: data.display_name,
+      };
+
+      reverseGeocodeCache.set(cacheKey, result);
+      return result;
+    } catch (err: any) {
+      if (err.name === 'AbortError') throw err;
+      return null;
+    }
+  }
+
   /**
    * Get the current device coordinates via HTML5 Geolocation API with graceful fallback
    */

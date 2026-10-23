@@ -135,6 +135,7 @@ function AppRoutes() {
           {/* Role 1: Food Donor Experience */}
           <Route path="/donor-dashboard" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'admin']} fallbackPath="/dashboard"><DonorDashboardPage /></RoleRouteGuard>} />
           <Route path="/donations/new" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'admin']} fallbackPath="/dashboard"><CreateDonationPage /></RoleRouteGuard>} />
+          <Route path="/donations/:id/edit" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'admin']} fallbackPath="/dashboard"><CreateDonationPage /></RoleRouteGuard>} />
           <Route path="/donor-donations" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'admin']} fallbackPath="/dashboard"><DonorDonationsStatus /></RoleRouteGuard>} />
           <Route path="/donations" element={<DonationsPage />} />
           <Route path="/donations/:id" element={<DonationDetailPage />} />

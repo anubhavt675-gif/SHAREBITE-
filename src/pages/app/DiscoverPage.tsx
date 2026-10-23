@@ -13,7 +13,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { DonationService } from '../../services/donations';
-import { LocationService, DEFAULT_COORDINATES, type Coordinates } from '../../services/location';
+import { LocationService, type Coordinates } from '../../services/location';
 import { NGOService } from '../../services/ngo';
 import DiscoverFoodMap from '../../components/map/DiscoverFoodMap';
 import DiscoverFoodItem from '../../components/food/DiscoverFoodItem';
@@ -151,9 +151,11 @@ export default function DiscoverPage() {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
 
-  // Coordinates
+  // Coordinates: initialize from authenticated user location if available, otherwise null until acquired
   const [userCoords, setUserCoords] = useState<Coordinates | null>(
-    DEFAULT_COORDINATES
+    user?.location?.latitude && user?.location?.longitude
+      ? { latitude: user.location.latitude, longitude: user.location.longitude, city: user.location.city }
+      : null
   );
 
   // Data states
@@ -179,8 +181,23 @@ export default function DiscoverPage() {
 
     async function initLocationAndData() {
       try {
-        const coords = await LocationService.getCurrentCoordinates();
-        if (isMounted) setUserCoords(coords);
+        let coords: Coordinates | null = null;
+        if (user?.location?.latitude && user?.location?.longitude) {
+          coords = {
+            latitude: user.location.latitude,
+            longitude: user.location.longitude,
+            city: user.location.city,
+          };
+        }
+
+        try {
+          const deviceCoords = await LocationService.getCurrentCoordinates();
+          if (deviceCoords && typeof deviceCoords.latitude === 'number' && !isNaN(deviceCoords.latitude)) {
+            coords = deviceCoords;
+          }
+        } catch {}
+
+        if (isMounted && coords) setUserCoords(coords);
 
         // Fetch DB listings
         const dbListings = await DonationService.getActiveListings();
@@ -191,7 +208,7 @@ export default function DiscoverPage() {
 
           // Calculate real distances if coords are available
           const withDist = combined.map((item) => {
-            if (item.latitude && item.longitude) {
+            if (coords && item.latitude && item.longitude) {
               const d = LocationService.calculateDistance(
                 coords.latitude,
                 coords.longitude,
@@ -206,12 +223,14 @@ export default function DiscoverPage() {
           setRawListings(withDist);
 
           // Fetch nearby NGOs
-          const nearbyNGOList = await NGOService.getNearbyNGOs(
-            coords.latitude,
-            coords.longitude,
-            radiusKm
-          );
-          setNgos(nearbyNGOList);
+          if (coords) {
+            const nearbyNGOList = await NGOService.getNearbyNGOs(
+              coords.latitude,
+              coords.longitude,
+              radiusKm
+            );
+            setNgos(nearbyNGOList);
+          }
         }
       } catch (err) {
         console.error('Error initializing Discover page:', err);

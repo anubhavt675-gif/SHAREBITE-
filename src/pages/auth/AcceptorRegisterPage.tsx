@@ -252,48 +252,6 @@ export default function AcceptorRegisterPage({ initialMode }: { initialMode?: 'r
             ))}
           </div>
 
-          {/* Photo + decorations */}
-          <div className={styles.photoContainer}>
-            <div className={styles.photoBgBlob} />
-
-            {/* Green botanical leaves near photo */}
-            <div className={styles.dLeaf1} aria-hidden>
-              <svg width="46" height="56" viewBox="0 0 46 56" fill="none">
-                <path d="M23 4C13 10 7 22 9 36C11 50 21 56 29 52C37 48 41 36 39 22C37 8 29 2 23 4Z" fill="#4A7C59" opacity="0.7"/>
-                <path d="M23 4C23 4 21 30 13 52" stroke="#2D5A3D" strokeWidth="1.5" strokeLinecap="round" opacity="0.55"/>
-              </svg>
-            </div>
-            <div className={styles.dLeaf2} aria-hidden>
-              <svg width="38" height="50" viewBox="0 0 38 50" fill="none">
-                <path d="M19 4C9 10 3 22 5 36C7 48 17 54 25 50C33 46 37 34 35 20C33 6 25 0 19 4Z" fill="#5B8C6A" opacity="0.6"/>
-                <path d="M19 4C19 4 17 28 9 50" stroke="#2D5A3D" strokeWidth="1.5" strokeLinecap="round" opacity="0.48"/>
-              </svg>
-            </div>
-
-            {/* Orange arrow decorations */}
-            <div className={styles.dArrow1} aria-hidden>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M5 12H19M14 7L19 12L14 17" stroke="#FF521C" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <div className={styles.dArrow2} aria-hidden>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M5 12H19M14 7L19 12L14 17" stroke="#FF521C" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            {/* Orange heart */}
-            <div className={styles.dHeart} aria-hidden>
-              <svg width="18" height="17" viewBox="0 0 24 22" fill="none">
-                <path d="M12 19.5C12 19.5 2 13 2 6.5C2 4.5 3.5 2 6 2C8.5 2 10 3.5 12 5.5C14 3.5 15.5 2 18 2C20.5 2 22 4.5 22 6.5C22 13 12 19.5 12 19.5Z" fill="#FF521C" opacity="0.82"/>
-              </svg>
-            </div>
-
-            {/* The photo itself */}
-            <div className={styles.photoCircle}>
-              <img src={ngoPhoto} alt="NGO volunteers distributing food" className={styles.photoImg} />
-            </div>
-          </div>
-
           {/* Handwritten note */}
           <div className={styles.handwrittenNote} aria-hidden>
             <svg width="178" height="88" viewBox="0 0 178 88" fill="none" style={{ overflow: 'visible' }}>
@@ -307,6 +265,48 @@ export default function AcceptorRegisterPage({ initialMode }: { initialMode?: 'r
             </svg>
           </div>
         </section>
+
+        {/* ─────────────── CENTER PHOTO CONTAINER ─────────────── */}
+        <div className={styles.photoContainer}>
+          <div className={styles.photoBgBlob} />
+
+          {/* Green botanical leaves near photo */}
+          <div className={styles.dLeaf1} aria-hidden>
+            <svg width="46" height="56" viewBox="0 0 46 56" fill="none">
+              <path d="M23 4C13 10 7 22 9 36C11 50 21 56 29 52C37 48 41 36 39 22C37 8 29 2 23 4Z" fill="#4A7C59" opacity="0.7"/>
+              <path d="M23 4C23 4 21 30 13 52" stroke="#2D5A3D" strokeWidth="1.5" strokeLinecap="round" opacity="0.55"/>
+            </svg>
+          </div>
+          <div className={styles.dLeaf2} aria-hidden>
+            <svg width="38" height="50" viewBox="0 0 38 50" fill="none">
+              <path d="M19 4C9 10 3 22 5 36C7 48 17 54 25 50C33 46 37 34 35 20C33 6 25 0 19 4Z" fill="#5B8C6A" opacity="0.6"/>
+              <path d="M19 4C19 4 17 28 9 50" stroke="#2D5A3D" strokeWidth="1.5" strokeLinecap="round" opacity="0.48"/>
+            </svg>
+          </div>
+
+          {/* Orange arrow decorations */}
+          <div className={styles.dArrow1} aria-hidden>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M5 12H19M14 7L19 12L14 17" stroke="#FF521C" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+          <div className={styles.dArrow2} aria-hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M5 12H19M14 7L19 12L14 17" stroke="#FF521C" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+          {/* Orange heart */}
+          <div className={styles.dHeart} aria-hidden>
+            <svg width="18" height="17" viewBox="0 0 24 22" fill="none">
+              <path d="M12 19.5C12 19.5 2 13 2 6.5C2 4.5 3.5 2 6 2C8.5 2 10 3.5 12 5.5C14 3.5 15.5 2 18 2C20.5 2 22 4.5 22 6.5C22 13 12 19.5 12 19.5Z" fill="#FF521C" opacity="0.82"/>
+            </svg>
+          </div>
+
+          {/* The photo itself */}
+          <div className={styles.photoCircle}>
+            <img src={ngoPhoto} alt="NGO volunteers distributing food" className={styles.photoImg} />
+          </div>
+        </div>
 
         {/* ─────────────── RIGHT CARD ─────────────── */}
         <aside className={styles.card}>

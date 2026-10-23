@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { MapPin, Clock, Users, CheckCircle, ArrowLeft, Utensils, AlertTriangle, ShieldAlert, ArrowRight } from 'lucide-react';
+import { MapPin, Clock, Users, CheckCircle, ArrowLeft, Utensils, AlertTriangle, ShieldAlert, ArrowRight, Edit } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { DonationService } from '../../services/donations';
@@ -264,6 +264,30 @@ export default function DonationDetailPage() {
               </button>
             </div>
           ) : null}
+
+          {isDonor && (listing.status === 'available' || listing.status === 'partially_reserved') && (
+            <Link
+              to={`/donations/${listing.id}/edit`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                padding: '10px 16px',
+                background: '#fff',
+                border: '1.5px solid #ea580c',
+                color: '#ea580c',
+                borderRadius: 8,
+                fontWeight: 600,
+                fontSize: 14,
+                textDecoration: 'none',
+                marginTop: 8,
+                cursor: 'pointer',
+              }}
+            >
+              <Edit size={16} /> Edit Listing
+            </Link>
+          )}
 
           {isDonor && (
             <button
