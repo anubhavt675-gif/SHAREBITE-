@@ -43,6 +43,7 @@ const RiderDashboardPage = lazy(() => import('./pages/app/RiderDashboardPage'));
 const NGOClaimsDashboard = lazy(() => import('./pages/app/NGOClaimsDashboard'));
 const DonorDonationsStatus = lazy(() => import('./pages/app/DonorDonationsStatus'));
 const ChatPage = lazy(() => import('./pages/app/ChatPage'));
+const NGODiscoveryPage = lazy(() => import('./pages/app/NGODiscoveryPage'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -162,6 +163,7 @@ function AppRoutes() {
           <Route path="/admin" element={<RoleRouteGuard allowedRoles={['admin']} fallbackPath="/dashboard"><AdminPage /></RoleRouteGuard>} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/chat/:conversationId" element={<ChatPage />} />
+          <Route path="/ngos" element={<NGODiscoveryPage />} />
         </Route>
 
         {/* Fallback */}

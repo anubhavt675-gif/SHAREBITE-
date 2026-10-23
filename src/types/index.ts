@@ -262,3 +262,53 @@ export interface NearbyNGO {
   distanceKm: number;
 }
 
+// ─── India NGO Discovery System ──────────────────────────────────────────────
+
+export type NGOVerificationStatus = 'source_listed' | 'contact_available' | 'sharebite_verified' | 'unverified';
+
+export type NGOCategory =
+  | 'food_distribution'
+  | 'child_welfare'
+  | 'education'
+  | 'women_empowerment'
+  | 'elderly_care'
+  | 'disability_support'
+  | 'animal_welfare'
+  | 'healthcare'
+  | 'disaster_relief'
+  | 'homeless_support'
+  | 'environment'
+  | 'general_charity'
+  | 'other';
+
+export interface IndiaNGO {
+  id: string;
+  name: string;
+  slug?: string;
+  description?: string;
+  categories: NGOCategory[];
+  address?: string;
+  city?: string;
+  district?: string;
+  state?: string;
+  pincode?: string;
+  latitude?: number;
+  longitude?: number;
+  phone?: string;
+  email?: string;
+  website?: string;
+  registrationNumber?: string;
+  sourceName: string;
+  sourceUrl?: string;
+  verificationStatus: NGOVerificationStatus;
+  acceptsFoodDonations?: boolean;
+  acceptsVolunteers?: boolean;
+  operatingHours?: string;
+  lastVerifiedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  distanceKm?: number;
+  osmId?: string;
+}
+
+

@@ -3,7 +3,7 @@ import { NavLink, Link } from 'react-router-dom';
 import {
   LayoutGrid, Search, Utensils, MapPin, ClipboardList,
   BarChart2, User, Settings, ShieldCheck, ShieldAlert, X, Leaf,
-  Truck, Package, Plus, MessageSquare, Heart
+  Truck, Package, Plus, MessageSquare, Heart, Building2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ShareBiteLogo } from './Navbar';
@@ -35,6 +35,7 @@ export default function Sidebar({ open, onClose }: Props) {
         return [
           { to: '/dashboard', icon: <Truck size={18} />, label: 'Rider Dashboard' },
           { to: '/rider-dashboard', icon: <Package size={18} />, label: 'Available Jobs', badge: 'Live' },
+          { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs' },
           { to: '/map', icon: <MapPin size={18} />, label: 'Live Rescue Map' },
           { to: '/chat', icon: <MessageSquare size={18} />, label: 'Messages & Dispatch' },
           { to: '/impact-dashboard', icon: <BarChart2 size={18} />, label: 'Fleet Impact' },
@@ -49,6 +50,7 @@ export default function Sidebar({ open, onClose }: Props) {
         return [
           { to: '/dashboard', icon: <LayoutGrid size={18} />, label: 'NGO Hub' },
           { to: '/discover', icon: <Search size={18} />, label: 'Claim Surplus Food', highlight: true },
+          { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs Across India' },
           { to: '/my-claims', icon: <ClipboardList size={18} />, label: 'Incoming Deliveries', badge: 'Active' },
           { to: '/requests', icon: <Utensils size={18} />, label: 'Distribution Log' },
           { to: '/map', icon: <MapPin size={18} />, label: 'Live Food Map' },
@@ -90,6 +92,7 @@ export default function Sidebar({ open, onClose }: Props) {
           { to: '/donations/new', icon: <Plus size={18} />, label: 'Donate Surplus Food', highlight: true },
           { to: '/donor-donations', icon: <Truck size={18} />, label: 'Track Deliveries & History' },
           { to: '/discover', icon: <Search size={18} />, label: 'Explore Network' },
+          { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs Across India' },
           { to: '/chat', icon: <MessageSquare size={18} />, label: 'Rider & NGO Chat' },
           { to: '/impact-dashboard', icon: <BarChart2 size={18} />, label: 'Food & CO2 Impact' },
           { to: '/profile', icon: <User size={18} />, label: 'Donor Profile' },
