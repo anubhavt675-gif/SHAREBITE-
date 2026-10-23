@@ -1,13 +1,13 @@
 /* ============================================================
    SHAREBITE — FOOD DONOR REGISTER PAGE
-   Matches the uploaded visual mockup with 100% precision
+   Optimized to fit perfectly on 100% of screens (no bottom cutoff)
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Kalam:wght@400;700&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=DM+Sans:wght@400;500;600;700;800&display=swap');
 
 /* ─── CSS CUSTOM PROPERTIES ─── */
 :root {
-  --nav-height: 68px;
+  --nav-height: 56px;
   --page-bg: #FAF7F2;
   --color-orange: #EA580C;
   --color-orange-hover: #D94E06;
@@ -19,10 +19,12 @@
 /* ─── MAIN PAGE CONTAINER ─── */
 .page {
   min-height: 100vh;
+  max-height: 100vh;
   background-color: var(--page-bg);
   display: flex;
   flex-direction: column;
   position: relative;
+  overflow-y: auto;
   overflow-x: hidden;
   font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: #1F2937;
@@ -33,8 +35,8 @@
   position: absolute;
   top: 0;
   left: 0;
-  width: 140px;
-  max-width: 11vw;
+  width: 120px;
+  max-width: 9vw;
   pointer-events: none;
   z-index: 1;
   opacity: 0.85;
@@ -44,8 +46,8 @@
   position: absolute;
   bottom: 0;
   left: 0;
-  width: 160px;
-  max-width: 13vw;
+  width: 130px;
+  max-width: 10vw;
   pointer-events: none;
   z-index: 1;
   opacity: 0.8;
@@ -55,34 +57,35 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 150px;
-  max-width: 12vw;
+  width: 130px;
+  max-width: 10vw;
   pointer-events: none;
   z-index: 1;
   opacity: 0.85;
 }
 
-/* ─── NAVBAR ─── */
+/* ─── NAVBAR (Compact 56px) ─── */
 .navbar {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: rgba(250, 247, 242, 0.95);
+  background: rgba(250, 247, 242, 0.96);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(237, 233, 223, 0.8);
   height: var(--nav-height);
   width: 100%;
+  flex-shrink: 0;
 }
 
 .navInner {
   max-width: 1480px;
   margin: 0 auto;
-  padding: 0 40px;
+  padding: 0 32px;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
 }
 
 .navLogo {
@@ -94,18 +97,29 @@
 .logoFull {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .logoIcon {
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   background: var(--color-orange);
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 3px 10px rgba(234, 88, 12, 0.25);
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.22);
+  flex-shrink: 0;
+}
+
+.logoIconCompact {
+  width: 26px;
+  height: 26px;
+  background: var(--color-orange);
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
@@ -115,10 +129,17 @@
 }
 
 .logoName {
-  font-size: 1.45rem;
+  font-size: 1.25rem;
   font-weight: 800;
   line-height: 1;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.3px;
+}
+
+.logoNameCompact {
+  font-size: 1.1rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.3px;
 }
 
 .logoShareDark {
@@ -130,21 +151,27 @@
 }
 
 .logoTagline {
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 500;
   color: #6B7280;
-  margin-top: 2px;
+  margin-top: 1px;
+}
+
+.logoTaglineCompact {
+  font-size: 0.58rem;
+  font-weight: 500;
+  color: #6B7280;
 }
 
 /* ─── NAV CENTER LINKS ─── */
 .navLinks {
   display: flex;
   align-items: center;
-  gap: 32px;
+  gap: 24px;
 }
 
 .navLink {
-  font-size: 0.92rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: #4B5563;
   text-decoration: none;
@@ -164,7 +191,7 @@
 .navLinkActive::after {
   content: '';
   position: absolute;
-  bottom: -4px;
+  bottom: -3px;
   left: 0;
   width: 100%;
   height: 2px;
@@ -176,26 +203,26 @@
 .navRight {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .navSearch {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background: #FFFFFF;
   border: 1px solid #E5E7EB;
   border-radius: 999px;
-  padding: 0 16px;
-  height: 38px;
-  width: 250px;
+  padding: 0 12px;
+  height: 33px;
+  width: 220px;
   transition: all 0.2s ease;
 }
 
 .navSearch:focus-within {
   border-color: var(--color-orange);
-  box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.08);
-  width: 270px;
+  box-shadow: 0 0 0 2.5px rgba(234, 88, 12, 0.08);
+  width: 240px;
 }
 
 .navSearchIcon {
@@ -208,20 +235,20 @@
   background: transparent;
   outline: none;
   font-family: inherit;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: #1F2937;
   width: 100%;
 }
 
 .navSearchInput::placeholder {
   color: #9CA3AF;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
 }
 
 .navBellBtn {
   position: relative;
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: transparent;
   border: none;
@@ -240,14 +267,14 @@
 
 .navBellBadge {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 3px;
+  right: 3px;
   background: #EA580C;
   color: #FFFFFF;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   font-weight: 800;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -258,16 +285,16 @@
 .navGetStartedBtn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background: var(--color-orange);
   color: #FFFFFF;
   text-decoration: none;
-  padding: 0 18px;
-  height: 38px;
+  padding: 0 14px;
+  height: 33px;
   border-radius: 999px;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 700;
-  box-shadow: 0 3px 12px rgba(234, 88, 12, 0.25);
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.22);
   transition: all 0.2s ease;
   white-space: nowrap;
 }
@@ -275,38 +302,37 @@
 .navGetStartedBtn:hover {
   background: var(--color-orange-hover);
   transform: translateY(-1px);
-  box-shadow: 0 5px 16px rgba(234, 88, 12, 0.35);
 }
 
-/* ─── MAIN CONTENT ─── */
+/* ─── MAIN CONTENT CONTAINER (Compact Fit) ─── */
 .main {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  max-width: 1480px;
+  max-width: 1440px;
   margin: 0 auto;
   width: 100%;
-  padding: 24px 40px;
-  gap: 32px;
+  padding: 10px 32px 14px 32px;
+  gap: 20px;
   position: relative;
   z-index: 5;
 }
 
 /* ─────────────────────────────────────
-   HERO SECTION (Left Copy + Central Circle)
+   HERO SECTION
 ───────────────────────────────────── */
 .heroSection {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 20px;
   min-width: 0;
 }
 
 .heroContent {
-  max-width: 360px;
+  max-width: 320px;
   flex-shrink: 0;
   position: relative;
   z-index: 2;
@@ -316,16 +342,16 @@
 .heroBadge {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   background: var(--color-green-light);
   color: var(--color-green-mid);
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   font-weight: 800;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.7px;
   text-transform: uppercase;
-  padding: 6px 14px;
+  padding: 4px 11px;
   border-radius: 999px;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 
 .heroBadgeIcon {
@@ -335,17 +361,17 @@
 /* Headline */
 .heroTitle {
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: clamp(2.8rem, 3.8vw, 3.7rem);
+  font-size: clamp(2rem, 2.7vw, 2.75rem);
   font-weight: 800;
   line-height: 1.05;
-  margin: 0 0 16px 0;
-  letter-spacing: -1.2px;
+  margin: 0 0 10px 0;
+  letter-spacing: -0.8px;
 }
 
 .heroTitleRow {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   position: relative;
 }
 
@@ -361,7 +387,7 @@
 .sparkleWrap {
   display: inline-flex;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .sparkleSvg {
@@ -375,36 +401,36 @@
 
 /* Description Paragraph */
 .heroPara {
-  font-size: 0.95rem;
+  font-size: 0.84rem;
   color: #4B5563;
-  line-height: 1.6;
-  margin-bottom: 24px;
-  max-width: 320px;
+  line-height: 1.5;
+  margin-bottom: 14px;
+  max-width: 290px;
 }
 
 /* 3 Impact Badges */
 .impactRow {
   display: flex;
   align-items: flex-start;
-  gap: 20px;
-  margin-bottom: 28px;
+  gap: 14px;
+  margin-bottom: 12px;
 }
 
 .impactItem {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  font-size: 0.72rem;
+  gap: 5px;
+  font-size: 0.66rem;
   font-weight: 700;
   color: var(--color-green-dark);
   text-align: center;
-  max-width: 80px;
+  max-width: 72px;
 }
 
 .impactIcon {
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   background: var(--color-green-light);
   border-radius: 50%;
   display: flex;
@@ -412,41 +438,30 @@
   justify-content: center;
   color: var(--color-green-mid);
   flex-shrink: 0;
-  transition: transform 0.2s ease;
-}
-
-.impactItem:hover .impactIcon {
-  transform: translateY(-2px);
 }
 
 /* Handwritten Note (Bottom Left) */
 .handwrittenNote {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  margin-top: 10px;
+  gap: 0;
+  margin-top: 4px;
 }
 
 .handwrittenLine {
   font-family: 'Caveat', 'Kalam', cursive;
-  font-size: 1.65rem;
+  font-size: 1.35rem;
   font-weight: 700;
   color: var(--color-orange);
-  line-height: 1.15;
+  line-height: 1.1;
   transform: rotate(-2deg);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .handwrittenHeart {
-  font-size: 1.2rem;
-  animation: heartBeat 2s infinite ease-in-out;
-}
-
-@keyframes heartBeat {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.2); }
+  font-size: 1rem;
 }
 
 /* ─────────────────────────────────────
@@ -454,8 +469,8 @@
 ───────────────────────────────────── */
 .chefPhotoWrapper {
   position: relative;
-  width: 380px;
-  height: 380px;
+  width: clamp(260px, 22vw, 320px);
+  height: clamp(260px, 22vw, 320px);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -464,7 +479,7 @@
 
 .chefPhotoAura {
   position: absolute;
-  inset: -15px;
+  inset: -10px;
   border-radius: 50%;
   background: radial-gradient(circle, #F5ECE0 0%, #FAF7F2 70%);
   z-index: 1;
@@ -472,12 +487,12 @@
 
 .chefPhotoCircle {
   position: relative;
-  width: 350px;
-  height: 350px;
+  width: clamp(240px, 20vw, 290px);
+  height: clamp(240px, 20vw, 290px);
   border-radius: 50%;
   overflow: hidden;
   border: 4px solid #FFFFFF;
-  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.10), 0 2px 10px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.09), 0 2px 8px rgba(0, 0, 0, 0.03);
   z-index: 2;
 }
 
@@ -489,38 +504,38 @@
   display: block;
 }
 
-/* Decorative leaves hugging the circular photo */
+/* Floating leaves around photo */
 .floatingLeafTopRight {
   position: absolute;
-  top: 15px;
+  top: 10px;
   right: -5px;
   z-index: 3;
-  filter: drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.12));
+  filter: drop-shadow(2px 3px 5px rgba(0, 0, 0, 0.10));
 }
 
 .floatingLeafBottomRight {
   position: absolute;
-  bottom: 30px;
-  right: -15px;
+  bottom: 20px;
+  right: -10px;
   z-index: 3;
-  filter: drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.10));
+  filter: drop-shadow(2px 3px 5px rgba(0, 0, 0, 0.08));
 }
 
 /* ─────────────────────────────────────
-   RIGHT FLOATING CARD
+   RIGHT FLOATING CARD (Fits 100% inside viewport)
 ───────────────────────────────────── */
 .cardContainer {
-  width: 440px;
+  width: 385px;
   flex-shrink: 0;
   z-index: 10;
 }
 
 .card {
   background: #FFFFFF;
-  border-radius: 24px;
+  border-radius: 20px;
   border: 1px solid rgba(0, 0, 0, 0.04);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.06), 0 2px 10px rgba(0, 0, 0, 0.02);
-  padding: 26px 32px 22px 32px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.02);
+  padding: 15px 22px 13px 22px;
   display: flex;
   flex-direction: column;
 }
@@ -530,46 +545,32 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.cardHeader .logoIcon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-}
-
-.cardHeader .logoName {
-  font-size: 1.2rem;
-}
-
-.cardHeader .logoTagline {
-  font-size: 0.62rem;
+  margin-bottom: 6px;
 }
 
 .cardBadge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: var(--color-green-light);
   color: var(--color-green-mid);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 800;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  padding: 4px 10px;
+  padding: 3px 8px;
   border-radius: 999px;
 }
 
 /* Card Title & Subtitle */
 .cardTitle {
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 1.62rem;
+  font-size: 1.28rem;
   font-weight: 800;
   line-height: 1.15;
   color: var(--color-green-dark);
-  letter-spacing: -0.4px;
-  margin: 0 0 4px 0;
+  letter-spacing: -0.3px;
+  margin: 0 0 2px 0;
 }
 
 .cardTitleHighlight {
@@ -577,67 +578,67 @@
 }
 
 .cardSubtitle {
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   color: #6B7280;
-  margin: 0 0 14px 0;
-  line-height: 1.4;
+  margin: 0 0 8px 0;
+  line-height: 1.25;
 }
 
 /* Alerts */
 .errorBox {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 6px 10px;
   background: #FEF2F2;
   border: 1px solid #FECACA;
-  border-radius: 8px;
+  border-radius: 7px;
   color: #B91C1C;
-  font-size: 0.78rem;
-  margin-bottom: 10px;
+  font-size: 0.72rem;
+  margin-bottom: 6px;
 }
 
 .successBox {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
   background: #F0FDF4;
   border: 1px solid #BBF7D0;
-  border-radius: 10px;
+  border-radius: 8px;
   color: #15803D;
-  font-size: 0.82rem;
-  margin-bottom: 12px;
+  font-size: 0.76rem;
+  margin-bottom: 8px;
 }
 
 .proceedBtn {
   display: inline-block;
-  margin-top: 8px;
-  padding: 5px 12px;
+  margin-top: 6px;
+  padding: 4px 10px;
   background: #16A34A;
   color: #FFFFFF;
-  border-radius: 6px;
-  font-size: 0.78rem;
+  border-radius: 5px;
+  font-size: 0.72rem;
   font-weight: 700;
   border: none;
   cursor: pointer;
 }
 
-/* Form */
+/* Form (Compact & Clean) */
 .form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 5px;
 }
 
 .fieldGroup {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
 }
 
 .fieldLabel {
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 700;
   color: #374151;
   letter-spacing: 0.1px;
@@ -648,21 +649,21 @@
   align-items: center;
   background: #FFFFFF;
   border: 1.5px solid #E5E7EB;
-  border-radius: 10px;
-  padding: 0 12px;
-  height: 40px;
+  border-radius: 8px;
+  padding: 0 10px;
+  height: 33px;
   transition: border-color 0.2s, box-shadow 0.2s;
   position: relative;
 }
 
 .inputWrap:focus-within {
   border-color: var(--color-orange);
-  box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.10);
+  box-shadow: 0 0 0 2.5px rgba(234, 88, 12, 0.10);
 }
 
 .inputIcon {
   color: #9CA3AF;
-  margin-right: 8px;
+  margin-right: 6px;
   flex-shrink: 0;
 }
 
@@ -671,14 +672,14 @@
   border: none;
   background: transparent;
   font-family: inherit;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   color: #111827;
   outline: none;
 }
 
 .input::placeholder {
   color: #9CA3AF;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .eyeBtn {
@@ -686,11 +687,10 @@
   border: none;
   color: #9CA3AF;
   cursor: pointer;
-  padding: 4px;
+  padding: 2px;
   display: flex;
   align-items: center;
   border-radius: 4px;
-  transition: color 0.15s;
 }
 
 .eyeBtn:hover {
@@ -700,28 +700,27 @@
 /* CTA Submit Button */
 .ctaBtn {
   width: 100%;
-  height: 44px;
+  height: 36px;
   background: var(--color-orange);
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   color: #FFFFFF;
   font-family: inherit;
-  font-size: 0.92rem;
+  font-size: 0.85rem;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.28);
+  box-shadow: 0 3px 10px rgba(234, 88, 12, 0.24);
   transition: all 0.2s ease;
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
 .ctaBtn:hover:not(:disabled) {
   background: var(--color-orange-hover);
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(234, 88, 12, 0.38);
 }
 
 .ctaBtn:disabled {
@@ -742,8 +741,8 @@
 .dividerRow {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 6px 0 3px 0;
+  gap: 10px;
+  margin: 4px 0 2px 0;
 }
 
 .dividerLine {
@@ -753,7 +752,7 @@
 }
 
 .dividerText {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: #9CA3AF;
   font-weight: 500;
   white-space: nowrap;
@@ -762,16 +761,16 @@
 /* Google OAuth Button */
 .googleBtn {
   width: 100%;
-  height: 40px;
+  height: 33px;
   background: #FFFFFF;
   border: 1.5px solid #E5E7EB;
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: #374151;
   cursor: pointer;
@@ -781,15 +780,14 @@
 .googleBtn:hover {
   background: #F9FAFB;
   border-color: #D1D5DB;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
 /* Footer Switch */
 .cardFooter {
   text-align: center;
-  font-size: 0.78rem;
+  font-size: 0.73rem;
   color: #6B7280;
-  margin-top: 8px;
+  margin-top: 5px;
 }
 
 .cardFooterLink {
@@ -812,46 +810,40 @@
 /* ─────────────────────────────────────
    RESPONSIVE ADAPTATIONS
 ───────────────────────────────────── */
-@media (max-width: 1320px) {
+@media (max-width: 1200px) {
   .chefPhotoWrapper {
-    width: 320px;
-    height: 320px;
+    width: 250px;
+    height: 250px;
   }
   .chefPhotoCircle {
-    width: 300px;
-    height: 300px;
+    width: 230px;
+    height: 230px;
   }
   .cardContainer {
-    width: 400px;
+    width: 360px;
   }
   .card {
-    padding: 22px 26px 18px 26px;
+    padding: 13px 18px 11px 18px;
   }
   .heroTitle {
-    font-size: 3rem;
+    font-size: 2.2rem;
   }
 }
 
-@media (max-width: 1120px) {
-  .heroSection {
-    flex-direction: column;
-    align-items: flex-start;
+@media (max-width: 980px) {
+  .page {
+    max-height: none;
   }
-  .chefPhotoWrapper {
-    margin: 20px auto 0 auto;
-  }
-}
-
-@media (max-width: 960px) {
   .main {
     flex-direction: column;
     align-items: center;
-    padding: 24px 20px;
+    padding: 20px 20px 40px 20px;
   }
   .heroSection {
     width: 100%;
     align-items: center;
     text-align: center;
+    flex-direction: column;
   }
   .heroContent {
     max-width: 100%;
@@ -865,9 +857,12 @@
   .impactRow {
     justify-content: center;
   }
+  .chefPhotoWrapper {
+    margin: 10px auto 16px auto;
+  }
   .cardContainer {
     width: 100%;
-    max-width: 460px;
+    max-width: 440px;
   }
   .navSearch,
   .navBellBtn {
@@ -880,13 +875,13 @@
     display: none;
   }
   .heroTitle {
-    font-size: 2.3rem;
+    font-size: 2rem;
   }
   .navInner {
     padding: 0 16px;
   }
   .card {
-    padding: 20px 18px 16px 18px;
-    border-radius: 18px;
+    padding: 16px 16px 14px 16px;
+    border-radius: 16px;
   }
 }

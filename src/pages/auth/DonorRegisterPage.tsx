@@ -14,7 +14,7 @@ import styles from './DonorRegister.module.css';
 
 function GoogleIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24">
+    <svg width="17" height="17" viewBox="0 0 24 24">
       <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
       <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
       <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
@@ -23,22 +23,22 @@ function GoogleIcon() {
   );
 }
 
-function ShareBiteLogoFull() {
+function ShareBiteLogoFull({ compact = false }: { compact?: boolean }) {
   return (
     <div className={styles.logoFull}>
-      <div className={styles.logoIcon}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <div className={compact ? styles.logoIconCompact : styles.logoIcon}>
+        <svg width={compact ? "16" : "18"} height={compact ? "16" : "18"} viewBox="0 0 24 24" fill="none">
           <path d="M7 3v6a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V3M9 11v10" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           <path d="M9 3v4" stroke="#FFFFFF" strokeWidth="1.8" strokeLinecap="round" />
           <path d="M16 3c-1.66 0-3 1.79-3 4s1.34 4 3 4 3-1.79 3-4-1.34-4-3-4zM16 11v10" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
       <div className={styles.logoText}>
-        <span className={styles.logoName}>
+        <span className={compact ? styles.logoNameCompact : styles.logoName}>
           <span className={styles.logoShareDark}>Share</span>
           <span className={styles.logoBiteOrange}>Bite</span>
         </span>
-        <span className={styles.logoTagline}>Share Food. Share Hope.</span>
+        <span className={compact ? styles.logoTaglineCompact : styles.logoTagline}>Share Food. Share Hope.</span>
       </div>
     </div>
   );
@@ -163,7 +163,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
           {/* Right Controls: Search + Notification Bell + Get Started Button */}
           <div className={styles.navRight}>
             <div className={styles.navSearch}>
-              <Search size={15} className={styles.navSearchIcon} />
+              <Search size={14} className={styles.navSearchIcon} />
               <input
                 type="text"
                 placeholder="Search food, NGOs, or location..."
@@ -171,11 +171,11 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
               />
             </div>
             <button type="button" className={styles.navBellBtn} title="Notifications">
-              <Bell size={17} />
+              <Bell size={16} />
               <span className={styles.navBellBadge}>3</span>
             </button>
             <Link to="/register" className={styles.navGetStartedBtn}>
-              Get Started <ArrowRight size={14} />
+              Get Started <ArrowRight size={13} />
             </Link>
           </div>
         </div>
@@ -189,7 +189,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
           <div className={styles.heroContent}>
             {/* FOOD DONOR Badge */}
             <div className={styles.heroBadge}>
-              <Leaf size={14} className={styles.heroBadgeIcon} />
+              <Leaf size={13} className={styles.heroBadgeIcon} />
               <span>FOOD DONOR</span>
             </div>
 
@@ -198,7 +198,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
               <span className={styles.heroTitleRow}>
                 <span className={styles.heroTitleGreen}>Give food,</span>
                 <span className={styles.sparkleWrap}>
-                  <svg className={styles.sparkleSvg} width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <svg className={styles.sparkleSvg} width="22" height="22" viewBox="0 0 24 24" fill="none">
                     <path d="M12 2v5M4.5 4.5l3.5 3.5M2 12h5" stroke="#EA580C" strokeWidth="2.5" strokeLinecap="round" />
                   </svg>
                 </span>
@@ -216,19 +216,19 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
             <div className={styles.impactRow}>
               <div className={styles.impactItem}>
                 <div className={styles.impactIcon}>
-                  <Utensils size={18} />
+                  <Utensils size={15} />
                 </div>
                 <span>Reduce Food Waste</span>
               </div>
               <div className={styles.impactItem}>
                 <div className={styles.impactIcon}>
-                  <Users size={18} />
+                  <Users size={15} />
                 </div>
                 <span>Help Communities</span>
               </div>
               <div className={styles.impactItem}>
                 <div className={styles.impactIcon}>
-                  <Leaf size={18} />
+                  <Leaf size={15} />
                 </div>
                 <span>Build a Greener Future</span>
               </div>
@@ -250,7 +250,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
             
             {/* Top-Right Decorative Floating Leaf */}
             <div className={styles.floatingLeafTopRight}>
-              <svg width="44" height="58" viewBox="0 0 44 58" fill="none">
+              <svg width="40" height="52" viewBox="0 0 44 58" fill="none">
                 <path d="M22 2C12 10 6 24 8 38C10 52 20 57 28 55C36 53 41 41 39 27C37 13 29 4 22 2Z" fill="#3D704D" />
                 <path d="M22 2C22 2 20 30 12 54" stroke="#224831" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
@@ -258,7 +258,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
 
             {/* Bottom-Right Decorative Floating Leaf */}
             <div className={styles.floatingLeafBottomRight}>
-              <svg width="48" height="42" viewBox="0 0 48 42" fill="none">
+              <svg width="42" height="38" viewBox="0 0 48 42" fill="none">
                 <path d="M46 22C38 12 26 4 13 6C0 8 -4 20 4 28C12 36 26 40 38 34C44 30 46 24 46 22Z" fill="#528362" />
                 <path d="M46 22C46 22 18 20 2 34" stroke="#2B543A" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
@@ -280,9 +280,9 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
           <div className={styles.card}>
             {/* Card Logo Header */}
             <div className={styles.cardHeader}>
-              <ShareBiteLogoFull />
+              <ShareBiteLogoFull compact />
               <div className={styles.cardBadge}>
-                <Leaf size={12} />
+                <Leaf size={11} />
                 <span>FOOD DONOR</span>
               </div>
             </div>
@@ -306,7 +306,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
             {/* Error Message */}
             {error && (
               <div className={styles.errorBox}>
-                <AlertCircle size={15} />
+                <AlertCircle size={14} />
                 <span>{error}</span>
               </div>
             )}
@@ -314,7 +314,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
             {/* Success Box */}
             {success ? (
               <div className={styles.successBox}>
-                <CheckCircle2 size={18} />
+                <CheckCircle2 size={16} />
                 <div>
                   <strong>Account Created!</strong>
                   <p>Please check your email and log in to continue.</p>
@@ -335,7 +335,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                     <div className={styles.fieldGroup}>
                       <label className={styles.fieldLabel}>Full Name</label>
                       <div className={styles.inputWrap}>
-                        <User size={16} className={styles.inputIcon} />
+                        <User size={14} className={styles.inputIcon} />
                         <input
                           type="text"
                           placeholder="Enter your full name"
@@ -351,7 +351,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                     <div className={styles.fieldGroup}>
                       <label className={styles.fieldLabel}>Mobile Number</label>
                       <div className={styles.inputWrap}>
-                        <Phone size={16} className={styles.inputIcon} />
+                        <Phone size={14} className={styles.inputIcon} />
                         <input
                           type="tel"
                           placeholder="Enter 10 digit mobile number"
@@ -368,7 +368,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Email Address</label>
                   <div className={styles.inputWrap}>
-                    <Mail size={16} className={styles.inputIcon} />
+                    <Mail size={14} className={styles.inputIcon} />
                     <input
                       type="email"
                       placeholder="Enter your email address"
@@ -385,7 +385,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                   <div className={styles.fieldGroup}>
                     <label className={styles.fieldLabel}>Address</label>
                     <div className={styles.inputWrap}>
-                      <MapPin size={16} className={styles.inputIcon} />
+                      <MapPin size={14} className={styles.inputIcon} />
                       <input
                         type="text"
                         placeholder="Enter your complete address"
@@ -401,7 +401,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Password</label>
                   <div className={styles.inputWrap}>
-                    <Lock size={16} className={styles.inputIcon} />
+                    <Lock size={14} className={styles.inputIcon} />
                     <input
                       type={showPassword ? 'text' : 'password'}
                       placeholder={mode === 'login' ? 'Enter your password' : 'Create a strong password'}
@@ -416,7 +416,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                       onClick={() => setShowPassword(p => !p)}
                       title={showPassword ? 'Hide password' : 'Show password'}
                     >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
                   </div>
                 </div>
@@ -424,11 +424,11 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                 {/* CTA Submit Button */}
                 <button type="submit" disabled={loading} className={styles.ctaBtn}>
                   {loading ? (
-                    <Loader2 size={18} className={styles.spinner} />
+                    <Loader2 size={16} className={styles.spinner} />
                   ) : (
                     <>
                       {mode === 'login' ? 'Log In as Food Donor' : 'Register as Food Donor'}
-                      <ArrowRight size={16} />
+                      <ArrowRight size={14} />
                     </>
                   )}
                 </button>
