@@ -1079,17 +1079,17 @@ drop policy if exists "volunteer_tasks_update_assigned" on public.volunteer_task
 create policy "volunteer_tasks_update_assigned" on public.volunteer_tasks
   for update to authenticated
   using (
-    assigned_volunteer_id = auth.uid()
-    or ngo_id = auth.uid()
-    or exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
+    assigned_volunteer_id = (select auth.uid())
+    or ngo_id = (select auth.uid())
+    or public.get_auth_user_role() = 'admin'
   );
 
 drop policy if exists "volunteer_tasks_insert_ngo" on public.volunteer_tasks;
 create policy "volunteer_tasks_insert_ngo" on public.volunteer_tasks
   for insert to authenticated
   with check (
-    ngo_id = auth.uid()
-    or exists (select 1 from public.profiles where id = auth.uid() and role in ('ngo', 'admin'))
+    ngo_id = (select auth.uid())
+    or public.get_auth_user_role() in ('ngo', 'admin')
   );
 
 -- ── Food Moderation ───────────────────────────────────────────────────────────
@@ -1103,9 +1103,8 @@ create policy "moderation_user_insert" on public.food_moderation
 
 drop policy if exists "moderation_admin_all" on public.food_moderation;
 create policy "moderation_admin_all" on public.food_moderation
-  for all using (
-    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
-  );
+  for all to authenticated
+  using (public.get_auth_user_role() = 'admin');
 
 -- =========================================================
 -- STORAGE BUCKETS

@@ -104,12 +104,9 @@ create policy "moderation_user_insert" on public.food_moderation
 
 -- Admins can read and update all records
 create policy "moderation_admin_all" on public.food_moderation
-  for all using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  for all
+  to authenticated
+  using (public.get_auth_user_role() = 'admin');
 
 -- ── View: pending moderation queue (for admin) ────────────────────────────────
 

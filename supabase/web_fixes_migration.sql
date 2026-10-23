@@ -43,15 +43,14 @@ create policy "avatars_authenticated_update" on storage.objects
 
 -- 3. ADMIN PROFILE MANAGEMENT POLICY
 -- Allows admins to update verification status on user profiles
+-- IMPORTANT: Uses get_auth_user_role() SECURITY DEFINER function to avoid
+-- infinite recursion (a subquery on public.profiles inside a policy ON
+-- public.profiles causes PostgreSQL infinite recursion).
 drop policy if exists "admin_manage_profiles" on public.profiles;
 create policy "admin_manage_profiles" on public.profiles
   for all to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using  (public.get_auth_user_role() = 'admin')
+  with check (public.get_auth_user_role() = 'admin');
 
 -- 4. REALTIME PUBLICATION SETUP
 -- Ensure notifications and listings broadcast changes to connected clients
