@@ -1,13 +1,13 @@
 /* ============================================================
-   SHAREBITE — FOOD DONOR REGISTER PAGE
-   Spacious, Grand, Premium UI with Natural Smooth Scrolling
+   SHAREBITE — FOOD DONOR REGISTER & LOGIN PAGE
+   Perfect viewport fit on all laptop & desktop screens (No Cutout)
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Kalam:wght@400;700&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600&family=DM+Sans:wght@400;500;600;700;800&display=swap');
 
 /* ─── CSS CUSTOM PROPERTIES ─── */
 :root {
-  --nav-height: 64px;
+  --nav-height: 60px;
   --page-bg: #FAF7F2;
   --color-orange: #EA580C;
   --color-orange-hover: #D94E06;
@@ -34,8 +34,8 @@
   position: absolute;
   top: 0;
   left: 0;
-  width: 140px;
-  max-width: 11vw;
+  width: 130px;
+  max-width: 10vw;
   pointer-events: none;
   z-index: 1;
   opacity: 0.85;
@@ -45,8 +45,8 @@
   position: absolute;
   bottom: 0;
   left: 0;
-  width: 155px;
-  max-width: 12vw;
+  width: 145px;
+  max-width: 11vw;
   pointer-events: none;
   z-index: 1;
   opacity: 0.8;
@@ -56,8 +56,8 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 145px;
-  max-width: 11vw;
+  width: 135px;
+  max-width: 10vw;
   pointer-events: none;
   z-index: 1;
   opacity: 0.85;
@@ -77,14 +77,14 @@
 }
 
 .navInner {
-  max-width: 1500px;
+  max-width: 1480px;
   margin: 0 auto;
-  padding: 0 40px;
+  padding: 0 36px;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
 }
 
 .navLogo {
@@ -96,12 +96,12 @@
 .logoFull {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .logoIcon {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   background: var(--color-orange);
   border-radius: 9px;
   display: flex;
@@ -112,8 +112,8 @@
 }
 
 .logoIconCompact {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   background: var(--color-orange);
   border-radius: 8px;
   display: flex;
@@ -128,14 +128,14 @@
 }
 
 .logoName {
-  font-size: 1.35rem;
+  font-size: 1.3rem;
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.3px;
 }
 
 .logoNameCompact {
-  font-size: 1.18rem;
+  font-size: 1.15rem;
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.3px;
@@ -150,14 +150,14 @@
 }
 
 .logoTagline {
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   font-weight: 500;
   color: #6B7280;
   margin-top: 1px;
 }
 
 .logoTaglineCompact {
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 500;
   color: #6B7280;
 }
@@ -166,11 +166,11 @@
 .navLinks {
   display: flex;
   align-items: center;
-  gap: 30px;
+  gap: 26px;
 }
 
 .navLink {
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: #4B5563;
   text-decoration: none;
@@ -190,7 +190,7 @@
 .navLinkActive::after {
   content: '';
   position: absolute;
-  bottom: -4px;
+  bottom: -3px;
   left: 0;
   width: 100%;
   height: 2px;
@@ -202,26 +202,26 @@
 .navRight {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .navSearch {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   background: #FFFFFF;
   border: 1px solid #E5E7EB;
   border-radius: 999px;
-  padding: 0 16px;
-  height: 36px;
-  width: 240px;
+  padding: 0 14px;
+  height: 34px;
+  width: 230px;
   transition: all 0.2s ease;
 }
 
 .navSearch:focus-within {
   border-color: var(--color-orange);
-  box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.08);
-  width: 260px;
+  box-shadow: 0 0 0 2.5px rgba(234, 88, 12, 0.08);
+  width: 250px;
 }
 
 .navSearchIcon {
@@ -234,20 +234,20 @@
   background: transparent;
   outline: none;
   font-family: inherit;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: #1F2937;
   width: 100%;
 }
 
 .navSearchInput::placeholder {
   color: #9CA3AF;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
 .navBellBtn {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: transparent;
   border: none;
@@ -270,7 +270,7 @@
   right: 3px;
   background: #EA580C;
   color: #FFFFFF;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 800;
   width: 15px;
   height: 15px;
@@ -284,14 +284,14 @@
 .navGetStartedBtn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background: var(--color-orange);
   color: #FFFFFF;
   text-decoration: none;
-  padding: 0 18px;
-  height: 36px;
+  padding: 0 16px;
+  height: 34px;
   border-radius: 999px;
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   font-weight: 700;
   box-shadow: 0 2px 8px rgba(234, 88, 12, 0.22);
   transition: all 0.2s ease;
@@ -309,11 +309,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  max-width: 1480px;
+  max-width: 1460px;
   margin: 0 auto;
   width: 100%;
-  padding: 24px 44px 36px 44px;
-  gap: 32px;
+  padding: 14px 36px 18px 36px;
+  gap: 24px;
   position: relative;
   z-index: 5;
 }
@@ -326,12 +326,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 28px;
+  gap: 24px;
   min-width: 0;
 }
 
 .heroContent {
-  max-width: 370px;
+  max-width: 350px;
   flex-shrink: 0;
   position: relative;
   z-index: 2;
@@ -341,16 +341,16 @@
 .heroBadge {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   background: var(--color-green-light);
   color: var(--color-green-mid);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 800;
   letter-spacing: 0.8px;
   text-transform: uppercase;
-  padding: 6px 14px;
+  padding: 5px 12px;
   border-radius: 999px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .heroBadgeIcon {
@@ -360,17 +360,17 @@
 /* Headline */
 .heroTitle {
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: clamp(2.6rem, 3.6vw, 3.4rem);
+  font-size: clamp(2.3rem, 3.2vw, 3rem);
   font-weight: 800;
   line-height: 1.05;
-  margin: 0 0 14px 0;
-  letter-spacing: -1px;
+  margin: 0 0 12px 0;
+  letter-spacing: -0.9px;
 }
 
 .heroTitleRow {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   position: relative;
 }
 
@@ -386,7 +386,7 @@
 .sparkleWrap {
   display: inline-flex;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
 
 .sparkleSvg {
@@ -400,36 +400,36 @@
 
 /* Description Paragraph */
 .heroPara {
-  font-size: 0.94rem;
+  font-size: 0.9rem;
   color: #4B5563;
-  line-height: 1.6;
-  margin-bottom: 22px;
-  max-width: 330px;
+  line-height: 1.55;
+  margin-bottom: 16px;
+  max-width: 310px;
 }
 
 /* 3 Impact Badges */
 .impactRow {
   display: flex;
   align-items: flex-start;
-  gap: 18px;
-  margin-bottom: 22px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .impactItem {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  font-size: 0.72rem;
+  gap: 5px;
+  font-size: 0.7rem;
   font-weight: 700;
   color: var(--color-green-dark);
   text-align: center;
-  max-width: 78px;
+  max-width: 76px;
 }
 
 .impactIcon {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   background: var(--color-green-light);
   border-radius: 50%;
   display: flex;
@@ -444,12 +444,12 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .handwrittenLine {
   font-family: 'Caveat', 'Kalam', cursive;
-  font-size: 1.55rem;
+  font-size: 1.45rem;
   font-weight: 700;
   color: var(--color-orange);
   line-height: 1.15;
@@ -468,8 +468,8 @@
 ───────────────────────────────────── */
 .chefPhotoWrapper {
   position: relative;
-  width: clamp(300px, 26vw, 360px);
-  height: clamp(300px, 26vw, 360px);
+  width: clamp(280px, 24vw, 340px);
+  height: clamp(280px, 24vw, 340px);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -478,7 +478,7 @@
 
 .chefPhotoAura {
   position: absolute;
-  inset: -12px;
+  inset: -10px;
   border-radius: 50%;
   background: radial-gradient(circle, #F5ECE0 0%, #FAF7F2 70%);
   z-index: 1;
@@ -486,12 +486,12 @@
 
 .chefPhotoCircle {
   position: relative;
-  width: clamp(280px, 24vw, 330px);
-  height: clamp(280px, 24vw, 330px);
+  width: clamp(260px, 22vw, 310px);
+  height: clamp(260px, 22vw, 310px);
   border-radius: 50%;
   overflow: hidden;
   border: 4px solid #FFFFFF;
-  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.10), 0 2px 10px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.10), 0 2px 10px rgba(0, 0, 0, 0.04);
   z-index: 2;
 }
 
@@ -506,7 +506,7 @@
 /* Floating leaves around photo */
 .floatingLeafTopRight {
   position: absolute;
-  top: 12px;
+  top: 10px;
   right: -5px;
   z-index: 3;
   filter: drop-shadow(2px 3px 5px rgba(0, 0, 0, 0.10));
@@ -514,27 +514,27 @@
 
 .floatingLeafBottomRight {
   position: absolute;
-  bottom: 24px;
-  right: -12px;
+  bottom: 20px;
+  right: -10px;
   z-index: 3;
   filter: drop-shadow(2px 3px 5px rgba(0, 0, 0, 0.08));
 }
 
 /* ─────────────────────────────────────
-   RIGHT FLOATING CARD (Spacious & Comfortable)
+   RIGHT FLOATING CARD (Comfortable & Fitted)
 ───────────────────────────────────── */
 .cardContainer {
-  width: 430px;
+  width: 410px;
   flex-shrink: 0;
   z-index: 10;
 }
 
 .card {
   background: #FFFFFF;
-  border-radius: 24px;
+  border-radius: 22px;
   border: 1px solid rgba(0, 0, 0, 0.04);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.06), 0 2px 10px rgba(0, 0, 0, 0.02);
-  padding: 24px 30px 20px 30px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.06), 0 2px 10px rgba(0, 0, 0, 0.02);
+  padding: 18px 26px 16px 26px;
   display: flex;
   flex-direction: column;
 }
@@ -544,32 +544,32 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .cardBadge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: var(--color-green-light);
   color: var(--color-green-mid);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 800;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  padding: 4px 10px;
+  padding: 3px 9px;
   border-radius: 999px;
 }
 
 /* Card Title & Subtitle */
 .cardTitle {
   font-family: 'Playfair Display', Georgia, serif;
-  font-size: 1.52rem;
+  font-size: 1.4rem;
   font-weight: 800;
   line-height: 1.15;
   color: var(--color-green-dark);
-  letter-spacing: -0.4px;
-  margin: 0 0 3px 0;
+  letter-spacing: -0.3px;
+  margin: 0 0 2px 0;
 }
 
 .cardTitleHighlight {
@@ -577,67 +577,67 @@
 }
 
 .cardSubtitle {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: #6B7280;
-  margin: 0 0 12px 0;
-  line-height: 1.35;
+  margin: 0 0 10px 0;
+  line-height: 1.3;
 }
 
 /* Alerts */
 .errorBox {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 7px;
+  padding: 7px 11px;
   background: #FEF2F2;
   border: 1px solid #FECACA;
-  border-radius: 8px;
+  border-radius: 7px;
   color: #B91C1C;
-  font-size: 0.78rem;
-  margin-bottom: 8px;
+  font-size: 0.74rem;
+  margin-bottom: 7px;
 }
 
 .successBox {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 12px;
+  gap: 9px;
+  padding: 11px;
   background: #F0FDF4;
   border: 1px solid #BBF7D0;
-  border-radius: 10px;
+  border-radius: 9px;
   color: #15803D;
-  font-size: 0.82rem;
-  margin-bottom: 10px;
+  font-size: 0.78rem;
+  margin-bottom: 8px;
 }
 
 .proceedBtn {
   display: inline-block;
-  margin-top: 6px;
-  padding: 5px 12px;
+  margin-top: 5px;
+  padding: 4px 11px;
   background: #16A34A;
   color: #FFFFFF;
-  border-radius: 6px;
-  font-size: 0.76rem;
+  border-radius: 5px;
+  font-size: 0.74rem;
   font-weight: 700;
   border: none;
   cursor: pointer;
 }
 
-/* Form (Comfortable Field Heights) */
+/* Form (Compact & Cleanly Spaced) */
 .form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .fieldGroup {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1.5px;
 }
 
 .fieldLabel {
-  font-size: 0.74rem;
+  font-size: 0.71rem;
   font-weight: 700;
   color: #374151;
   letter-spacing: 0.1px;
@@ -648,21 +648,21 @@
   align-items: center;
   background: #FFFFFF;
   border: 1.5px solid #E5E7EB;
-  border-radius: 9px;
-  padding: 0 12px;
-  height: 38px;
+  border-radius: 8px;
+  padding: 0 11px;
+  height: 35px;
   transition: border-color 0.2s, box-shadow 0.2s;
   position: relative;
 }
 
 .inputWrap:focus-within {
   border-color: var(--color-orange);
-  box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.10);
+  box-shadow: 0 0 0 2.5px rgba(234, 88, 12, 0.10);
 }
 
 .inputIcon {
   color: #9CA3AF;
-  margin-right: 8px;
+  margin-right: 7px;
   flex-shrink: 0;
 }
 
@@ -671,14 +671,14 @@
   border: none;
   background: transparent;
   font-family: inherit;
-  font-size: 0.84rem;
+  font-size: 0.81rem;
   color: #111827;
   outline: none;
 }
 
 .input::placeholder {
   color: #9CA3AF;
-  font-size: 0.8rem;
+  font-size: 0.77rem;
 }
 
 .eyeBtn {
@@ -686,7 +686,7 @@
   border: none;
   color: #9CA3AF;
   cursor: pointer;
-  padding: 3px;
+  padding: 2px;
   display: flex;
   align-items: center;
   border-radius: 4px;
@@ -699,22 +699,22 @@
 /* CTA Submit Button */
 .ctaBtn {
   width: 100%;
-  height: 42px;
+  height: 39px;
   background: var(--color-orange);
   border: none;
-  border-radius: 10px;
+  border-radius: 9px;
   color: #FFFFFF;
   font-family: inherit;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.26);
+  box-shadow: 0 3px 12px rgba(234, 88, 12, 0.25);
   transition: all 0.2s ease;
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
 .ctaBtn:hover:not(:disabled) {
@@ -740,8 +740,8 @@
 .dividerRow {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 6px 0 4px 0;
+  gap: 11px;
+  margin: 5px 0 3px 0;
 }
 
 .dividerLine {
@@ -751,7 +751,7 @@
 }
 
 .dividerText {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: #9CA3AF;
   font-weight: 500;
   white-space: nowrap;
@@ -760,16 +760,16 @@
 /* Google OAuth Button */
 .googleBtn {
   width: 100%;
-  height: 38px;
+  height: 35px;
   background: #FFFFFF;
   border: 1.5px solid #E5E7EB;
-  border-radius: 10px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 9px;
   font-family: inherit;
-  font-size: 0.84rem;
+  font-size: 0.81rem;
   font-weight: 600;
   color: #374151;
   cursor: pointer;
@@ -784,9 +784,9 @@
 /* Footer Switch */
 .cardFooter {
   text-align: center;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   color: #6B7280;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .cardFooterLink {
@@ -807,25 +807,131 @@
 }
 
 /* ─────────────────────────────────────
-   RESPONSIVE ADAPTATIONS
+   SMART LAPTOP SCREEN HEIGHT ADAPTATION (Prevents any cutout on 1366x768 & 1080p scaled screens)
 ───────────────────────────────────── */
-@media (max-width: 1240px) {
-  .chefPhotoWrapper {
-    width: 290px;
-    height: 290px;
+@media (max-height: 820px) {
+  :root {
+    --nav-height: 52px;
   }
-  .chefPhotoCircle {
-    width: 270px;
-    height: 270px;
+  .main {
+    padding: 8px 32px 12px 32px;
+    gap: 16px;
   }
   .cardContainer {
     width: 390px;
   }
   .card {
-    padding: 18px 24px 16px 24px;
+    padding: 13px 20px 11px 20px;
+    border-radius: 18px;
+  }
+  .cardHeader {
+    margin-bottom: 5px;
+  }
+  .cardTitle {
+    font-size: 1.25rem;
+    margin-bottom: 1px;
+  }
+  .cardSubtitle {
+    font-size: 0.72rem;
+    margin-bottom: 6px;
+  }
+  .form {
+    gap: 4px;
+  }
+  .fieldGroup {
+    gap: 1px;
+  }
+  .fieldLabel {
+    font-size: 0.67rem;
+  }
+  .inputWrap {
+    height: 31px;
+    padding: 0 9px;
+    border-radius: 7px;
+  }
+  .input {
+    font-size: 0.76rem;
+  }
+  .ctaBtn {
+    height: 34px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+    margin-top: 2px;
+  }
+  .dividerRow {
+    margin: 4px 0 2px 0;
+  }
+  .dividerText {
+    font-size: 0.66rem;
+  }
+  .googleBtn {
+    height: 31px;
+    font-size: 0.76rem;
+    border-radius: 8px;
+  }
+  .cardFooter {
+    margin-top: 4px;
+    font-size: 0.7rem;
+  }
+  /* Hero adaptations */
+  .heroBadge {
+    margin-bottom: 8px;
+    padding: 3px 10px;
+    font-size: 0.66rem;
   }
   .heroTitle {
-    font-size: 2.5rem;
+    font-size: 2.1rem;
+    margin-bottom: 6px;
+  }
+  .heroPara {
+    font-size: 0.8rem;
+    line-height: 1.4;
+    margin-bottom: 10px;
+  }
+  .impactRow {
+    margin-bottom: 10px;
+    gap: 10px;
+  }
+  .impactIcon {
+    width: 32px;
+    height: 32px;
+  }
+  .impactItem {
+    font-size: 0.62rem;
+  }
+  .handwrittenLine {
+    font-size: 1.25rem;
+  }
+  .chefPhotoWrapper {
+    width: 250px;
+    height: 250px;
+  }
+  .chefPhotoCircle {
+    width: 230px;
+    height: 230px;
+  }
+}
+
+/* ─────────────────────────────────────
+   RESPONSIVE WIDTH ADAPTATIONS
+───────────────────────────────────── */
+@media (max-width: 1200px) {
+  .chefPhotoWrapper {
+    width: 260px;
+    height: 260px;
+  }
+  .chefPhotoCircle {
+    width: 240px;
+    height: 240px;
+  }
+  .cardContainer {
+    width: 370px;
+  }
+  .card {
+    padding: 15px 20px 14px 20px;
+  }
+  .heroTitle {
+    font-size: 2.3rem;
   }
 }
 
@@ -854,11 +960,11 @@
     justify-content: center;
   }
   .chefPhotoWrapper {
-    margin: 16px auto 20px auto;
+    margin: 14px auto 18px auto;
   }
   .cardContainer {
     width: 100%;
-    max-width: 460px;
+    max-width: 440px;
   }
   .navSearch,
   .navBellBtn {
@@ -871,13 +977,13 @@
     display: none;
   }
   .heroTitle {
-    font-size: 2.2rem;
+    font-size: 2.1rem;
   }
   .navInner {
-    padding: 0 18px;
+    padding: 0 16px;
   }
   .card {
-    padding: 20px 20px 16px 20px;
-    border-radius: 20px;
+    padding: 18px 18px 14px 18px;
+    border-radius: 18px;
   }
 }
