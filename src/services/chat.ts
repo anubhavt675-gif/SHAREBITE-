@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { isValidUUID, toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
 import type { Conversation, ChatMessage, User } from '../types';
 
 function mapProfileToUser(p: any): User {
@@ -32,12 +33,16 @@ export class ChatService {
     }
   ): Promise<Conversation> {
     const type = options?.type || 'direct';
+    const safeCurrentUserId = toSafeUUID(currentUserId, DEMO_RECORD_UUIDS.donor);
+    const safeRecipientUserId = toSafeUUID(recipientUserId, DEMO_RECORD_UUIDS.ngo);
+    const relatedListingId = isValidUUID(options?.relatedListingId) ? options.relatedListingId : null;
+    const relatedTaskId = isValidUUID(options?.relatedTaskId) ? options.relatedTaskId : null;
 
     // 1. Check if a conversation with these participants already exists
     const { data: userConvs } = await supabase
       .from('conversation_participants')
       .select('conversation_id')
-      .eq('user_id', currentUserId);
+      .eq('user_id', safeCurrentUserId);
 
     if (userConvs && userConvs.length > 0) {
       const convIds = userConvs.map((c) => c.conversation_id);
@@ -45,7 +50,7 @@ export class ChatService {
       const { data: sharedConvs } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
-        .eq('user_id', recipientUserId)
+        .eq('user_id', safeRecipientUserId)
         .in('conversation_id', convIds);
 
       if (sharedConvs && sharedConvs.length > 0) {
@@ -58,13 +63,13 @@ export class ChatService {
             .single();
 
           if (conv) {
-            if (options?.relatedListingId && conv.related_listing_id === options.relatedListingId) {
+            if (relatedListingId && conv.related_listing_id === relatedListingId) {
               return this.enrichConversation(conv);
             }
-            if (options?.relatedTaskId && conv.related_task_id === options.relatedTaskId) {
+            if (relatedTaskId && conv.related_task_id === relatedTaskId) {
               return this.enrichConversation(conv);
             }
-            if (!options?.relatedListingId && !options?.relatedTaskId && conv.type === 'direct') {
+            if (!relatedListingId && !relatedTaskId && conv.type === 'direct') {
               return this.enrichConversation(conv);
             }
           }
@@ -77,8 +82,8 @@ export class ChatService {
       .from('conversations')
       .insert({
         type,
-        related_listing_id: options?.relatedListingId || null,
-        related_task_id: options?.relatedTaskId || null,
+        related_listing_id: relatedListingId,
+        related_task_id: relatedTaskId,
         title: options?.title || null,
       })
       .select()
@@ -90,8 +95,8 @@ export class ChatService {
 
     // 3. Add participants
     await supabase.from('conversation_participants').insert([
-      { conversation_id: newConv.id, user_id: currentUserId },
-      { conversation_id: newConv.id, user_id: recipientUserId },
+      { conversation_id: newConv.id, user_id: safeCurrentUserId },
+      { conversation_id: newConv.id, user_id: safeRecipientUserId },
     ]);
 
     return this.enrichConversation(newConv);
@@ -154,16 +159,18 @@ export class ChatService {
    * Fetch all conversations for a user
    */
   static async getUserConversations(userId: string): Promise<Conversation[]> {
+    const safeUserId = toSafeUUID(userId, DEMO_RECORD_UUIDS.donor);
     const { data: participantRows, error } = await supabase
       .from('conversation_participants')
       .select('conversation_id')
-      .eq('user_id', userId);
+      .eq('user_id', safeUserId);
 
     if (error || !participantRows || participantRows.length === 0) {
       return [];
     }
 
-    const convIds = participantRows.map((r) => r.conversation_id);
+    const convIds = participantRows.map((r) => r.conversation_id).filter(isValidUUID);
+    if (convIds.length === 0) return [];
 
     const { data: convs, error: convsErr } = await supabase
       .from('conversations')
@@ -184,6 +191,8 @@ export class ChatService {
    * Get all messages in a conversation
    */
   static async getMessages(conversationId: string): Promise<ChatMessage[]> {
+    if (!isValidUUID(conversationId)) return [];
+
     const { data, error } = await supabase
       .from('messages')
       .select('*, sender:sender_id(id, full_name, avatar_url, role)')
@@ -215,11 +224,16 @@ export class ChatService {
     messageType?: 'text' | 'image' | 'location' | 'system';
     metadata?: Record<string, any>;
   }): Promise<ChatMessage> {
+    if (!isValidUUID(params.conversationId)) {
+      throw new Error('Invalid conversation ID');
+    }
+    const safeSenderId = toSafeUUID(params.senderId, DEMO_RECORD_UUIDS.donor);
+
     const { data, error } = await supabase
       .from('messages')
       .insert({
         conversation_id: params.conversationId,
-        sender_id: params.senderId,
+        sender_id: safeSenderId,
         content: params.content,
         message_type: params.messageType || 'text',
         metadata: params.metadata || {},

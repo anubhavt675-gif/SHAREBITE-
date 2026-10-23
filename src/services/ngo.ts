@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { LocationService } from './location';
+import { toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
 import type { NearbyNGO } from '../types';
 
 export class NGOService {
@@ -85,11 +86,12 @@ export class NGOService {
    * Get an NGO profile with statistics
    */
   static async getNGOProfile(ngoId: string) {
+    const safeNgoId = toSafeUUID(ngoId, DEMO_RECORD_UUIDS.ngo);
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', ngoId)
-      .single();
+      .eq('id', safeNgoId)
+      .maybeSingle();
 
     if (error || !profile) return null;
 
@@ -97,7 +99,7 @@ export class NGOService {
     const { count: claimsCount } = await supabase
       .from('ngo_claims')
       .select('*', { count: 'exact', head: true })
-      .eq('ngo_id', ngoId);
+      .eq('ngo_id', safeNgoId);
 
     return {
       ...profile,

@@ -1,5 +1,6 @@
 // ShareBite — Auth Service (Web)
 import { supabase } from '../lib/supabase';
+import { isValidUUID, DEMO_RECORD_UUIDS, LEGACY_DEMO_ID_MAP } from '../lib/uuid';
 import type { User, UserRole } from '../types';
 
 const MOCK_STORAGE_KEY = 'sharebite_mock_session_user';
@@ -7,7 +8,7 @@ const OAUTH_ROLE_KEY = 'sharebite_oauth_role';
 
 export const DEMO_USERS: Record<string, User> = {
   donor: {
-    id: 'demo-donor-001',
+    id: DEMO_RECORD_UUIDS.donor,
     name: 'Anubhav',
     email: 'anubhav@sharebite.org',
     phone: '+91 98101 23456',
@@ -30,7 +31,7 @@ export const DEMO_USERS: Record<string, User> = {
     updatedAt: '2024-01-15T10:00:00.000Z',
   },
   ngo: {
-    id: 'demo-ngo-002',
+    id: DEMO_RECORD_UUIDS.ngo,
     name: 'Robin Hood Army Delhi',
     email: 'ngo@sharebite.org',
     phone: '+91 98202 34567',
@@ -54,7 +55,7 @@ export const DEMO_USERS: Record<string, User> = {
     updatedAt: '2024-01-10T10:00:00.000Z',
   },
   rider: {
-    id: 'demo-rider-003',
+    id: DEMO_RECORD_UUIDS.rider,
     name: 'Kabir Sharma',
     email: 'rider@sharebite.org',
     phone: '+91 98505 67890',
@@ -77,7 +78,7 @@ export const DEMO_USERS: Record<string, User> = {
     updatedAt: '2024-02-15T10:00:00.000Z',
   },
   volunteer: {
-    id: 'demo-volunteer-004',
+    id: DEMO_RECORD_UUIDS.volunteer,
     name: 'Priya Patel',
     email: 'volunteer@sharebite.org',
     phone: '+91 98303 45678',
@@ -100,7 +101,7 @@ export const DEMO_USERS: Record<string, User> = {
     updatedAt: '2024-02-01T10:00:00.000Z',
   },
   admin: {
-    id: 'demo-admin-005',
+    id: DEMO_RECORD_UUIDS.admin,
     name: 'ShareBite Admin',
     email: 'admin@sharebite.org',
     phone: '+91 98404 56789',
@@ -162,7 +163,21 @@ function mapProfileToUser(profile: any): User {
 function getStoredMockUser(): User | null {
   try {
     const raw = localStorage.getItem(MOCK_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.id) return null;
+
+    // Discard or sanitize non-UUID IDs (e.g. legacy 'demo-donor-001')
+    if (!isValidUUID(parsed.id)) {
+      if (LEGACY_DEMO_ID_MAP[parsed.id]) {
+        parsed.id = LEGACY_DEMO_ID_MAP[parsed.id];
+        localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(parsed));
+        return parsed;
+      }
+      localStorage.removeItem(MOCK_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -171,6 +186,9 @@ function getStoredMockUser(): User | null {
 function setStoredMockUser(user: User | null) {
   try {
     if (user) {
+      if (!isValidUUID(user.id) && LEGACY_DEMO_ID_MAP[user.id]) {
+        user = { ...user, id: LEGACY_DEMO_ID_MAP[user.id] };
+      }
       localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(user));
     } else {
       localStorage.removeItem(MOCK_STORAGE_KEY);
@@ -191,44 +209,49 @@ export const AuthService = {
   },
 
   async getCurrentUser(): Promise<User | null> {
-    // 1. Check local mock session
+    // 1. Check active Supabase session FIRST
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        // Clear lingering mock storage when real auth session exists
+        if (localStorage.getItem(MOCK_STORAGE_KEY)) {
+          localStorage.removeItem(MOCK_STORAGE_KEY);
+        }
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (!profile) {
+          const meta = session.user.user_metadata || {};
+          return {
+            id: session.user.id,
+            name: meta.full_name || meta.name || 'User',
+            email: session.user.email || '',
+            phone: meta.phone || '',
+            role: (meta.role as UserRole) || 'donor',
+            isVerified: false,
+            verificationStatus: 'pending',
+            totalDonations: 0,
+            totalRescues: 0,
+            createdAt: session.user.created_at,
+            updatedAt: session.user.created_at,
+          };
+        }
+
+        return mapProfileToUser(profile);
+      }
+    } catch {
+      // Fall through to mock session if session check fails
+    }
+
+    // 2. Check local mock session (guaranteed valid UUID)
     const mock = getStoredMockUser();
     if (mock) return mock;
 
-    // 2. Check Supabase session
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        return null;
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .maybeSingle();
-
-      if (!profile) {
-        const meta = session.user.user_metadata || {};
-        return {
-          id: session.user.id,
-          name: meta.full_name || meta.name || 'User',
-          email: session.user.email || '',
-          phone: meta.phone || '',
-          role: (meta.role as UserRole) || 'donor',
-          isVerified: false,
-          verificationStatus: 'pending',
-          totalDonations: 0,
-          totalRescues: 0,
-          createdAt: session.user.created_at,
-          updatedAt: session.user.created_at,
-        };
-      }
-
-      return mapProfileToUser(profile);
-    } catch {
-      return null;
-    }
+    return null;
   },
 
   async resetPasswordForEmail(email: string): Promise<void> {

@@ -1,13 +1,15 @@
 // ShareBite — Notifications Service (Web)
 import { supabase } from '../lib/supabase';
+import { toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
 import type { AppNotification, NotificationType } from '../types';
 
 export const NotificationsService = {
   async getNotifications(userId: string): Promise<AppNotification[]> {
+    const safeUserId = toSafeUUID(userId, DEMO_RECORD_UUIDS.donor);
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
-      .eq('user_id', userId)
+      .eq('user_id', safeUserId)
       .order('created_at', { ascending: false });
 
     if (error || !data) return [];
@@ -23,10 +25,11 @@ export const NotificationsService = {
   },
 
   async getUnreadCount(userId: string): Promise<number> {
+    const safeUserId = toSafeUUID(userId, DEMO_RECORD_UUIDS.donor);
     const { count } = await supabase
       .from('notifications')
       .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
+      .eq('user_id', safeUserId)
       .eq('is_read', false);
     return count || 0;
   },
@@ -36,18 +39,20 @@ export const NotificationsService = {
   },
 
   async markAllAsRead(userId: string): Promise<void> {
-    await supabase.from('notifications').update({ is_read: true }).eq('user_id', userId).eq('is_read', false);
+    const safeUserId = toSafeUUID(userId, DEMO_RECORD_UUIDS.donor);
+    await supabase.from('notifications').update({ is_read: true }).eq('user_id', safeUserId).eq('is_read', false);
   },
 
   subscribeToNotifications(userId: string, onNotification: (n: AppNotification) => void) {
-    const channelName = `notifs_${userId}_${Date.now()}`;
+    const safeUserId = toSafeUUID(userId, DEMO_RECORD_UUIDS.donor);
+    const channelName = `notifs_${safeUserId}_${Date.now()}`;
     const channel = supabase
       .channel(channelName)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'notifications',
-        filter: `user_id=eq.${userId}`,
+        filter: `user_id=eq.${safeUserId}`,
       }, (payload) => {
         const item = payload.new as any;
         onNotification({

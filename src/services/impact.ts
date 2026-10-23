@@ -1,5 +1,6 @@
 // ShareBite — Impact Service (Web)
 import { supabase } from '../lib/supabase';
+import { toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
 import type { ImpactStats, CommunityImpact } from '../types';
 
 let communityImpactCache: { data: CommunityImpact; timestamp: number } | null = null;
@@ -7,11 +8,13 @@ const CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes cache
 
 export const ImpactService = {
   async getUserImpact(userId: string, role: string): Promise<ImpactStats> {
+    const safeUserId = toSafeUUID(userId, role === 'ngo' ? DEMO_RECORD_UUIDS.ngo : DEMO_RECORD_UUIDS.donor);
+
     try {
       const { data: viewData } = await supabase
         .from('user_impact')
         .select('*')
-        .eq('user_id', userId)
+        .eq('user_id', safeUserId)
         .maybeSingle();
 
       if (viewData) {
@@ -37,7 +40,7 @@ export const ImpactService = {
         const { data } = await supabase
           .from('reservations')
           .select('servings')
-          .eq('user_id', userId)
+          .eq('user_id', safeUserId)
           .eq('status', 'completed');
 
         const mealsSaved = data ? data.reduce((acc, r) => acc + r.servings, 0) : 0;
@@ -53,8 +56,8 @@ export const ImpactService = {
         };
       } else {
         const [impactResult, countResult] = await Promise.all([
-          supabase.from('impact_events').select('servings').eq('user_id', userId).eq('event_type', 'food_donated'),
-          supabase.from('food_listings').select('*', { count: 'exact', head: true }).eq('donor_id', userId),
+          supabase.from('impact_events').select('servings').eq('user_id', safeUserId).eq('event_type', 'food_donated'),
+          supabase.from('food_listings').select('*', { count: 'exact', head: true }).eq('donor_id', safeUserId),
         ]);
 
         const mealsSaved = impactResult.data ? impactResult.data.reduce((acc, r) => acc + r.servings, 0) : 0;

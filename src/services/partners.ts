@@ -1,5 +1,6 @@
-﻿// ShareBite — Partners Service (Web)
+// ShareBite — Partners Service (Web)
 import { supabase } from '../lib/supabase';
+import { toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
 import type { Partner } from '../types';
 
 function mapPartner(data: any): Partner {
@@ -40,10 +41,11 @@ export const PartnersService = {
   },
 
   async createPartner(profileId: string, orgData: Partial<Partner>): Promise<Partner | null> {
+    const safeProfileId = toSafeUUID(profileId, DEMO_RECORD_UUIDS.ngo);
     const { data, error } = await supabase
       .from('partners')
       .insert({
-        profile_id: profileId,
+        profile_id: safeProfileId,
         organization_name: orgData.organizationName,
         organization_type: orgData.organizationType || 'other',
         description: orgData.description,
