@@ -5,8 +5,8 @@ import type { User, UserRole } from '../types';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password?: string, expectedRole?: UserRole | 'acceptor') => Promise<void>;
-  loginAsDemo: (role: 'donor' | 'ngo' | 'volunteer' | 'admin') => Promise<void>;
+  login: (email: string, password?: string, expectedRole?: UserRole | 'acceptor') => Promise<User>;
+  loginAsDemo: (role: 'donor' | 'ngo' | 'volunteer' | 'admin') => Promise<User>;
   signup: (data: {
     name: string;
     phone: string;
@@ -70,14 +70,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [refreshUser, setUserIfChanged]);
 
-  const login = useCallback(async (email: string, password?: string, expectedRole?: UserRole | 'acceptor') => {
+  const login = useCallback(async (email: string, password?: string, expectedRole?: UserRole | 'acceptor'): Promise<User> => {
     const loggedInUser = await AuthService.login(email, password, expectedRole);
     setUserIfChanged(loggedInUser);
+    return loggedInUser;
   }, [setUserIfChanged]);
 
-  const loginAsDemo = useCallback(async (role: 'donor' | 'ngo' | 'volunteer' | 'admin') => {
+  const loginAsDemo = useCallback(async (role: 'donor' | 'ngo' | 'volunteer' | 'admin'): Promise<User> => {
     const loggedInUser = AuthService.loginAsDemoRole(role);
     setUserIfChanged(loggedInUser);
+    return loggedInUser;
   }, [setUserIfChanged]);
 
   const signup = useCallback(async (data: {

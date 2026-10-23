@@ -6,6 +6,7 @@ import {
   Search, Bell, Leaf, Utensils, Users,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getRoleDashboardPath } from '../../services/auth';
 import donorChefPhoto from '../../assets/donor_chef_photo.jpg';
 import leafTopLeft from '../../assets/leaf_tl_pure.png';
 import leafBottomLeft from '../../assets/leaf_bl_pure.png';
@@ -86,8 +87,9 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
       }
       setLoading(true);
       try {
-        await login(email.trim(), password, 'donor');
-        navigate('/dashboard', { replace: true });
+        const loggedInUser = await login(email.trim(), password, 'donor');
+        const targetPath = getRoleDashboardPath(loggedInUser.role);
+        navigate(targetPath, { replace: true });
       } catch (err: any) {
         setError(err.message || 'Login failed. Please check your credentials.');
       } finally {
@@ -117,14 +119,14 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
       });
 
       if (res.sessionExists) {
-        navigate('/dashboard', { replace: true });
+        navigate(getRoleDashboardPath(res.user.role), { replace: true });
         return;
       }
 
       // Try automatic login
       try {
-        await login(email.trim(), password, 'donor');
-        navigate('/dashboard', { replace: true });
+        const loggedInUser = await login(email.trim(), password, 'donor');
+        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
         return;
       } catch {
         setSuccess(true);

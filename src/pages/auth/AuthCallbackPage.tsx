@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Loader2, AlertCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getRoleDashboardPath } from '../../services/auth';
 import { supabase } from '../../lib/supabase';
 import leafTopLeft from '../../assets/leaf_top_left.png';
 import authLeavesTopRight from '../../assets/auth_leaves_top_right.png';
@@ -48,10 +49,10 @@ export default function AuthCallbackPage() {
         // 3. Fast check: is user already logged in?
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          await handleOAuthCallback();
+          const u = await handleOAuthCallback();
           await refreshUser();
           if (mounted) {
-            navigate('/dashboard', { replace: true });
+            navigate(getRoleDashboardPath(u?.role), { replace: true });
             return;
           }
         }
@@ -74,9 +75,10 @@ export default function AuthCallbackPage() {
           // Timeout occurred: re-check if session was created in background
           const { data: { session: lateSession } } = await supabase.auth.getSession();
           if (lateSession?.user) {
+            const role = (lateSession.user.user_metadata?.role as any) || 'donor';
             await refreshUser();
             if (mounted) {
-              navigate('/dashboard', { replace: true });
+              navigate(getRoleDashboardPath(role), { replace: true });
               return;
             }
           }
@@ -90,16 +92,17 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        if (mounted) {
+        if (mounted && 'user' in raceResult) {
           await refreshUser();
-          navigate('/dashboard', { replace: true });
+          navigate(getRoleDashboardPath(raceResult.user?.role), { replace: true });
         }
       } catch (err: any) {
         console.error('OAuth callback failed:', err);
         // If already logged in, ignore error and navigate
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          navigate('/dashboard', { replace: true });
+          const role = (session.user.user_metadata?.role as any) || 'donor';
+          navigate(getRoleDashboardPath(role), { replace: true });
           return;
         }
 
@@ -119,7 +122,8 @@ export default function AuthCallbackPage() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user && mounted) {
         await refreshUser();
-        navigate('/dashboard', { replace: true });
+        const role = (session.user.user_metadata?.role as any) || 'donor';
+        navigate(getRoleDashboardPath(role), { replace: true });
       }
     });
 

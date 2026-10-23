@@ -13,6 +13,7 @@ import {
   Sparkles 
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getRoleDashboardPath } from '../../services/auth';
 import authFoodSharingImg from '../../assets/auth_food_sharing.png';
 import leafTopLeft from '../../assets/leaf_top_left.png';
 import leafBottomLeft from '../../assets/leaf_bottom_left.png';
@@ -44,8 +45,8 @@ export default function LoginPage() {
     setError('');
     setDemoLoading(role);
     try {
-      await loginAsDemo(role);
-      navigate('/dashboard');
+      const demoUser = await loginAsDemo(role);
+      navigate(getRoleDashboardPath(demoUser.role));
     } catch (err: any) {
       setError(err.message || 'Demo login failed.');
     } finally {
@@ -62,8 +63,8 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      await login(email, password || 'demo123');
-      navigate('/dashboard');
+      const loggedInUser = await login(email, password || 'demo123');
+      navigate(getRoleDashboardPath(loggedInUser.role));
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {

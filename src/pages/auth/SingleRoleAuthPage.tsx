@@ -20,6 +20,7 @@ import {
   Bike,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getRoleDashboardPath } from '../../services/auth';
 import leafTopLeft from '../../assets/leaf_top_left.png';
 import authLeavesTopRight from '../../assets/auth_leaves_top_right.png';
 import roleDonorIllus from '../../assets/role_donor_illus.png';
@@ -121,8 +122,8 @@ export default function SingleRoleAuthPage({ forcedRole, initialMode }: SingleRo
     if (isLogin) {
       setLoading(true);
       try {
-        await login(email.trim(), password, activeRole === 'community' ? 'volunteer' : activeRole);
-        navigate('/dashboard', { replace: true });
+        const loggedInUser = await login(email.trim(), password, activeRole === 'community' ? 'volunteer' : activeRole);
+        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
       } catch (err: any) {
         const msg = err.message || 'Login failed. Please check your credentials.';
         if (msg.includes('ROLE_MISMATCH:')) {
@@ -200,7 +201,7 @@ export default function SingleRoleAuthPage({ forcedRole, initialMode }: SingleRo
       });
 
       if (res.sessionExists) {
-        navigate('/dashboard', { replace: true });
+        navigate(getRoleDashboardPath(res.user.role), { replace: true });
       } else {
         setSuccessConfirmation(true);
       }

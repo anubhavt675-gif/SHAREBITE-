@@ -33,8 +33,7 @@ export default function Sidebar({ open, onClose }: Props) {
       case 'rider':
       case 'volunteer':
         return [
-          { to: '/dashboard', icon: <Truck size={18} />, label: 'Rider Dashboard' },
-          { to: '/rider-dashboard', icon: <Package size={18} />, label: 'Available Jobs', badge: 'Live' },
+          { to: '/rider-dashboard', icon: <Truck size={18} />, label: 'Rider Dashboard' },
           { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs' },
           { to: '/map', icon: <MapPin size={18} />, label: 'Live Rescue Map' },
           { to: '/chat', icon: <MessageSquare size={18} />, label: 'Messages & Dispatch' },
@@ -48,7 +47,7 @@ export default function Sidebar({ open, onClose }: Props) {
       case 'receiver':
       case 'acceptor':
         return [
-          { to: '/dashboard', icon: <LayoutGrid size={18} />, label: 'NGO Hub' },
+          { to: '/ngo-dashboard', icon: <LayoutGrid size={18} />, label: 'NGO Hub' },
           { to: '/discover', icon: <Search size={18} />, label: 'Claim Surplus Food', highlight: true },
           { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs Across India' },
           { to: '/my-claims', icon: <ClipboardList size={18} />, label: 'Incoming Deliveries', badge: 'Active' },
@@ -63,7 +62,7 @@ export default function Sidebar({ open, onClose }: Props) {
 
       case 'community':
         return [
-          { to: '/dashboard', icon: <Heart size={18} />, label: 'Community Meals' },
+          { to: '/community-dashboard', icon: <Heart size={18} />, label: 'Community Meals' },
           { to: '/discover', icon: <Search size={18} />, label: 'Find Free Food' },
           { to: '/requests', icon: <ClipboardList size={18} />, label: 'My Food Requests' },
           { to: '/map', icon: <MapPin size={18} />, label: 'Distribution Centers' },
@@ -74,7 +73,6 @@ export default function Sidebar({ open, onClose }: Props) {
 
       case 'admin':
         return [
-          { to: '/dashboard', icon: <LayoutGrid size={18} />, label: 'Overview' },
           { to: '/admin', icon: <ShieldAlert size={18} />, label: 'Admin Command Portal' },
           { to: '/donations', icon: <Utensils size={18} />, label: 'All Food Listings' },
           { to: '/rider-dashboard', icon: <Truck size={18} />, label: 'Fleet Operations' },
@@ -88,7 +86,7 @@ export default function Sidebar({ open, onClose }: Props) {
       case 'partner':
       default:
         return [
-          { to: '/dashboard', icon: <LayoutGrid size={18} />, label: 'Donor Dashboard' },
+          { to: '/donor-dashboard', icon: <LayoutGrid size={18} />, label: 'Donor Dashboard' },
           { to: '/donations/new', icon: <Plus size={18} />, label: 'Donate Surplus Food', highlight: true },
           { to: '/donor-donations', icon: <Truck size={18} />, label: 'Track Deliveries & History' },
           { to: '/discover', icon: <Search size={18} />, label: 'Explore Network' },

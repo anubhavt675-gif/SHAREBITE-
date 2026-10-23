@@ -6,6 +6,31 @@ import type { User, UserRole } from '../types';
 const MOCK_STORAGE_KEY = 'sharebite_mock_session_user';
 const OAUTH_ROLE_KEY = 'sharebite_oauth_role';
 
+/**
+ * Maps a user's role to their designated dashboard route.
+ * Never assigns the Rider dashboard or role as a fallback for other roles.
+ */
+export function getRoleDashboardPath(role?: UserRole | string | null): string {
+  if (!role) return '/donor-dashboard';
+  switch (role) {
+    case 'rider':
+    case 'volunteer':
+      return '/rider-dashboard';
+    case 'ngo':
+    case 'receiver':
+    case 'acceptor':
+      return '/ngo-dashboard';
+    case 'community':
+      return '/community-dashboard';
+    case 'admin':
+      return '/admin';
+    case 'donor':
+    case 'partner':
+    default:
+      return '/donor-dashboard';
+  }
+}
+
 export const DEMO_USERS: Record<string, User> = {
   donor: {
     id: DEMO_RECORD_UUIDS.donor,
@@ -282,6 +307,13 @@ export const AuthService = {
       throw new Error('Please enter your password.');
     }
 
+    // Proactively clear any mock storage BEFORE initiating Supabase sign-in
+    // so onAuthStateChange doesn't catch stale mock users
+    setStoredMockUser(null);
+    try {
+      localStorage.removeItem(MOCK_STORAGE_KEY);
+    } catch {}
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email: cleanEmail,
       password,
@@ -295,8 +327,11 @@ export const AuthService = {
       throw new Error('Login failed. Please check your credentials.');
     }
 
-    // Clear any previous demo user
+    // Ensure mock user is purged
     setStoredMockUser(null);
+    try {
+      localStorage.removeItem(MOCK_STORAGE_KEY);
+    } catch {}
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -506,7 +541,7 @@ export const AuthService = {
           updatedAt: new Date().toISOString(),
         };
         setStoredMockUser(mockGoogleUser);
-        window.location.href = '/dashboard';
+        window.location.href = getRoleDashboardPath(effectiveRole);
         return;
       }
       throw new Error(err.message || 'Failed to start Google authentication.');
@@ -663,32 +698,49 @@ export const AuthService = {
     window.addEventListener('sharebite_auth_update', handleCustomEvent);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const currentMock = getStoredMockUser();
-      if (currentMock) {
-        callback(currentMock);
-        return;
-      }
+      // 1. A real Supabase session ALWAYS takes absolute precedence over any local mock data
+      if (session?.user) {
+        // Purge mock storage so it never overrides or pollutes a real authenticated account
+        setStoredMockUser(null);
+        try {
+          localStorage.removeItem(MOCK_STORAGE_KEY);
+        } catch {}
 
-      if (!session?.user) {
-        callback(null);
-        return;
-      }
-      try {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .maybeSingle();
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .maybeSingle();
 
-        if (profile) {
-          callback(mapProfileToUser(profile));
-        } else {
+          if (profile) {
+            callback(mapProfileToUser(profile));
+            return;
+          } else {
+            const meta = session.user.user_metadata || {};
+            callback({
+              id: session.user.id,
+              name: meta.full_name || meta.name || 'User',
+              email: session.user.email || '',
+              phone: meta.phone || '',
+              role: (meta.role as UserRole) || 'donor',
+              isVerified: false,
+              verificationStatus: 'pending',
+              totalDonations: 0,
+              totalRescues: 0,
+              createdAt: session.user.created_at,
+              updatedAt: session.user.created_at,
+            });
+            return;
+          }
+        } catch {
+          const meta = session.user.user_metadata || {};
           callback({
             id: session.user.id,
-            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || 'User',
+            name: meta.full_name || meta.name || 'User',
             email: session.user.email || '',
-            phone: session.user.user_metadata?.phone || '',
-            role: (session.user.user_metadata?.role as UserRole) || 'donor',
+            phone: meta.phone || '',
+            role: (meta.role as UserRole) || 'donor',
             isVerified: false,
             verificationStatus: 'pending',
             totalDonations: 0,
@@ -696,22 +748,18 @@ export const AuthService = {
             createdAt: session.user.created_at,
             updatedAt: session.user.created_at,
           });
+          return;
         }
-      } catch {
-        callback({
-          id: session.user.id,
-          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || 'User',
-          email: session.user.email || '',
-          phone: session.user.user_metadata?.phone || '',
-          role: (session.user.user_metadata?.role as UserRole) || 'donor',
-          isVerified: false,
-          verificationStatus: 'pending',
-          totalDonations: 0,
-          totalRescues: 0,
-          createdAt: session.user.created_at,
-          updatedAt: session.user.created_at,
-        });
       }
+
+      // 2. Only if there is NO real Supabase session, check for mock/demo session
+      const currentMock = getStoredMockUser();
+      if (currentMock) {
+        callback(currentMock);
+        return;
+      }
+
+      callback(null);
     });
 
     return {

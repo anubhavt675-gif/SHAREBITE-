@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { getRoleDashboardPath } from './services/auth';
 import './index.css';
 
 // Public pages (LandingPage eager for instant LCP, secondary public pages lazy)
@@ -64,7 +65,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <AppLoading />;
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) return <Navigate to={getRoleDashboardPath(user.role)} replace />;
   return <>{children}</>;
 }
 

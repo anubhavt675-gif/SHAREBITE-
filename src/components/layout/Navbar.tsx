@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Bell, Menu, ChevronDown, User, LogOut, Settings, Search, MessageSquare } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getRoleDashboardPath } from '../../services/auth';
 import { NotificationsService } from '../../services/notifications';
 import UserAvatar from '../ui/UserAvatar';
 import styles from './Navbar.module.css';
@@ -107,15 +108,14 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
             </>
           ) : user.role === 'rider' || user.role === 'volunteer' ? (
             <>
-              <Link to="/dashboard" className={`${styles.navLink} ${location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}>Rider Home</Link>
-              <Link to="/rider-dashboard" className={`${styles.navLink} ${location.pathname === '/rider-dashboard' ? styles.navLinkActive : ''}`}>Available Jobs</Link>
+              <Link to="/rider-dashboard" className={`${styles.navLink} ${location.pathname === '/rider-dashboard' ? styles.navLinkActive : ''}`}>Rider Home</Link>
               <Link to="/map" className={`${styles.navLink} ${location.pathname === '/map' ? styles.navLinkActive : ''}`}>Live Map</Link>
               <Link to="/chat" className={`${styles.navLink} ${location.pathname === '/chat' ? styles.navLinkActive : ''}`}>Messages</Link>
               <Link to="/impact-dashboard" className={`${styles.navLink} ${location.pathname === '/impact-dashboard' ? styles.navLinkActive : ''}`}>Fleet Stats</Link>
             </>
           ) : user.role === 'ngo' || user.role === 'receiver' || user.role === 'acceptor' ? (
             <>
-              <Link to="/dashboard" className={`${styles.navLink} ${location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}>NGO Hub</Link>
+              <Link to="/ngo-dashboard" className={`${styles.navLink} ${location.pathname === '/ngo-dashboard' ? styles.navLinkActive : ''}`}>NGO Hub</Link>
               <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Claim Food</Link>
               <Link to="/my-claims" className={`${styles.navLink} ${location.pathname === '/my-claims' ? styles.navLinkActive : ''}`}>Incoming Deliveries</Link>
               <Link to="/requests" className={`${styles.navLink} ${location.pathname === '/requests' ? styles.navLinkActive : ''}`}>Distribution Log</Link>
@@ -123,7 +123,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
             </>
           ) : user.role === 'community' ? (
             <>
-              <Link to="/dashboard" className={`${styles.navLink} ${location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}>Community Home</Link>
+              <Link to="/community-dashboard" className={`${styles.navLink} ${location.pathname === '/community-dashboard' ? styles.navLinkActive : ''}`}>Community Home</Link>
               <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Find Free Meals</Link>
               <Link to="/requests" className={`${styles.navLink} ${location.pathname === '/requests' ? styles.navLinkActive : ''}`}>My Requests</Link>
               <Link to="/map" className={`${styles.navLink} ${location.pathname === '/map' ? styles.navLinkActive : ''}`}>Distribution Centers</Link>
@@ -131,7 +131,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
           ) : (
             /* Donor / Partner Default */
             <>
-              <Link to="/dashboard" className={`${styles.navLink} ${location.pathname === '/dashboard' ? styles.navLinkActive : ''}`}>Donor Dashboard</Link>
+              <Link to="/donor-dashboard" className={`${styles.navLink} ${location.pathname === '/donor-dashboard' ? styles.navLinkActive : ''}`}>Donor Dashboard</Link>
               <Link to="/donations/new" className={`${styles.navLink} ${location.pathname === '/donations/new' ? styles.navLinkActive : ''}`} style={{ color: '#ea580c', fontWeight: 700 }}>+ Donate Food</Link>
               <Link to="/donor-donations" className={`${styles.navLink} ${location.pathname === '/donor-donations' ? styles.navLinkActive : ''}`}>Track Deliveries</Link>
               <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Network</Link>
@@ -178,7 +178,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
                     <p className={styles.userMenuName}>{user.name}</p>
                     <p className={styles.userMenuRole}>{user.role}</p>
                   </div>
-                  <Link to="/dashboard" className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
+                  <Link to={getRoleDashboardPath(user.role)} className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
                     Dashboard
                   </Link>
                   <Link to="/chat" className={styles.menuItem} onClick={() => setShowUserMenu(false)}>

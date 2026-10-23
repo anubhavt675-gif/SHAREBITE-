@@ -5,6 +5,7 @@ import {
   ArrowRight, Loader2, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getRoleDashboardPath } from '../../services/auth';
 import ngoPhoto from '../../assets/ngo_volunteers_photo.jpg';
 import leafTopLeft from '../../assets/leaf_top_left.png';
 import leafBottomLeft from '../../assets/leaf_bottom_left.png';
@@ -97,8 +98,8 @@ export default function AcceptorRegisterPage({ initialMode }: { initialMode?: 'r
       }
       setLoading(true);
       try {
-        await login(email.trim(), password, 'acceptor');
-        navigate('/dashboard', { replace: true });
+        const loggedInUser = await login(email.trim(), password, 'acceptor');
+        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
       } catch (err: any) {
         setError(err.message || 'Login failed. Please check your credentials.');
       } finally {
@@ -131,14 +132,14 @@ export default function AcceptorRegisterPage({ initialMode }: { initialMode?: 'r
       });
 
       if (res.sessionExists) {
-        navigate('/dashboard', { replace: true });
+        navigate(getRoleDashboardPath(res.user.role), { replace: true });
         return;
       }
 
       // Try automatic login
       try {
-        await login(email.trim(), password, 'acceptor');
-        navigate('/dashboard', { replace: true });
+        const loggedInUser = await login(email.trim(), password, 'acceptor');
+        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
         return;
       } catch {
         setSuccess(true);
