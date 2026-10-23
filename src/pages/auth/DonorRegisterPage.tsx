@@ -198,7 +198,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
               <span className={styles.heroTitleRow}>
                 <span className={styles.heroTitleGreen}>Give food,</span>
                 <span className={styles.sparkleWrap}>
-                  <svg className={styles.sparkleSvg} width="26" height="26" viewBox="0 0 24 24" fill="none">
+                  <svg className={styles.sparkleSvg} width="30" height="30" viewBox="0 0 24 24" fill="none">
                     <path d="M12 2v5M4.5 4.5l3.5 3.5M2 12h5" stroke="#EA580C" strokeWidth="2.5" strokeLinecap="round" />
                   </svg>
                 </span>
