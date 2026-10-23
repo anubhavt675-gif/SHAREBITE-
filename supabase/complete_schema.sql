@@ -289,6 +289,9 @@ create table if not exists public.notifications (
   data                 jsonb,
   related_food_id      uuid references public.food_listings(id) on delete set null,
   related_reservation_id uuid references public.reservations(id) on delete set null,
+  related_claim_id     uuid,
+  related_delivery_id  uuid,
+  action_url           text,
   is_read              boolean not null default false,
   created_at           timestamptz not null default now()
 );

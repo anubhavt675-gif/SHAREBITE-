@@ -3,12 +3,13 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   User, Phone, Mail, MapPin, Lock, Eye, EyeOff,
   ArrowRight, Loader2, CheckCircle2, AlertCircle,
+  Search, Bell, Leaf, Utensils, Users,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import donorChefPhoto from '../../assets/donor_chef_photo.jpg';
-import leafTopLeft from '../../assets/leaf_top_left.png';
-import leafBottomLeft from '../../assets/leaf_bottom_left.png';
-import authLeavesTopRight from '../../assets/auth_leaves_top_right.png';
+import leafTopLeft from '../../assets/leaf_tl_pure.png';
+import leafBottomLeft from '../../assets/leaf_bl_pure.png';
+import authLeavesTopRight from '../../assets/leaf_tr_pure.png';
 import styles from './DonorRegister.module.css';
 
 function GoogleIcon() {
@@ -22,19 +23,19 @@ function GoogleIcon() {
   );
 }
 
-function ShareBiteLogoFull({ dark = false }: { dark?: boolean }) {
+function ShareBiteLogoFull() {
   return (
     <div className={styles.logoFull}>
       <div className={styles.logoIcon}>
-        <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
-          <path d="M20 7.2C16.8 3.5 11.2 3.3 7.6 6.9C4.1 10.4 4.1 16.1 7.6 19.7L20 32.2L32.4 19.7C35.9 16.1 35.9 10.4 32.4 6.9C28.8 3.3 23.2 3.5 20 7.2Z" fill="#FF521C" />
-          <path d="M16 12V18M14.5 12V15.5C14.5 16.3 15.2 17 16 17C16.8 17 17.5 16.3 17.5 15.5V12M16 18V23" stroke="#FFFFFF" strokeWidth="1.7" strokeLinecap="round" />
-          <path d="M24 12C22.6 12 21.8 13.2 21.8 14.8C21.8 16.4 22.6 17.4 24 17.4V23M24 12C25.4 12 26.2 13.2 26.2 14.8C26.2 16.4 25.4 17.4 24 17.4" stroke="#FFFFFF" strokeWidth="1.7" strokeLinecap="round" />
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M7 3v6a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V3M9 11v10" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9 3v4" stroke="#FFFFFF" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M16 3c-1.66 0-3 1.79-3 4s1.34 4 3 4 3-1.79 3-4-1.34-4-3-4zM16 11v10" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
       <div className={styles.logoText}>
         <span className={styles.logoName}>
-          <span className={dark ? styles.logoShareDark : styles.logoShareDark}>Share</span>
+          <span className={styles.logoShareDark}>Share</span>
           <span className={styles.logoBiteOrange}>Bite</span>
         </span>
         <span className={styles.logoTagline}>Share Food. Share Hope.</span>
@@ -142,7 +143,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
       <img src={leafBottomLeft} className={styles.leafBottomLeft} alt="" aria-hidden="true" />
       <img src={authLeavesTopRight} className={styles.leafTopRight} alt="" aria-hidden="true" />
 
-      {/* ═══════════════════════════════════ NAVIGATION ═══════════════════════════════════ */}
+      {/* ═══════════════════════════════════ TOP NAVBAR ═══════════════════════════════════ */}
       <header className={styles.navbar}>
         <div className={styles.navInner}>
           {/* Logo */}
@@ -156,16 +157,26 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
             <Link to="/about" className={styles.navLink}>About</Link>
             <Link to="/how-it-works" className={styles.navLink}>How It Works</Link>
             <Link to="/impact" className={styles.navLink}>Impact</Link>
-            <a href="#contact" className={styles.navLink}>Contact</a>
+            <Link to="/partners" className={styles.navLink}>Contact</Link>
           </nav>
 
-          {/* Right: Hunger Free India badge */}
+          {/* Right Controls: Search + Notification Bell + Get Started Button */}
           <div className={styles.navRight}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className={styles.navLeafIcon}>
-              <path d="M12 2C9 6 6 10 8 14C10 18 14 19 17 17C20 15 21 11 19 7C17 3 13 2 12 2Z" fill="#2D6A4F" />
-              <path d="M12 2C12 2 12 12 8 18" stroke="#1B4332" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            <span className={styles.navHungerText}>A Hunger Free India</span>
+            <div className={styles.navSearch}>
+              <Search size={15} className={styles.navSearchIcon} />
+              <input
+                type="text"
+                placeholder="Search food, NGOs, or location..."
+                className={styles.navSearchInput}
+              />
+            </div>
+            <button type="button" className={styles.navBellBtn} title="Notifications">
+              <Bell size={17} />
+              <span className={styles.navBellBadge}>3</span>
+            </button>
+            <Link to="/register" className={styles.navGetStartedBtn}>
+              Get Started <ArrowRight size={14} />
+            </Link>
           </div>
         </div>
       </header>
@@ -173,171 +184,126 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
       {/* ═══════════════════════════════════ MAIN CONTENT ═══════════════════════════════════ */}
       <main className={styles.main}>
 
-        {/* ─────────────── LEFT HERO ─────────────── */}
-        <section className={styles.hero}>
+        {/* ─────────────── HERO SECTION (Text + Chef Circle) ─────────────── */}
+        <section className={styles.heroSection}>
+          <div className={styles.heroContent}>
+            {/* FOOD DONOR Badge */}
+            <div className={styles.heroBadge}>
+              <Leaf size={14} className={styles.heroBadgeIcon} />
+              <span>FOOD DONOR</span>
+            </div>
 
-          {/* FOOD DONOR badge */}
-          <div className={styles.heroBadge}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-              <path d="M3 3h4v14H3zM17 3h4v14h-4zM3 10h4M17 10h4M10 3v18M8 21h8" stroke="#2D6A4F" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-            <span>FOOD DONOR</span>
+            {/* Main Headline */}
+            <h1 className={styles.heroTitle}>
+              <span className={styles.heroTitleRow}>
+                <span className={styles.heroTitleGreen}>Give food,</span>
+                <span className={styles.sparkleWrap}>
+                  <svg className={styles.sparkleSvg} width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2v5M4.5 4.5l3.5 3.5M2 12h5" stroke="#EA580C" strokeWidth="2.5" strokeLinecap="round" />
+                  </svg>
+                </span>
+              </span>
+              <span className={styles.heroTitleOrange}>spread hope.</span>
+            </h1>
+
+            {/* Description */}
+            <p className={styles.heroPara}>
+              Your extra food can bring smiles to those in need. Donate surplus food from
+              your restaurant, hotel, or event and make a real difference.
+            </p>
+
+            {/* 3 Impact Features */}
+            <div className={styles.impactRow}>
+              <div className={styles.impactItem}>
+                <div className={styles.impactIcon}>
+                  <Utensils size={18} />
+                </div>
+                <span>Reduce Food Waste</span>
+              </div>
+              <div className={styles.impactItem}>
+                <div className={styles.impactIcon}>
+                  <Users size={18} />
+                </div>
+                <span>Help Communities</span>
+              </div>
+              <div className={styles.impactItem}>
+                <div className={styles.impactIcon}>
+                  <Leaf size={18} />
+                </div>
+                <span>Build a Greener Future</span>
+              </div>
+            </div>
+
+            {/* Handwritten Note */}
+            <div className={styles.handwrittenNote}>
+              <span className={styles.handwrittenLine}>Good food.</span>
+              <span className={styles.handwrittenLine}>Real people.</span>
+              <span className={styles.handwrittenLine}>
+                Real impact. <span className={styles.handwrittenHeart}>❤️</span>
+              </span>
+            </div>
           </div>
 
-          {/* Main headline */}
-          <h1 className={styles.heroTitle}>
-            <span className={styles.heroTitleGreen}>Give food,</span>
-            <br />
-            <span className={styles.heroTitleOrange}>spread hope.</span>
-          </h1>
-
-          {/* Supporting paragraph */}
-          <p className={styles.heroPara}>
-            Your extra food can bring smiles to those in need. Donate surplus food from
-            your restaurant, hotel, or event and make a real difference.
-          </p>
-
-          {/* 3 Impact Features */}
-          <div className={styles.impactRow}>
-            <div className={styles.impactItem}>
-              <div className={styles.impactIcon}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M3 3h4v14H3zM17 3h4v14h-4z" stroke="#2D6A4F" strokeWidth="1.7" strokeLinecap="round" />
-                  <path d="M10 3v18M8 21h8" stroke="#2D6A4F" strokeWidth="1.7" strokeLinecap="round" />
-                </svg>
-              </div>
-              <span>Reduce Food Waste</span>
-            </div>
-            <div className={styles.impactItem}>
-              <div className={styles.impactIcon}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="#2D6A4F" strokeWidth="1.7" strokeLinecap="round" />
-                  <circle cx="9" cy="7" r="4" stroke="#2D6A4F" strokeWidth="1.7" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="#2D6A4F" strokeWidth="1.7" strokeLinecap="round" />
-                </svg>
-              </div>
-              <span>Help Communities</span>
-            </div>
-            <div className={styles.impactItem}>
-              <div className={styles.impactIcon}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 2C9 6 6 10 8 14C10 18 14 19 17 17C20 15 21 11 19 7" stroke="#2D6A4F" strokeWidth="1.7" strokeLinecap="round" />
-                  <path d="M12 2C12 2 12 10 8 18" stroke="#2D6A4F" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </div>
-              <span>Build a Greener Future</span>
-            </div>
-          </div>
-
-          {/* Chef photo with organic border */}
-          <div className={styles.chefPhotoContainer}>
-            {/* Decorative background blob */}
-            <div className={styles.chefPhotoBgBlob} />
-
-            {/* Decorative leaves around photo */}
-            <div className={styles.decLeaf1}>
-              <svg width="48" height="58" viewBox="0 0 48 58" fill="none">
-                <path d="M24 4C14 10 8 22 10 36C12 50 22 56 30 52C38 48 42 36 40 22C38 8 30 2 24 4Z" fill="#4A7C59" opacity="0.75" />
-                <path d="M24 4C24 4 22 30 14 52" stroke="#2D5A3D" strokeWidth="1.5" strokeLinecap="round" opacity="0.6" />
-              </svg>
-            </div>
-            <div className={styles.decLeaf2}>
-              <svg width="40" height="52" viewBox="0 0 40 52" fill="none">
-                <path d="M20 4C10 10 4 22 6 36C8 48 18 54 26 50C34 46 38 34 36 20C34 6 26 0 20 4Z" fill="#5B8C6A" opacity="0.65" />
-                <path d="M20 4C20 4 18 28 10 50" stroke="#2D5A3D" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+          {/* Central Circular Chef Photo with aura and leaves */}
+          <div className={styles.chefPhotoWrapper}>
+            <div className={styles.chefPhotoAura} />
+            
+            {/* Top-Right Decorative Floating Leaf */}
+            <div className={styles.floatingLeafTopRight}>
+              <svg width="44" height="58" viewBox="0 0 44 58" fill="none">
+                <path d="M22 2C12 10 6 24 8 38C10 52 20 57 28 55C36 53 41 41 39 27C37 13 29 4 22 2Z" fill="#3D704D" />
+                <path d="M22 2C22 2 20 30 12 54" stroke="#224831" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
             </div>
 
-            {/* Orange decorative arrows */}
-            <div className={styles.decArrow1}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                <path d="M5 12H19M14 7L19 12L14 17" stroke="#FF521C" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <div className={styles.decArrow2}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M5 12H19M14 7L19 12L14 17" stroke="#FF521C" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            {/* Bottom-Right Decorative Floating Leaf */}
+            <div className={styles.floatingLeafBottomRight}>
+              <svg width="48" height="42" viewBox="0 0 48 42" fill="none">
+                <path d="M46 22C38 12 26 4 13 6C0 8 -4 20 4 28C12 36 26 40 38 34C44 30 46 24 46 22Z" fill="#528362" />
+                <path d="M46 22C46 22 18 20 2 34" stroke="#2B543A" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
             </div>
 
-            {/* Orange heart decoration */}
-            <div className={styles.decHeart}>
-              <svg width="22" height="20" viewBox="0 0 24 22" fill="none">
-                <path d="M12 19.5C12 19.5 2 13 2 6.5C2 4.5 3.5 2 6 2C8.5 2 10 3.5 12 5.5C14 3.5 15.5 2 18 2C20.5 2 22 4.5 22 6.5C22 13 12 19.5 12 19.5Z" fill="#FF521C" opacity="0.85" />
-              </svg>
-            </div>
-
-            {/* The actual circular photo */}
+            {/* Circular Photo */}
             <div className={styles.chefPhotoCircle}>
               <img
                 src={donorChefPhoto}
-                alt="Chef and volunteer preparing meals in kitchen"
+                alt="Chef and volunteer preparing fresh food donation"
                 className={styles.chefPhotoImg}
               />
             </div>
           </div>
-
-          {/* Handwritten note at bottom-left */}
-          <div className={styles.handwrittenNote}>
-            <svg width="180" height="90" viewBox="0 0 180 90" fill="none" className={styles.handwrittenSvg}>
-              {/* "Good food." */}
-              <text x="8" y="28" fontFamily="'Caveat', 'Dancing Script', cursive" fontSize="20" fill="#FF521C" fontWeight="600">Good food.</text>
-              {/* "Real people." */}
-              <text x="8" y="54" fontFamily="'Caveat', 'Dancing Script', cursive" fontSize="20" fill="#FF521C" fontWeight="600">Real people.</text>
-              {/* "Real impact." */}
-              <text x="8" y="80" fontFamily="'Caveat', 'Dancing Script', cursive" fontSize="20" fill="#FF521C" fontWeight="600">Real impact.</text>
-              {/* Small heart */}
-              <path d="M140 72C140 72 136 68 136 65C136 63.3 137.3 62 139 62C140 62 141 62.7 141.5 63.7C142 62.7 143 62 144 62C145.7 62 147 63.3 147 65C147 68 143 72 141.5 73.5C140.8 72.8 140 72 140 72Z" fill="#FF521C" />
-              {/* Squiggly doodle */}
-              <path d="M8 88 Q25 82 42 88 Q59 94 76 88" stroke="#FF521C" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.6" />
-            </svg>
-          </div>
         </section>
 
-        {/* ─────────────── RIGHT CARD ─────────────── */}
-        <aside className={styles.card}>
-          <div className={styles.cardInner}>
-
-            {/* A. Card logo */}
-            <div className={styles.cardLogo}>
+        {/* ─────────────── RIGHT FLOATING CARD ─────────────── */}
+        <aside className={styles.cardContainer}>
+          <div className={styles.card}>
+            {/* Card Logo Header */}
+            <div className={styles.cardHeader}>
               <ShareBiteLogoFull />
+              <div className={styles.cardBadge}>
+                <Leaf size={12} />
+                <span>FOOD DONOR</span>
+              </div>
             </div>
 
-            {/* B. Pill badge */}
-            <div className={styles.cardBadge}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="#2D6A4F" strokeWidth="1.8" strokeLinecap="round" />
-                <circle cx="9" cy="7" r="4" stroke="#2D6A4F" strokeWidth="1.8" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="#2D6A4F" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-              <span>FOOD DONOR</span>
-            </div>
-
-            {/* C. Heading */}
+            {/* Title */}
             <h2 className={styles.cardTitle}>
               {mode === 'login' ? (
-                <>
-                  <span className={styles.cardTitleGreen}>Log In to </span>
-                  <span className={styles.cardTitleOrange}>Donor</span>
-                  <span className={styles.cardTitleGreen}> Account</span>
-                </>
+                <>Log In to <span className={styles.cardTitleHighlight}>Donor</span> Account</>
               ) : (
-                <>
-                  <span className={styles.cardTitleGreen}>Create Your </span>
-                  <span className={styles.cardTitleOrange}>Donor</span>
-                  <span className={styles.cardTitleGreen}> Account</span>
-                </>
+                <>Create Your <span className={styles.cardTitleHighlight}>Donor</span> Account</>
               )}
             </h2>
 
-            {/* D. Subtitle */}
+            {/* Subtitle */}
             <p className={styles.cardSubtitle}>
               {mode === 'login'
-                ? 'Welcome back! Enter your email and password to continue.'
+                ? 'Welcome back! Enter your details to continue.'
                 : 'Join hands with us and help reduce food waste.'}
             </p>
 
-            {/* Error */}
+            {/* Error Message */}
             {error && (
               <div className={styles.errorBox}>
                 <AlertCircle size={15} />
@@ -345,21 +311,16 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
               </div>
             )}
 
-            {/* Success */}
+            {/* Success Box */}
             {success ? (
               <div className={styles.successBox}>
                 <CheckCircle2 size={18} />
                 <div>
                   <strong>Account Created!</strong>
-                  <p style={{ marginTop: 4, fontSize: '0.82rem' }}>
-                    Registration successful. Please check your email and then log in right here.
-                  </p>
+                  <p>Please check your email and log in to continue.</p>
                   <button
                     type="button"
-                    onClick={() => {
-                      setSuccess(false);
-                      setMode('login');
-                    }}
+                    onClick={() => { setSuccess(false); setMode('login'); }}
                     className={styles.proceedBtn}
                   >
                     Log In Here →
@@ -368,10 +329,6 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
               </div>
             ) : (
               <form onSubmit={handleSubmit} className={styles.form} noValidate>
-
-                {/* E. Form fields */}
-
-                {/* Register Mode Specific Fields */}
                 {mode === 'register' && (
                   <>
                     {/* Full Name */}
@@ -390,7 +347,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                       </div>
                     </div>
 
-                    {/* Mobile */}
+                    {/* Mobile Number */}
                     <div className={styles.fieldGroup}>
                       <label className={styles.fieldLabel}>Mobile Number</label>
                       <div className={styles.inputWrap}>
@@ -407,7 +364,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                   </>
                 )}
 
-                {/* Email (Shown in both Register & Login) */}
+                {/* Email Address */}
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Email Address</label>
                   <div className={styles.inputWrap}>
@@ -423,7 +380,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                   </div>
                 </div>
 
-                {/* Address (Only in Register mode) */}
+                {/* Address (Register only) */}
                 {mode === 'register' && (
                   <div className={styles.fieldGroup}>
                     <label className={styles.fieldLabel}>Address</label>
@@ -440,7 +397,7 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                   </div>
                 )}
 
-                {/* Password (Shown in both) */}
+                {/* Password */}
                 <div className={styles.fieldGroup}>
                   <label className={styles.fieldLabel}>Password</label>
                   <div className={styles.inputWrap}>
@@ -456,86 +413,72 @@ export default function DonorRegisterPage({ initialMode }: { initialMode?: 'regi
                     <button
                       type="button"
                       className={styles.eyeBtn}
-                      onClick={() => setShowPassword(v => !v)}
-                      aria-label="Toggle password visibility"
+                      onClick={() => setShowPassword(p => !p)}
+                      title={showPassword ? 'Hide password' : 'Show password'}
                     >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
 
-                {/* F. CTA Button */}
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className={styles.ctaBtn}
-                >
+                {/* CTA Submit Button */}
+                <button type="submit" disabled={loading} className={styles.ctaBtn}>
                   {loading ? (
                     <Loader2 size={18} className={styles.spinner} />
                   ) : (
                     <>
-                      <span>{mode === 'login' ? 'Log In as Food Donor' : 'Register as Food Donor'}</span>
-                      <ArrowRight size={18} />
+                      {mode === 'login' ? 'Log In as Food Donor' : 'Register as Food Donor'}
+                      <ArrowRight size={16} />
                     </>
                   )}
                 </button>
 
-                {/* G. Divider */}
+                {/* Divider */}
                 <div className={styles.dividerRow}>
                   <div className={styles.dividerLine} />
                   <span className={styles.dividerText}>Or continue with</span>
                   <div className={styles.dividerLine} />
                 </div>
 
-                {/* H. Google button */}
+                {/* Google Button */}
                 <button
                   type="button"
-                  className={styles.googleBtn}
                   onClick={handleGoogleSignIn}
                   disabled={loading}
+                  className={styles.googleBtn}
                 >
                   <GoogleIcon />
                   <span>Continue with Google</span>
                 </button>
 
+                {/* Footer Switch */}
+                <div className={styles.cardFooter}>
+                  {mode === 'login' ? (
+                    <span>
+                      Don't have an account?{' '}
+                      <button
+                        type="button"
+                        onClick={() => { setError(null); setMode('register'); }}
+                        className={styles.cardFooterLink}
+                      >
+                        Register
+                      </button>
+                    </span>
+                  ) : (
+                    <span>
+                      Already have an account?{' '}
+                      <button
+                        type="button"
+                        onClick={() => { setError(null); setMode('login'); }}
+                        className={styles.cardFooterLink}
+                      >
+                        Log in
+                      </button>
+                    </span>
+                  )}
+                </div>
               </form>
             )}
-
-            {/* I. Bottom account prompt */}
-            <p className={styles.cardFooter}>
-              {mode === 'login' ? (
-                <>
-                  Don't have an account?{' '}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('register');
-                      setError(null);
-                    }}
-                    className={styles.cardFooterLink}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', padding: 0 }}
-                  >
-                    Register
-                  </button>
-                </>
-              ) : (
-                <>
-                  Already have an account?{' '}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('login');
-                      setError(null);
-                    }}
-                    className={styles.cardFooterLink}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', padding: 0 }}
-                  >
-                    Log in
-                  </button>
-                </>
-              )}
-            </p>
-
           </div>
         </aside>
       </main>

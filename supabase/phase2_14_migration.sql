@@ -178,6 +178,40 @@ create trigger delivery_tasks_updated_at
   before update on public.delivery_tasks
   for each row execute function public.set_updated_at();
 
+-- ─── Notifications link columns ────────────────────────────
+alter table public.notifications add column if not exists related_claim_id uuid references public.ngo_claims(id) on delete set null;
+alter table public.notifications add column if not exists related_delivery_id uuid references public.delivery_tasks(id) on delete set null;
+alter table public.notifications add column if not exists action_url text;
+
+-- ─── Rider Live Location Updates Table ───────────────────────
+create table if not exists public.rider_location_updates (
+  id               uuid primary key default gen_random_uuid(),
+  rider_id         uuid not null,
+  delivery_task_id uuid references public.delivery_tasks(id) on delete set null,
+  latitude         double precision not null,
+  longitude        double precision not null,
+  heading          double precision,
+  speed            double precision,
+  recorded_at      timestamptz not null default now()
+);
+
+create index if not exists idx_rider_loc_task on public.rider_location_updates(delivery_task_id, recorded_at desc);
+create index if not exists idx_rider_loc_rider on public.rider_location_updates(rider_id, recorded_at desc);
+
+alter table public.rider_location_updates enable row level security;
+
+drop policy if exists "loc_insert_rider" on public.rider_location_updates;
+create policy "loc_insert_rider" on public.rider_location_updates
+  for insert to authenticated
+  with check (auth.uid() is not null);
+
+drop policy if exists "loc_select_participants" on public.rider_location_updates;
+create policy "loc_select_participants" on public.rider_location_updates
+  for select to authenticated
+  using (auth.uid() is not null);
+
+do $$ begin alter publication supabase_realtime add table public.rider_location_updates; exception when others then null; end $$;
+
 -- ─── DISTRIBUTION RECORDS ─────────────────────────────────
 
 create table if not exists public.distribution_records (
@@ -604,7 +638,7 @@ begin
     raise exception 'You are not assigned to this delivery';
   end if;
 
-  if v_task.status != 'rider_assigned' then
+  if v_task.status not in ('rider_assigned', 'going_to_pickup') then
     raise exception 'Cannot confirm pickup in current status: %', v_task.status;
   end if;
 
@@ -727,7 +761,7 @@ begin
   insert into public.notifications (user_id, type, title, message, data, related_food_id, related_delivery_id, action_url)
   values (
     v_task.ngo_id,
-    'rider_assigned',
+    'delivery_completed',
     'Food Delivered — Please Confirm Receipt',
     'The rider has delivered "' || v_task.food_title || '". Please confirm receipt and record the quantity.',
     jsonb_build_object('delivery_task_id', p_task_id),

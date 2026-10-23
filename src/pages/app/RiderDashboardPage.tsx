@@ -233,6 +233,13 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [riderCoords, setRiderCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  useEffect(() => {
+    LocationService.getCurrentCoordinates()
+      .then(c => setRiderCoords(c))
+      .catch(() => {});
+  }, []);
 
   const acceptJob = async () => {
     setError(''); setLoading(true);
@@ -278,9 +285,14 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
 
   const isOverdue = task.collectionDeadline && new Date(task.collectionDeadline) < new Date();
 
-  // Calculated distance & ETA
+  // Calculated distance & ETA using live rider coordinates when available
   const etaInfo = (task.pickupLat && task.pickupLng)
-    ? LocationService.calculateEtaBetween(23.2599, 77.4126, task.pickupLat, task.pickupLng)
+    ? LocationService.calculateEtaBetween(
+        riderCoords ? riderCoords.latitude : 23.2599,
+        riderCoords ? riderCoords.longitude : 77.4126,
+        task.pickupLat,
+        task.pickupLng
+      )
     : { distanceKm: 2.1, text: '7 mins' };
 
   return (
@@ -408,7 +420,7 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
         {/* Chat with participants */}
         {task.status !== 'completed' && task.status !== 'cancelled' && (
           <Link
-            to="/messages"
+            to="/chat"
             className={`${styles.btn} ${styles.btnOutline}`}
             style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >

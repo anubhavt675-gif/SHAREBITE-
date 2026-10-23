@@ -821,10 +821,29 @@ export const ClaimsService = {
     );
 
     try {
-      await supabase
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return true;
+
+      // Look up rider row if user is rider
+      const { data: rider } = await supabase
+        .from('riders')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      const riderId = rider?.id;
+
+      let query = supabase
         .from('delivery_tasks')
         .update({ status, updated_at: new Date().toISOString() })
         .eq('id', taskId);
+
+      // If user is a rider, ensure they can only update their own assigned task
+      if (riderId) {
+        query = query.eq('rider_id', riderId);
+      }
+
+      await query;
     } catch {}
 
     return true;
@@ -1134,6 +1153,7 @@ export const ClaimsService = {
         event: '*',
         schema: 'public',
         table: 'delivery_tasks',
+        filter: 'status=eq.awaiting_rider',
       }, debounced)
       .subscribe();
 

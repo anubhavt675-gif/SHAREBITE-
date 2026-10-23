@@ -110,7 +110,7 @@ export default function CreateDonationPage() {
   };
 
   const handleSubmit = async () => {
-    if (!user) return;
+    if (!user || loading) return;
     if (!form.safetyDeclarationSigned) {
       setError('You must sign the Food Safety Declaration before publishing.');
       return;

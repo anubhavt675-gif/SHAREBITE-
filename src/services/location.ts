@@ -126,9 +126,21 @@ export class LocationService {
     speed?: number;
   }): Promise<void> {
     try {
-      // 1. Record historical update
+      // Resolve the riders.id (PK) from the auth user UUID (user_id FK)
+      // These are two different UUIDs — riders.id != auth.users.id
+      let riderRowId = params.riderId; // fallback (may fail FK if wrong, but better than nothing)
+      try {
+        const { data: riderRow } = await supabase
+          .from('riders')
+          .select('id')
+          .eq('user_id', params.riderId)
+          .maybeSingle();
+        if (riderRow?.id) riderRowId = riderRow.id;
+      } catch {}
+
+      // 1. Record historical update in rider_location_updates (uses riders.id PK)
       await supabase.from('rider_location_updates').insert({
-        rider_id: params.riderId,
+        rider_id: riderRowId,
         delivery_task_id: params.deliveryTaskId || null,
         latitude: params.latitude,
         longitude: params.longitude,
@@ -136,7 +148,7 @@ export class LocationService {
         speed: params.speed || null,
       });
 
-      // 2. Update current position on riders table
+      // 2. Update current position on riders table (filter by user_id, not id)
       await supabase
         .from('riders')
         .update({
@@ -144,7 +156,7 @@ export class LocationService {
           current_lng: params.longitude,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', params.riderId);
+        .eq('user_id', params.riderId);
     } catch (err) {
       console.error('Error broadcasting rider location:', err);
     }
