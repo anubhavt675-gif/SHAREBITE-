@@ -1,7 +1,6 @@
 /* ============================================================
    SHAREBITE — High-Fidelity Split-Screen Auth Styles
    ============================================================ */
-
 .page {
   min-height: 100vh;
   background-color: #FAF7F2;
@@ -286,6 +285,7 @@
   background: #FFFFFF;
   border-radius: 26px;
   padding: 34px 38px;
+
   width: 100%;
   max-width: 470px;
   box-shadow: 0 14px 44px rgba(35, 25, 15, 0.07);
@@ -559,20 +559,25 @@
     gap: 36px;
     padding-top: 10px;
   }
+
   .leftShowcase {
     align-items: center;
     text-align: center;
     padding-right: 0;
   }
+
   .subheadline {
     max-width: 100%;
   }
+
   .scriptHeaderWrap {
     display: none;
   }
+
   .pillarsRow {
     justify-content: center;
   }
+
   .foodSharingVisualWrap {
     display: none;
   }
@@ -582,13 +587,16 @@
   .authCard {
     padding: 28px 20px;
   }
+
   .headline {
     font-size: 38px;
   }
+
   .pillarsRow {
     flex-direction: column;
     gap: 10px;
   }
+
   .pillarDivider {
     display: none;
   }
@@ -686,4 +694,3 @@
   font-size: 9.5px;
   color: #8C7B6B;
 }
-
