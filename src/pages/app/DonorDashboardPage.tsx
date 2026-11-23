@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Utensils, Users, Leaf, ArrowRight, Plus, MapPin,
@@ -36,6 +36,11 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
   const [impact, setImpact] = useState<ImpactStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const userLocationRef = useRef(user?.location);
+
+  useEffect(() => {
+    userLocationRef.current = user?.location;
+  }, [user?.location]);
 
   const fetchDonorData = useCallback(async (isSilent = false) => {
     if (!userId) return;
@@ -89,8 +94,8 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
       setActiveTasks(liveTasks);
 
       // Load real nearby verified NGOs based on donor's latest listing or profile location
-      const refLat = listingsData.find((l) => l.latitude)?.latitude ?? user?.location?.latitude;
-      const refLng = listingsData.find((l) => l.longitude)?.longitude ?? user?.location?.longitude;
+      const refLat = listingsData.find((l) => l.latitude)?.latitude ?? userLocationRef.current?.latitude;
+      const refLng = listingsData.find((l) => l.longitude)?.longitude ?? userLocationRef.current?.longitude;
       if (typeof refLat === 'number' && typeof refLng === 'number' && refLat !== 0 && refLng !== 0) {
         NGOService.getNearbyNGOs(refLat, refLng, 20, true).then(setNearbyNgos).catch(() => {});
       }
@@ -100,21 +105,26 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId, user?.location?.latitude, user?.location?.longitude]);
+  }, [userId]);
+
+  const fetchDonorDataRef = useRef(fetchDonorData);
+  useEffect(() => {
+    fetchDonorDataRef.current = fetchDonorData;
+  }, [fetchDonorData]);
 
   useEffect(() => {
-    fetchDonorData(false);
+    fetchDonorDataRef.current(false);
 
     if (!userId) return;
     // Subscribe to donor listings & task updates
     const sub = ClaimsService.subscribeToDonorListings(userId, () => {
-      fetchDonorData(true);
+      fetchDonorDataRef.current(true);
     });
 
     return () => {
       sub.unsubscribe();
     };
-  }, [fetchDonorData, userId]);
+  }, [userId]);
 
   const handleOpenChat = async (task: DonorLiveTask) => {
     if (!userId) return;

@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase';
 import { AuthService, clearLegacyAuthCaches } from '../services/auth';
 import type { AuthStatus, User, UserRole } from '../types';
 
+const PROFILE_REVALIDATE_COOLDOWN_MS = 60_000;
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -47,13 +49,19 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
 
   const requestSeqRef = useRef(0);
   const activeUserIdRef = useRef<string | null>(null);
+  const authenticatedUserRef = useRef<User | null>(null);
+  const lastProfileSyncAtRef = useRef<number>(0);
   const mountedRef = useRef(true);
   const onSessionResetRef = useRef(onSessionReset);
-  onSessionResetRef.current = onSessionReset;
+
+  useEffect(() => {
+    onSessionResetRef.current = onSessionReset;
+  }, [onSessionReset]);
 
   const loading = authStatus === 'initializing' || authStatus === 'loading_profile';
 
   const setUserIfChanged = useCallback((newUser: User | null) => {
+    authenticatedUserRef.current = newUser;
     setUser((prev) => {
       if (!prev && !newUser) return null;
       if (!prev || !newUser) return newUser;
@@ -64,6 +72,8 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
         prev.verificationStatus === newUser.verificationStatus &&
         prev.name === newUser.name &&
         prev.email === newUser.email &&
+        prev.isAvailable === newUser.isAvailable &&
+        prev.serviceRadiusKm === newUser.serviceRadiusKm &&
         prev.updatedAt === newUser.updatedAt
       ) {
         return prev;
@@ -77,6 +87,8 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
       const seq = ++requestSeqRef.current;
 
       if (!session?.user) {
+        authenticatedUserRef.current = null;
+        lastProfileSyncAtRef.current = 0;
         if (activeUserIdRef.current !== null) {
           clearLegacyAuthCaches();
           onSessionResetRef.current?.();
@@ -91,19 +103,38 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
       }
 
       const sessionUserId = session.user.id;
+      const isSameAuthenticatedUser =
+        activeUserIdRef.current === sessionUserId && authenticatedUserRef.current !== null;
       const isAccountSwitch =
         activeUserIdRef.current !== null && activeUserIdRef.current !== sessionUserId;
 
-      if (isAccountSwitch) {
-        // Immediately wipe previous user's state & query cache so wrong role UI never flashes.
+      // Rule A: Token refresh only rotates the access JWT; keep active dashboard completely untouched.
+      if (eventReason === 'TOKEN_REFRESHED' && isSameAuthenticatedUser) {
+        return;
+      }
+
+      // Rule B: Duplicate SIGNED_IN / INITIAL_SESSION on browser tab switch must NEVER unmount or thrash API.
+      const isPassiveRevalidation =
+        eventReason === 'SIGNED_IN' || eventReason === 'INITIAL_SESSION' || eventReason === 'SAFETY_REFRESH';
+
+      if (isSameAuthenticatedUser && isPassiveRevalidation) {
+        if (Date.now() - lastProfileSyncAtRef.current < PROFILE_REVALIDATE_COOLDOWN_MS) {
+          return;
+        }
+        // Cooldown elapsed: silently revalidate in background without switching authStatus to loading_profile.
+      } else if (isAccountSwitch) {
+        // Rule C: Account switch -> wipe previous user cache/state immediately before loading new profile.
         clearLegacyAuthCaches();
         onSessionResetRef.current?.();
+        authenticatedUserRef.current = null;
+        lastProfileSyncAtRef.current = 0;
         if (mountedRef.current) {
           setUser(null);
           setAuthError(null);
           setAuthStatus('loading_profile');
         }
-      } else if (eventReason !== 'TOKEN_REFRESHED') {
+      } else if (!isSameAuthenticatedUser && eventReason !== 'TOKEN_REFRESHED') {
+        // Rule D: Cold start or unauthenticated -> show profile loading indicator.
         if (mountedRef.current) {
           setAuthError(null);
           setAuthStatus('loading_profile');
@@ -112,20 +143,28 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
 
       const result = await AuthService.fetchAuthoritativeProfile(sessionUserId);
 
-      // Ignore out-of-order responses from superseded sessions or unmounted provider.
       if (!mountedRef.current || seq !== requestSeqRef.current) {
         return;
       }
 
       if (result.status === 'ok') {
         activeUserIdRef.current = result.user.id;
+        lastProfileSyncAtRef.current = Date.now();
         setUserIfChanged(result.user);
         setAuthError(null);
         setAuthStatus('authenticated');
         return;
       }
 
+      // Rule E: Preserve already-authenticated session during temporary network/offline hiccups (TEST 10).
+      if (result.status === 'error' && isSameAuthenticatedUser) {
+        setAuthError(null);
+        setAuthStatus('authenticated');
+        return;
+      }
+
       activeUserIdRef.current = sessionUserId;
+      authenticatedUserRef.current = null;
       setUser(null);
 
       if (result.status === 'missing') {
@@ -146,30 +185,41 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
     [setUserIfChanged]
   );
 
-  const refreshUser = useCallback(async () => {
-    try {
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error) {
-        if (mountedRef.current) {
-          setAuthError(error.message);
+  const refreshUserWithReason = useCallback(
+    async (reason: string) => {
+      try {
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
+        if (error) {
+          if (mountedRef.current && authenticatedUserRef.current === null) {
+            setAuthError(error.message);
+            setAuthStatus('error');
+          }
+          return;
+        }
+        await loadProfileForSession(session, reason);
+      } catch (err: any) {
+        if (mountedRef.current && authenticatedUserRef.current === null) {
+          setAuthError(err?.message || 'Failed to verify authentication session.');
           setAuthStatus('error');
         }
-        return;
       }
-      await loadProfileForSession(session, 'MANUAL_REFRESH');
-    } catch (err: any) {
-      if (mountedRef.current) {
-        setAuthError(err?.message || 'Failed to verify authentication session.');
-        setAuthStatus('error');
-      }
-    }
-  }, [loadProfileForSession]);
+    },
+    [loadProfileForSession]
+  );
+
+  const refreshUser = useCallback(async () => {
+    await refreshUserWithReason('USER_ACTION_REFRESH');
+  }, [refreshUserWithReason]);
 
   const retryAuth = useCallback(async () => {
+    lastProfileSyncAtRef.current = 0;
     setAuthError(null);
     setAuthStatus('loading_profile');
-    await refreshUser();
-  }, [refreshUser]);
+    await refreshUserWithReason('MANUAL_RETRY');
+  }, [refreshUserWithReason]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -186,6 +236,8 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
       if (event === 'SIGNED_OUT') {
         ++requestSeqRef.current;
         activeUserIdRef.current = null;
+        authenticatedUserRef.current = null;
+        lastProfileSyncAtRef.current = 0;
         clearLegacyAuthCaches();
         onSessionResetRef.current?.();
         if (mountedRef.current) {
@@ -196,12 +248,20 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
         return;
       }
 
-      // Let login() complete expectedRole validation before updating React auth state.
       if (event === 'SIGNED_IN' && AuthService.isLoginInFlight()) {
         return;
       }
 
-      // Defer async profile query out of Supabase's onAuthStateChange callback to avoid v2 lock contention.
+      // Fast-path: TOKEN_REFRESHED for active user needs zero async profile query or timer.
+      if (
+        event === 'TOKEN_REFRESHED' &&
+        session?.user?.id &&
+        activeUserIdRef.current === session.user.id &&
+        authenticatedUserRef.current !== null
+      ) {
+        return;
+      }
+
       if (deferredTimer) window.clearTimeout(deferredTimer);
       deferredTimer = window.setTimeout(() => {
         if (mountedRef.current) {
@@ -210,10 +270,9 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
       }, 0);
     });
 
-    // Safety fallback if INITIAL_SESSION fails to emit promptly.
     const safetyTimer = window.setTimeout(() => {
-      if (!initialResolved && mountedRef.current) {
-        void refreshUser();
+      if (!initialResolved && mountedRef.current && authenticatedUserRef.current === null) {
+        void refreshUserWithReason('SAFETY_REFRESH');
       }
     }, 1500);
 
@@ -223,7 +282,7 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
       window.clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };
-  }, [loadProfileForSession, refreshUser]);
+  }, [loadProfileForSession, refreshUserWithReason]);
 
   const login = useCallback(
     async (
@@ -238,6 +297,7 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
         onSessionResetRef.current?.();
       }
       activeUserIdRef.current = loggedInUser.id;
+      lastProfileSyncAtRef.current = Date.now();
       setUserIfChanged(loggedInUser);
       setAuthError(null);
       setAuthStatus('authenticated');
@@ -270,6 +330,7 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
           onSessionResetRef.current?.();
         }
         activeUserIdRef.current = result.user.id;
+        lastProfileSyncAtRef.current = Date.now();
         setUserIfChanged(result.user);
         setAuthError(null);
         setAuthStatus('authenticated');
@@ -290,6 +351,7 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
       onSessionResetRef.current?.();
     }
     activeUserIdRef.current = u.id;
+    lastProfileSyncAtRef.current = Date.now();
     setUserIfChanged(u);
     setAuthError(null);
     setAuthStatus('authenticated');
@@ -299,6 +361,8 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
   const logout = useCallback(async () => {
     ++requestSeqRef.current;
     activeUserIdRef.current = null;
+    authenticatedUserRef.current = null;
+    lastProfileSyncAtRef.current = 0;
     await AuthService.logout();
     setUser(null);
     setAuthError(null);
@@ -308,11 +372,13 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
 
   const updateProfile = useCallback(
     async (updates: Partial<User>) => {
-      if (!user) return;
-      const updated = await AuthService.updateProfile(user.id, updates);
+      const current = authenticatedUserRef.current;
+      if (!current) return;
+      const updated = await AuthService.updateProfile(current.id, updates);
+      lastProfileSyncAtRef.current = Date.now();
       setUserIfChanged(updated);
     },
-    [user, setUserIfChanged]
+    [setUserIfChanged]
   );
 
   const resetPasswordForEmail = useCallback(async (email: string) => {

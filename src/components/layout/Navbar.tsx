@@ -76,6 +76,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
       return;
     }
 
+    let initialSubscribed = false;
     const fetchUnread = () => {
       NotificationsService.getUnreadCount(userId).then((count) => {
         setUnreadCount(count > 0 ? count : 0);
@@ -88,13 +89,20 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
       () => {
         setUnreadCount((c) => c + 1);
       },
-      fetchUnread
+      () => {
+        // Skip duplicate fetch on initial subscribe; only sync after an actual reconnect
+        if (!initialSubscribed) {
+          initialSubscribed = true;
+          return;
+        }
+        fetchUnread();
+      }
     );
 
     return () => {
       sub.unsubscribe();
     };
-  }, [userId, location.pathname]);
+  }, [userId]);
 
   const handleLogout = async () => {
     await logout();
@@ -163,8 +171,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
               <Link to="/my-claims" className={`${styles.navLink} ${location.pathname === '/my-claims' ? styles.navLinkActive : ''}`}>NGO Claims</Link>
               <Link to="/impact-dashboard" className={`${styles.navLink} ${location.pathname === '/impact-dashboard' ? styles.navLinkActive : ''}`}>Analytics</Link>
             </>
-          ) : (
-            /* Donor / Partner Default */
+          ) : canonicalRole === 'donor' ? (
             <>
               <Link to="/donor-dashboard" className={`${styles.navLink} ${location.pathname === '/donor-dashboard' ? styles.navLinkActive : ''}`}>Donor Dashboard</Link>
               <Link to="/donations/new" className={`${styles.navLink} ${location.pathname === '/donations/new' ? styles.navLinkActive : ''}`} style={{ color: '#ea580c', fontWeight: 700 }}>+ Donate Food</Link>
@@ -172,7 +179,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
               <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Network</Link>
               <Link to="/chat" className={`${styles.navLink} ${location.pathname === '/chat' ? styles.navLinkActive : ''}`}>Chat</Link>
             </>
-          )}
+          ) : null}
         </div>
 
         {/* Right: Search, Notifications, Auth */}

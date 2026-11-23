@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MapPin, Clock, Package, Truck, CheckCircle, AlertTriangle,
@@ -528,6 +528,7 @@ export default function RiderDashboardPage() {
   const [isOnline, setIsOnline] = useState(false);
   const [togglingOnline, setTogglingOnline] = useState(false);
   const [riderCoords, setRiderCoords] = useState<Coordinates | null>(null);
+  const riderCoordsRef = useRef<Coordinates | null>(null);
   const [gpsError, setGpsError] = useState('');
 
   const fetchData = useCallback(async (isSilent = false) => {
@@ -536,8 +537,9 @@ export default function RiderDashboardPage() {
     else setRefreshing(true);
 
     try {
+      const currentCoords = riderCoordsRef.current;
       const [available, mine] = await Promise.all([
-        ClaimsService.getAvailableDeliveryTasks(riderCoords?.latitude, riderCoords?.longitude),
+        ClaimsService.getAvailableDeliveryTasks(currentCoords?.latitude, currentCoords?.longitude),
         ClaimsService.getMyDeliveryTasks(userId),
       ]);
       setAvailableTasks(available);
@@ -553,29 +555,48 @@ export default function RiderDashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId, riderCoords?.latitude, riderCoords?.longitude]);
+  }, [userId]);
+
+  const fetchDataRef = useRef(fetchData);
+  useEffect(() => {
+    fetchDataRef.current = fetchData;
+  }, [fetchData]);
 
   useEffect(() => {
-    fetchData(false);
+    fetchDataRef.current(false);
+    if (!userId) return;
     const sub = ClaimsService.subscribeToAvailableTasks(() => {
-      fetchData(true);
+      fetchDataRef.current(true);
     });
     return () => { sub.unsubscribe(); };
-  }, [fetchData]);
+  }, [userId]);
+
+  const activeTaskId = useMemo(
+    () =>
+      myTasks.find((t) =>
+        ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(t.status)
+      )?.id,
+    [myTasks]
+  );
 
   // Live GPS Tracking: Broadcast rider coordinates whenever online (idle or active task)
   useEffect(() => {
     if (!isOnline || !userId) return;
     setGpsError('');
-    const activeTask = myTasks.find(t => ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(t.status));
 
     const stopWatching = LocationService.watchAndBroadcastRiderLocation({
       riderUserId: userId,
-      deliveryTaskId: activeTask?.id,
+      deliveryTaskId: activeTaskId,
       minIntervalMs: 5000,
       minDistanceMeters: 15,
       onPosition: (coords) => {
-        setRiderCoords(coords);
+        const prev = riderCoordsRef.current;
+        riderCoordsRef.current = coords;
+        const movedKm =
+          prev ? LocationService.calculateDistance(prev.latitude, prev.longitude, coords.latitude, coords.longitude) : Infinity;
+        if (!prev || movedKm >= 0.01) {
+          setRiderCoords(coords);
+        }
         setGpsError('');
       },
       onError: (err) => {
@@ -586,7 +607,7 @@ export default function RiderDashboardPage() {
     return () => {
       stopWatching();
     };
-  }, [isOnline, myTasks, userId]);
+  }, [isOnline, activeTaskId, userId]);
 
   const toggleOnline = async () => {
     if (!userId) return;

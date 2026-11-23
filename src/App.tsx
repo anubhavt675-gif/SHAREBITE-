@@ -53,11 +53,18 @@ const NGODiscoveryPage = lazyWithRetry(() => import('./pages/app/NGODiscoveryPag
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 2,
+      staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 15,
       retry: 1,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   },
 });
+
+const handleSessionReset = () => {
+  queryClient.clear();
+};
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, authStatus, authError, retryAuth, logout } = useAuth();
@@ -233,7 +240,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider onSessionReset={() => queryClient.clear()}>
+      <AuthProvider onSessionReset={handleSessionReset}>
         <BrowserRouter>
           <AppRoutes />
         </BrowserRouter>

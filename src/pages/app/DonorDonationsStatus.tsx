@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { MapPin, Clock, Package, Plus, RefreshCw, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -9,11 +9,11 @@ import { formatDistanceToNow } from 'date-fns';
 import styles from './DonorDonationsStatus.module.css';
 
 const LIFECYCLE_STEPS = [
-  { key: 'available',   label: 'Listed & Available' },
-  { key: 'claimed',     label: 'Claimed by NGO' },
-  { key: 'rider',       label: 'Rider Assigned' },
-  { key: 'collected',   label: 'Food Collected' },
-  { key: 'delivered',   label: 'Delivered to NGO' },
+  { key: 'available', label: 'Listed & Available' },
+  { key: 'claimed', label: 'Claimed by NGO' },
+  { key: 'rider', label: 'Rider Assigned' },
+  { key: 'collected', label: 'Food Collected' },
+  { key: 'delivered', label: 'Delivered to NGO' },
   { key: 'distributed', label: 'Distributed to Community' },
 ];
 
@@ -64,14 +64,19 @@ export default function DonorDonationsStatus() {
     }
   }, [userId]);
 
+  const fetchDataRef = useRef(fetchData);
   useEffect(() => {
-    fetchData(false);
+    fetchDataRef.current = fetchData;
+  }, [fetchData]);
+
+  useEffect(() => {
+    fetchDataRef.current(false);
     if (!userId) return;
     const sub = ClaimsService.subscribeToDonorListings(userId, () => {
-      fetchData(true);
+      fetchDataRef.current(true);
     });
     return () => { sub.unsubscribe(); };
-  }, [fetchData, userId]);
+  }, [userId]);
 
   if (loading) return (
     <div style={{ textAlign: 'center', padding: 64 }}>

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Clock, MapPin, Package, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { normalizeRole } from '../../services/auth';
 import { NotificationsService } from '../../services/notifications';
 import { ClaimsService } from '../../services/claims';
 import type { AppNotification } from '../../types';
@@ -9,19 +10,27 @@ import type { AppNotification } from '../../types';
 export default function LiveOpportunityPopup() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
   const [queue, setQueue] = useState<AppNotification[]>([]);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
-    if (!user?.id) return;
-    const isNGO = ['ngo', 'receiver', 'acceptor'].includes(user.role);
-    const isRider = ['rider', 'volunteer'].includes(user.role);
+    navigateRef.current = navigate;
+  }, [navigate]);
 
-    const sub = NotificationsService.subscribeToNotifications(user.id, (notif) => {
+  const userId = user?.id;
+  const canonicalRole = normalizeRole(user?.role);
+
+  useEffect(() => {
+    if (!userId || !canonicalRole) return;
+    const isNGO = canonicalRole === 'ngo';
+    const isRider = canonicalRole === 'rider';
+
+    const sub = NotificationsService.subscribeToNotifications(userId, (notif) => {
       // Trigger browser notification if user granted permission
       NotificationsService.showBrowserNotification(notif.title, notif.body, () => {
-        if (notif.actionUrl) navigate(notif.actionUrl);
+        if (notif.actionUrl) navigateRef.current(notif.actionUrl);
       });
 
       const isOpportunity =
@@ -44,7 +53,7 @@ export default function LiveOpportunityPopup() {
     return () => {
       sub.unsubscribe();
     };
-  }, [user?.id, user?.role, navigate]);
+  }, [userId, canonicalRole]);
 
   const dismiss = (id: string) => {
     setQueue((prev) => prev.filter((n) => n.id !== id));

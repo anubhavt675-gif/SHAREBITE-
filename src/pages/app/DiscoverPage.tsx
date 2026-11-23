@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import {
   MapPin,
   Utensils,
@@ -51,75 +51,30 @@ export default function DiscoverPage() {
   // Search query from URL or state
   const queryParam = searchParams.get('q') || '';
 
-  // 1. Acquire location & initial data
+  const userCoordsRef = useRef<Coordinates | null>(userCoords);
+
+  // 1a. Acquire device GPS once (or reuse profile coordinates) and subscribe to realtime listings once
   useEffect(() => {
     let isMounted = true;
 
-    async function initLocationAndData() {
+    async function initCoords() {
+      if (userCoordsRef.current) return;
       try {
-        let coords: Coordinates | null = null;
-        if (user?.location?.latitude && user?.location?.longitude) {
-          coords = {
-            latitude: user.location.latitude,
-            longitude: user.location.longitude,
-            city: user.location.city,
-          };
+        const deviceCoords = await LocationService.getCurrentCoordinates();
+        if (
+          isMounted &&
+          deviceCoords &&
+          typeof deviceCoords.latitude === 'number' &&
+          !isNaN(deviceCoords.latitude)
+        ) {
+          userCoordsRef.current = deviceCoords;
+          setUserCoords(deviceCoords);
         }
-
-        try {
-          const deviceCoords = await LocationService.getCurrentCoordinates();
-          if (deviceCoords && typeof deviceCoords.latitude === 'number' && !isNaN(deviceCoords.latitude)) {
-            coords = deviceCoords;
-          }
-        } catch {}
-
-        if (isMounted && coords) setUserCoords(coords);
-
-        // Fetch real DB listings (PostGIS nearby if GPS available, else all active)
-        const dbListings = coords
-          ? await DonationService.getNearbyListings(coords.latitude, coords.longitude, radiusKm)
-          : await DonationService.getActiveListings();
-
-        if (isMounted) {
-          // Calculate real distances if coords are available
-          const withDist = dbListings.map((item) => {
-            if (item.distanceKm != null) return item;
-            if (coords && item.latitude && item.longitude) {
-              const d = LocationService.calculateDistance(
-                coords.latitude,
-                coords.longitude,
-                item.latitude,
-                item.longitude
-              );
-              return { ...item, distanceKm: d };
-            }
-            return item;
-          });
-
-          setRawListings(withDist);
-
-          // Fetch real verified nearby NGOs from Supabase
-          if (coords) {
-            const nearbyNGOList = await NGOService.getNearbyNGOs(
-              coords.latitude,
-              coords.longitude,
-              radiusKm,
-              true
-            );
-            setNgos(nearbyNGOList);
-          }
-        }
-      } catch (err) {
-        console.error('Error initializing Discover page:', err);
-        if (isMounted) setRawListings([]);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+      } catch {}
     }
 
-    initLocationAndData();
+    void initCoords();
 
-    // Subscribe to realtime INSERT, UPDATE (e.g. claimed), and DELETE on food_listings
     const sub = DonationService.subscribeToListings(
       (newListing) => {
         if (['available', 'partially_reserved'].includes(newListing.status) && newListing.availableServings > 0) {
@@ -146,7 +101,69 @@ export default function DiscoverPage() {
       isMounted = false;
       sub.unsubscribe();
     };
-  }, [radiusKm]);
+  }, []);
+
+  // 1b. Fetch listings & nearby NGOs when radius or resolved coordinates change
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadDiscoverData() {
+      try {
+        const coords =
+          userCoords ||
+          (user?.location?.latitude && user?.location?.longitude
+            ? {
+                latitude: user.location.latitude,
+                longitude: user.location.longitude,
+                city: user.location.city,
+              }
+            : null);
+
+        const dbListings = coords
+          ? await DonationService.getNearbyListings(coords.latitude, coords.longitude, radiusKm)
+          : await DonationService.getActiveListings();
+
+        if (!isMounted) return;
+
+        const withDist = dbListings.map((item) => {
+          if (item.distanceKm != null) return item;
+          if (coords && item.latitude && item.longitude) {
+            const d = LocationService.calculateDistance(
+              coords.latitude,
+              coords.longitude,
+              item.latitude,
+              item.longitude
+            );
+            return { ...item, distanceKm: d };
+          }
+          return item;
+        });
+
+        setRawListings(withDist);
+
+        if (coords) {
+          const nearbyNGOList = await NGOService.getNearbyNGOs(
+            coords.latitude,
+            coords.longitude,
+            radiusKm,
+            true
+          );
+          if (isMounted) setNgos(nearbyNGOList);
+        }
+      } catch (err) {
+        console.error('Error initializing Discover page:', err);
+        if (isMounted) setRawListings([]);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    void loadDiscoverData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [radiusKm, userCoords, user?.location?.latitude, user?.location?.longitude, user?.location?.city]);
 
   // 2. Filter & Sort
   const filteredListings = useMemo(() => {

@@ -26,10 +26,11 @@ interface Props {
 
 export default function Sidebar({ open, onClose }: Props) {
   const { user } = useAuth();
-  const role = normalizeRole(user?.role) ?? 'donor';
+  const role = normalizeRole(user?.role);
 
   // Purpose-built navigation strictly segregated by trusted role
   const roleNavItems = useMemo<NavItem[]>(() => {
+    if (!role) return [];
     switch (role) {
       case 'rider':
         return [
@@ -81,7 +82,6 @@ export default function Sidebar({ open, onClose }: Props) {
         ];
 
       case 'donor':
-      default:
         return [
           { to: '/donor-dashboard', icon: <LayoutGrid size={18} />, label: 'Donor Dashboard' },
           { to: '/donations/new', icon: <Plus size={18} />, label: 'Donate Surplus Food', highlight: true },
@@ -97,6 +97,7 @@ export default function Sidebar({ open, onClose }: Props) {
   }, [role]);
 
   const roleLabel = useMemo(() => {
+    if (!role) return 'ShareBite Member';
     switch (role) {
       case 'rider':
         return '🚴 Logistics Fleet Partner';
@@ -107,7 +108,6 @@ export default function Sidebar({ open, onClose }: Props) {
       case 'admin':
         return '🛡️ Platform Administrator';
       case 'donor':
-      default:
         return '🌱 Verified Food Donor';
     }
   }, [role]);

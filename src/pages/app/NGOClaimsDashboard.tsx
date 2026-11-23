@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Package, Truck, CheckCircle, X, MapPin, Clock,
@@ -550,13 +550,19 @@ export default function NGOClaimsDashboard() {
     }
   }, [userId]);
 
+  const fetchClaimsRef = useRef(fetchClaims);
   useEffect(() => {
-    fetchClaims(false);
-    const sub = ClaimsService.subscribeToMyClaims(userId || '', () => {
-      fetchClaims(true);
+    fetchClaimsRef.current = fetchClaims;
+  }, [fetchClaims]);
+
+  useEffect(() => {
+    fetchClaimsRef.current(false);
+    if (!userId) return;
+    const sub = ClaimsService.subscribeToMyClaims(userId, () => {
+      fetchClaimsRef.current(true);
     });
     return () => { sub.unsubscribe(); };
-  }, [fetchClaims, userId]);
+  }, [userId]);
 
   const activeClaims = claims.filter(c => !['cancelled', 'expired', 'distributed'].includes(c.status));
   const completedClaims = claims.filter(c => c.status === 'distributed');
