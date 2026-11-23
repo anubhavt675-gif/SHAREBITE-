@@ -1,149 +1,34 @@
 // ShareBite — Donations / Food Listings Service (Web)
 import { supabase } from '../lib/supabase';
-import { isValidUUID, toSafeUUID, DEMO_RECORD_UUIDS, DEMO_FOOD_UUIDS } from '../lib/uuid';
-import type { FoodListing, FoodStatus, CreateFoodListingForm } from '../types';
-
-export const FALLBACK_DEMO_LISTINGS: FoodListing[] = [
-  {
-    id: DEMO_FOOD_UUIDS.food1,
-    donorId: DEMO_RECORD_UUIDS.donor,
-    title: 'Vegetable Rice + Dal',
-    description: 'Freshly prepared vegetable pulao with yellow dal tadka in food grade containers.',
-    category: 'cooked_meals',
-    foodType: 'veg',
-    servings: 25,
-    availableServings: 25,
-    imageUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80',
-    pickupAddress: 'Malviya Nagar, Near New Market',
-    city: 'Bhopal',
-    latitude: 23.2384,
-    longitude: 77.4042,
-    availableFrom: new Date().toISOString(),
-    availableUntil: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
-    status: 'available',
-    isUrgent: false,
-    allergens: [],
-    storageType: 'hot_insulated',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    distanceKm: 1.8,
-  },
-  {
-    id: DEMO_FOOD_UUIDS.food2,
-    donorId: DEMO_RECORD_UUIDS.donor,
-    title: 'Fresh Fruits',
-    description: 'Seasonal apples, bananas, and oranges surplus from hostel mess.',
-    category: 'fruits_veg',
-    foodType: 'veg',
-    servings: 30,
-    availableServings: 30,
-    imageUrl: 'https://images.unsplash.com/photo-1610832958506-aa56368176cf?auto=format&fit=crop&w=400&q=80',
-    pickupAddress: 'MANIT Campus, Link Road 3',
-    city: 'Bhopal',
-    latitude: 23.2185,
-    longitude: 77.4082,
-    availableFrom: new Date().toISOString(),
-    availableUntil: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-    status: 'available',
-    isUrgent: false,
-    allergens: [],
-    storageType: 'room_temp',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    distanceKm: 2.4,
-  },
-  {
-    id: DEMO_FOOD_UUIDS.food3,
-    donorId: DEMO_RECORD_UUIDS.donorSecondary,
-    title: 'Bread & Bakery Items',
-    description: 'Whole wheat bread loaves, croissants, and dinner rolls baked this morning.',
-    category: 'bakery',
-    foodType: 'veg',
-    servings: 20,
-    availableServings: 20,
-    imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=400&q=80',
-    pickupAddress: 'Arera Colony, E-3 Sector',
-    city: 'Bhopal',
-    latitude: 23.2145,
-    longitude: 77.4285,
-    availableFrom: new Date().toISOString(),
-    availableUntil: new Date(Date.now() + 1.5 * 3600 * 1000).toISOString(),
-    status: 'available',
-    isUrgent: true,
-    allergens: ['gluten'],
-    storageType: 'room_temp',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    distanceKm: 3.1,
-  },
-  {
-    id: DEMO_FOOD_UUIDS.food4,
-    donorId: DEMO_RECORD_UUIDS.donorSecondary,
-    title: 'Packed Meals',
-    description: 'Sealed buffet packages containing roti, sabzi, rice, and curd.',
-    category: 'cooked_meals',
-    foodType: 'veg',
-    servings: 24,
-    availableServings: 24,
-    imageUrl: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=400&q=80',
-    pickupAddress: 'MP Nagar Zone 1, Near DB City Mall',
-    city: 'Bhopal',
-    latitude: 23.2334,
-    longitude: 77.4342,
-    availableFrom: new Date().toISOString(),
-    availableUntil: new Date(Date.now() + 6 * 3600 * 1000).toISOString(),
-    status: 'available',
-    isUrgent: false,
-    allergens: [],
-    storageType: 'room_temp',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    distanceKm: 4.7,
-  },
-  {
-    id: DEMO_FOOD_UUIDS.food5,
-    donorId: DEMO_RECORD_UUIDS.donor,
-    title: 'Paneer Butter Masala & Roti',
-    description: 'Catering event surplus, safely kept in insulated food containers.',
-    category: 'cooked_meals',
-    foodType: 'veg',
-    servings: 35,
-    availableServings: 35,
-    imageUrl: 'https://images.unsplash.com/photo-1631452180519-c014fe946bc7?auto=format&fit=crop&w=400&q=80',
-    pickupAddress: 'Shahpura Lake Road',
-    city: 'Bhopal',
-    latitude: 23.1950,
-    longitude: 77.4250,
-    availableFrom: new Date().toISOString(),
-    availableUntil: new Date(Date.now() + 3 * 3600 * 1000).toISOString(),
-    status: 'available',
-    isUrgent: false,
-    allergens: ['dairy'],
-    storageType: 'hot_insulated',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    distanceKm: 5.2,
-  },
-];
+import { isValidUUID, toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
+import { NGOService } from './ngo';
+import type {
+  FoodListing,
+  FoodStatus,
+  CreateFoodListingForm,
+  DonationStatusHistoryItem,
+} from '../types';
 
 function mapListingToFood(data: any): FoodListing {
   const donorData = data.donor;
   return {
     id: data.id,
     donorId: data.donor_id,
-    donor: donorData ? {
-      id: donorData.id,
-      name: donorData.full_name || 'User',
-      email: donorData.email || '',
-      phone: donorData.phone || '',
-      role: donorData.role || 'donor',
-      avatar: donorData.avatar_url,
-      isVerified: donorData.is_verified || false,
-      totalDonations: donorData.total_donations || 0,
-      totalRescues: donorData.total_rescues || 0,
-      createdAt: donorData.created_at,
-      updatedAt: donorData.updated_at,
-    } : undefined,
+    donor: donorData
+      ? {
+          id: donorData.id,
+          name: donorData.full_name || 'User',
+          email: donorData.email || '',
+          phone: donorData.phone || '',
+          role: donorData.role || 'donor',
+          avatar: donorData.avatar_url,
+          isVerified: donorData.is_verified || false,
+          totalDonations: donorData.total_donations || 0,
+          totalRescues: donorData.total_rescues || 0,
+          createdAt: donorData.created_at,
+          updatedAt: donorData.updated_at,
+        }
+      : undefined,
     title: data.title,
     description: data.description,
     category: data.category || 'other',
@@ -163,6 +48,7 @@ function mapListingToFood(data: any): FoodListing {
     storageType: data.storage_type || 'room_temp',
     createdAt: data.created_at,
     updatedAt: data.updated_at,
+    distanceKm: data.distance_km != null ? Number(data.distance_km) : undefined,
   };
 }
 
@@ -173,6 +59,7 @@ export const DonationService = {
       .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
       .in('status', ['available', 'partially_reserved'])
       .gt('available_servings', 0)
+      .gt('available_until', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -183,52 +70,99 @@ export const DonationService = {
     return data.map(mapListingToFood);
   },
 
-  async getListingById(id: string): Promise<FoodListing | null> {
-    const safeId = toSafeUUID(id);
-    if (!isValidUUID(safeId)) return null;
-
+  async getNearbyListings(lat: number, lng: number, radiusKm: number = 25): Promise<FoodListing[]> {
     try {
-      const { data, error } = await supabase
-        .from('food_listings')
-        .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
-        .eq('id', safeId)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc('get_nearby_food', {
+        p_lat: lat,
+        p_lng: lng,
+        p_radius_km: radiusKm,
+      });
 
-      if (!error && data) return mapListingToFood(data);
+      if (!error && Array.isArray(data)) {
+        return data.map((row: any) =>
+          mapListingToFood({
+            ...row,
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.updated_at || new Date().toISOString(),
+          })
+        );
+      }
     } catch {}
-
-    const fallback = FALLBACK_DEMO_LISTINGS.find(f => f.id === safeId || f.id === id);
-    if (fallback) return fallback;
-
-    return null;
+    return DonationService.getActiveListings();
   },
 
-  async getMyListings(donorId: string): Promise<FoodListing[]> {
-    const safeDonorId = toSafeUUID(donorId, DEMO_RECORD_UUIDS.donor);
+  async getListingById(id: string): Promise<FoodListing | null> {
+    if (!isValidUUID(id)) return null;
 
     const { data, error } = await supabase
       .from('food_listings')
       .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
-      .eq('donor_id', safeDonorId)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return mapListingToFood(data);
+  },
+
+  async getMyListings(donorId: string): Promise<FoodListing[]> {
+    if (!isValidUUID(donorId)) return [];
+
+    const { data, error } = await supabase
+      .from('food_listings')
+      .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
+      .eq('donor_id', donorId)
       .order('created_at', { ascending: false });
 
     if (error || !data) return [];
     return data.map(mapListingToFood);
   },
 
+  async getStatusHistory(foodListingId: string, deliveryTaskId?: string): Promise<DonationStatusHistoryItem[]> {
+    if (!isValidUUID(foodListingId)) return [];
+    try {
+      let query = supabase
+        .from('donation_status_history')
+        .select('*')
+        .eq('food_listing_id', foodListingId)
+        .order('created_at', { ascending: true });
+
+      if (deliveryTaskId && isValidUUID(deliveryTaskId)) {
+        query = query.or(`delivery_task_id.eq.${deliveryTaskId},delivery_task_id.is.null`);
+      }
+
+      const { data, error } = await query;
+      if (error || !data) return [];
+      return data.map((row: any) => ({
+        id: row.id,
+        foodListingId: row.food_listing_id,
+        deliveryTaskId: row.delivery_task_id,
+        claimId: row.claim_id,
+        previousStatus: row.previous_status,
+        newStatus: row.new_status,
+        changedBy: row.changed_by,
+        actorRole: row.actor_role,
+        notes: row.notes,
+        createdAt: row.created_at,
+      }));
+    } catch {
+      return [];
+    }
+  },
+
   async createListing(donorId: string, form: CreateFoodListingForm): Promise<FoodListing> {
     let safeDonorId = donorId;
     if (!isValidUUID(safeDonorId)) {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (user?.id && isValidUUID(user.id)) {
         safeDonorId = user.id;
       } else {
-        safeDonorId = toSafeUUID(donorId, DEMO_RECORD_UUIDS.donor);
+        throw new Error('Please sign in to publish a food donation.');
       }
     }
 
     let imageUrl: string | null = null;
-
     if (form.imageFile) {
       try {
         const ext = form.imageFile.name.split('.').pop() || 'jpg';
@@ -238,12 +172,12 @@ export const DonationService = {
           .upload(filename, form.imageFile, { upsert: true });
 
         if (!uploadErr) {
-          const { data: { publicUrl } } = supabase.storage
-            .from('food-images')
-            .getPublicUrl(filename);
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from('food-images').getPublicUrl(filename);
           imageUrl = publicUrl;
         } else {
-          // If storage bucket is not configured, generate a local data URL as safe preview
+          // Graceful preview encoding only when storage bucket isn't yet provisioned
           imageUrl = await new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target?.result as string);
@@ -255,7 +189,6 @@ export const DonationService = {
       }
     }
 
-    // Prepare enriched description with dietary & handling notes
     const extraNotes: string[] = [];
     if (form.quantityUnit && form.quantityUnit !== 'servings') {
       extraNotes.push(`Quantity: ${form.quantityValue || form.servings} ${form.quantityUnit}`);
@@ -268,10 +201,57 @@ export const DonationService = {
     if (form.directHandover) extraNotes.push(`Handover: Direct handover to rider`);
 
     const fullDescription = form.description
-      ? (extraNotes.length > 0 ? `${form.description}\n\n---\n${extraNotes.join(' | ')}` : form.description)
+      ? extraNotes.length > 0
+        ? `${form.description}\n\n---\n${extraNotes.join(' | ')}`
+        : form.description
       : extraNotes.join(' | ');
 
-    // Primary insert payload with full metadata
+    const lat = typeof form.latitude === 'number' && !isNaN(form.latitude) ? form.latitude : null;
+    const lng = typeof form.longitude === 'number' && !isNaN(form.longitude) ? form.longitude : null;
+    const availableFromIso = form.availableFrom
+      ? new Date(form.availableFrom).toISOString()
+      : new Date().toISOString();
+    const availableUntilIso = new Date(form.availableUntil).toISOString();
+    const prepDateIso = form.preparationDate ? new Date(form.preparationDate).toISOString() : null;
+    const radiusKm = form.notificationRadiusKm || 15;
+
+    // 1. Primary path: atomic publish_food_donation RPC (PostGIS + nearby NGOs + online riders)
+    if (lat !== null && lng !== null) {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('publish_food_donation', {
+        p_title: form.title,
+        p_description: fullDescription,
+        p_category: form.category,
+        p_food_type: form.foodType,
+        p_servings: form.servings,
+        p_image_url: imageUrl,
+        p_pickup_address: form.pickupAddress,
+        p_city: form.city,
+        p_latitude: lat,
+        p_longitude: lng,
+        p_location_accuracy_m: form.locationAccuracyM ?? null,
+        p_location_captured_at: form.locationCapturedAt || new Date().toISOString(),
+        p_available_from: availableFromIso,
+        p_available_until: availableUntilIso,
+        p_is_urgent: form.isUrgent,
+        p_allergens: form.allergens || [],
+        p_storage_type: form.storageType || 'room_temp',
+        p_quantity_unit: form.quantityUnit || 'servings',
+        p_quantity_value: form.quantityValue ?? form.servings,
+        p_preparation_date: prepDateIso,
+        p_packaging_notes: form.packagingNotes || null,
+        p_notification_radius_km: radiusKm,
+      });
+
+      if (!rpcErr && rpcData?.listing) {
+        return mapListingToFood(rpcData.listing);
+      }
+
+      if (rpcErr && rpcErr.code !== 'PGRST202') {
+        throw new Error(rpcErr.message || 'Failed to publish food donation');
+      }
+    }
+
+    // 2. Fallback ONLY when publish_food_donation RPC is not yet deployed (PGRST202)
     const payload: any = {
       donor_id: safeDonorId,
       title: form.title,
@@ -283,10 +263,10 @@ export const DonationService = {
       image_url: imageUrl,
       pickup_address: form.pickupAddress,
       city: form.city,
-      latitude: typeof form.latitude === 'number' && !isNaN(form.latitude) ? form.latitude : null,
-      longitude: typeof form.longitude === 'number' && !isNaN(form.longitude) ? form.longitude : null,
-      available_from: form.availableFrom,
-      available_until: form.availableUntil,
+      latitude: lat,
+      longitude: lng,
+      available_from: availableFromIso,
+      available_until: availableUntilIso,
       status: 'available',
       is_urgent: form.isUrgent,
       allergens: form.allergens || [],
@@ -299,7 +279,6 @@ export const DonationService = {
       .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
       .maybeSingle();
 
-    // Fallback if extended columns are not yet applied on remote instance
     if (error && (error.message?.includes('column') || error.code === '42703')) {
       delete payload.allergens;
       delete payload.storage_type;
@@ -314,17 +293,12 @@ export const DonationService = {
 
     if (error || !listing) throw error || new Error('Failed to create food listing');
 
-    // Record impact event safely
     try {
       await supabase.from('impact_events').insert({
         user_id: safeDonorId,
         event_type: 'food_donated',
         servings: form.servings,
       });
-    } catch {}
-
-    // Record in donations table safely
-    try {
       await supabase.from('donations').insert({
         food_listing_id: listing.id,
         donor_id: safeDonorId,
@@ -333,28 +307,35 @@ export const DonationService = {
       });
     } catch {}
 
-    // Notify eligible NGOs about newly available surplus food
-    try {
-      const { data: ngos } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'ngo')
-        .limit(20);
-
-      if (ngos && ngos.length > 0) {
-        const ngoNotifs = ngos.map((ngo: any) => ({
-          user_id: ngo.id,
-          type: 'new_donation',
-          title: '🍲 New Food Donation Available!',
-          message: `${form.servings} servings of "${listing.title}" are available in ${listing.city || 'your area'}. Claim now!`,
-          data: { food_listing_id: listing.id },
-          related_food_id: listing.id,
-          action_url: '/discover',
-        }));
-        await supabase.from('notifications').insert(ngoNotifs);
-      }
-    } catch (notifErr) {
-      console.warn('NGO broadcast notice:', notifErr);
+    // Distance-filtered NGO notifications via NGOService
+    if (lat !== null && lng !== null) {
+      try {
+        const nearbyNgos = await NGOService.getNearbyNGOs(lat, lng, radiusKm, true);
+        if (nearbyNgos.length > 0) {
+          const notifs = nearbyNgos
+            .filter((n) => n.id !== safeDonorId)
+            .map((ngo) => ({
+              user_id: ngo.id,
+              type: 'new_donation',
+              title: 'NEW FOOD AVAILABLE!',
+              message: `${form.servings} servings of "${listing.title}" (${ngo.distanceKm} km away in ${listing.city || 'your area'}).`,
+              data: {
+                opportunity_type: 'ngo_food',
+                food_listing_id: listing.id,
+                title: listing.title,
+                image_url: imageUrl,
+                servings: form.servings,
+                distance_km: ngo.distanceKm,
+                available_until: availableUntilIso,
+              },
+              related_food_id: listing.id,
+              action_url: `/donations/${listing.id}`,
+            }));
+          if (notifs.length > 0) {
+            await supabase.from('notifications').insert(notifs);
+          }
+        }
+      } catch {}
     }
 
     return mapListingToFood(listing);
@@ -377,31 +358,35 @@ export const DonationService = {
     return reservationId as string;
   },
 
-  async cancelListing(listingId: string): Promise<boolean> {
-    if (!isValidUUID(listingId)) return true;
-    // BUG-04: Prevent cancellation if delivery is actively in progress
-    try {
-      const { data: activeTasks } = await supabase
-        .from('delivery_tasks')
-        .select('id, status')
-        .eq('food_listing_id', listingId)
-        .in('status', ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit']);
+  async cancelListing(listingId: string, reason?: string): Promise<boolean> {
+    if (!isValidUUID(listingId)) return false;
 
-      if (activeTasks && activeTasks.length > 0) {
-        throw new Error('Cannot cancel listing: a rider is currently assigned and delivery is in progress.');
-      }
+    const { data: rpcOk, error: rpcErr } = await supabase.rpc('cancel_donation', {
+      p_food_listing_id: listingId,
+      p_reason: reason || null,
+    });
 
-      // Mark any awaiting tasks as cancelled
-      await supabase
-        .from('delivery_tasks')
-        .update({ status: 'cancelled' })
-        .eq('food_listing_id', listingId)
-        .eq('status', 'awaiting_rider');
-    } catch (guardErr: any) {
-      if (guardErr.message?.includes('Cannot cancel listing')) {
-        throw guardErr;
-      }
+    if (!rpcErr) return !!rpcOk;
+    if (rpcErr.code !== 'PGRST202') {
+      throw new Error(rpcErr.message || 'Failed to cancel donation');
     }
+
+    // Fallback only if cancel_donation RPC not yet deployed
+    const { data: activeTasks } = await supabase
+      .from('delivery_tasks')
+      .select('id, status')
+      .eq('food_listing_id', listingId)
+      .in('status', ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit']);
+
+    if (activeTasks && activeTasks.length > 0) {
+      throw new Error('Cannot cancel listing: a rider is currently assigned and delivery is in progress.');
+    }
+
+    await supabase
+      .from('delivery_tasks')
+      .update({ status: 'cancelled' })
+      .eq('food_listing_id', listingId)
+      .eq('status', 'awaiting_rider');
 
     const { error } = await supabase
       .from('food_listings')
@@ -447,16 +432,10 @@ export const DonationService = {
           .upload(filename, form.imageFile, { upsert: true });
 
         if (!uploadErr) {
-          const { data: { publicUrl } } = supabase.storage
-            .from('food-images')
-            .getPublicUrl(filename);
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from('food-images').getPublicUrl(filename);
           payload.image_url = publicUrl;
-        } else {
-          payload.image_url = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.readAsDataURL(form.imageFile!);
-          });
         }
       } catch (err) {
         console.warn('Image storage handling error:', err);
@@ -510,18 +489,20 @@ export const DonationService = {
       .order('created_at', { ascending: false });
 
     if (error || !data) return [];
-    return data.filter((r: any) => r.food_listing).map((r: any) => ({
-      id: r.id,
-      foodListingId: r.food_listing_id,
-      foodListing: mapListingToFood(r.food_listing),
-      userId: r.user_id,
-      servings: r.servings,
-      status: r.status,
-      pickupTime: r.pickup_time,
-      notes: r.notes,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    }));
+    return data
+      .filter((r: any) => r.food_listing)
+      .map((r: any) => ({
+        id: r.id,
+        foodListingId: r.food_listing_id,
+        foodListing: mapListingToFood(r.food_listing),
+        userId: r.user_id,
+        servings: r.servings,
+        status: r.status,
+        pickupTime: r.pickup_time,
+        notes: r.notes,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }));
   },
 
   async updateReservationStatus(reservationId: string, status: string): Promise<boolean> {
@@ -533,30 +514,51 @@ export const DonationService = {
     return !error;
   },
 
-  subscribeToListings(callback: (listing: FoodListing) => void) {
-    const channelName = `listings_${Date.now()}`;
+  subscribeToListings(
+    onInsert: (listing: FoodListing) => void,
+    onUpdate?: (listing: FoodListing) => void,
+    onDelete?: (listingId: string) => void
+  ) {
+    const channelName = `listings_live_${Date.now()}`;
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'food_listings',
-      }, async (payload) => {
-        try {
-          const { data } = await supabase
-            .from('food_listings')
-            .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
-            .eq('id', payload.new.id)
-            .single();
-          if (data) callback(mapListingToFood(data));
-        } catch {}
-      })
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'food_listings',
+        },
+        async (payload) => {
+          try {
+            if (payload.eventType === 'DELETE') {
+              const oldId = (payload.old as any)?.id;
+              if (oldId) onDelete?.(oldId);
+              return;
+            }
+            const id = (payload.new as any)?.id;
+            if (!id) return;
+            const { data } = await supabase
+              .from('food_listings')
+              .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
+              .eq('id', id)
+              .maybeSingle();
+            if (!data) return;
+            const mapped = mapListingToFood(data);
+            if (payload.eventType === 'INSERT') {
+              onInsert(mapped);
+            } else if (payload.eventType === 'UPDATE') {
+              onUpdate?.(mapped);
+            }
+          } catch {}
+        }
+      )
       .subscribe();
 
     return {
       unsubscribe: () => {
         supabase.removeChannel(channel);
-      }
+      },
     };
   },
 };

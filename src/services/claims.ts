@@ -1,9 +1,9 @@
-// ShareBite — NGO Claims & Delivery Service (Phase 2-14)
-// Dual-mode architecture: Runs atomic PostgreSQL RPCs when migrations are active,
-// with automatic resilient client fallback to ensure 100% continuous uptime.
+// ShareBite — NGO Claims & Delivery Service
+// Enforces atomic PostgreSQL RPCs (First-Acceptance-Wins) without fake localStorage overrides.
 
 import { supabase } from '../lib/supabase';
-import { isValidUUID, toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
+import { isValidUUID } from '../lib/uuid';
+import { LocationService } from './location';
 
 export interface NgoClaim {
   id: string;
@@ -29,14 +29,22 @@ export interface NgoClaim {
   foodImageUrl?: string;
   pickupAddress?: string;
   pickupCity?: string;
+  pickupLat?: number;
+  pickupLng?: number;
   availableUntil?: string;
+  donorId?: string;
   donorName?: string;
+  donorPhone?: string;
   deliveryTaskId?: string;
   deliveryStatus?: string;
-  pickupCode?: string;
   dropoffCode?: string;
+  dropoffAddress?: string;
+  dropoffLat?: number;
+  dropoffLng?: number;
   pickupConfirmedAt?: string;
   deliveryConfirmedAt?: string;
+  riderId?: string;
+  riderUserId?: string;
   riderName?: string;
   riderPhone?: string;
   distributionRecordId?: string;
@@ -52,7 +60,8 @@ export interface DeliveryTask {
   claimId?: string;
   riderId?: string;
   donorId: string;
-  ngoId: string;
+  ngoId?: string;
+  assignmentType?: 'ngo_delivery' | 'rider_direct_pickup' | string;
   pickupAddress?: string;
   pickupLat?: number;
   pickupLng?: number;
@@ -66,8 +75,6 @@ export interface DeliveryTask {
   pickupWindowEnd?: string;
   collectionDeadline?: string;
   status: string;
-  pickupCode?: string;
-  dropoffCode?: string;
   pickupConfirmedAt?: string;
   servingsCollected?: number;
   collectionDiscrepancy?: string;
@@ -86,11 +93,16 @@ export interface DeliveryTask {
   foodCategory?: string;
   foodImageUrl?: string;
   donorName?: string;
+  donorPhone?: string;
   ngoName?: string;
   ngoOrgName?: string;
+  ngoPhone?: string;
   servingsClaimed?: number;
   riderName?: string;
   riderPhone?: string;
+  riderUserId?: string;
+  isDirectFoodOpportunity?: boolean;
+  distanceKm?: number;
 }
 
 export interface DistributionRecord {
@@ -122,626 +134,405 @@ export interface DistributionRecord {
   updatedAt: string;
 }
 
-// ── Local Persistence Cache for Fallback Mode ─────────────────
-const LS_CLAIMS_KEY = 'sharebite_claims_store_v1';
-const LS_TASKS_KEY = 'sharebite_tasks_store_v1';
-const LS_DISTS_KEY = 'sharebite_dists_store_v1';
-
-function getLocalStore<T>(key: string): T[] {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function setLocalStore<T>(key: string, items: T[]) {
-  try {
-    localStorage.setItem(key, JSON.stringify(items));
-  } catch {}
-}
-
 function mapClaim(row: any): NgoClaim {
   return {
     id: row.id,
-    foodListingId: row.food_listing_id || row.foodListingId,
-    ngoId: row.ngo_id || row.ngoId,
-    reservationId: row.reservation_id || row.reservationId,
-    servingsClaimed: Number(row.servings_claimed ?? row.servingsClaimed ?? 1),
+    foodListingId: row.food_listing_id,
+    ngoId: row.ngo_id,
+    reservationId: row.reservation_id,
+    servingsClaimed: Number(row.servings_claimed ?? 1),
     status: row.status,
-    pickupTime: row.pickup_time || row.pickupTime,
+    pickupTime: row.pickup_time,
     notes: row.notes,
-    cancellationReason: row.cancellation_reason || row.cancellationReason,
-    ngoName: row.ngo_name || row.ngoName,
-    confirmedAt: row.confirmed_at || row.confirmedAt,
-    riderAssignedAt: row.rider_assigned_at || row.riderAssignedAt,
-    collectedAt: row.collected_at || row.collectedAt,
-    deliveredAt: row.delivered_at || row.deliveredAt,
-    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
-    updatedAt: row.updated_at || row.updatedAt || new Date().toISOString(),
-    foodTitle: row.food_title || row.foodTitle || row.title,
-    foodCategory: row.category || row.foodCategory,
-    foodType: row.food_type || row.foodType,
-    foodImageUrl: row.image_url || row.foodImageUrl,
-    pickupAddress: row.pickup_address || row.pickupAddress,
-    pickupCity: row.pickup_city || row.pickupCity || row.city,
-    availableUntil: row.available_until || row.availableUntil,
-    donorName: row.donor_name || row.donorName,
-    deliveryTaskId: row.delivery_task_id || row.deliveryTaskId,
-    deliveryStatus: row.delivery_status || row.deliveryStatus,
-    pickupCode: row.pickup_code || row.pickupCode,
-    dropoffCode: row.dropoff_code || row.dropoffCode,
-    pickupConfirmedAt: row.pickup_confirmed_at || row.pickupConfirmedAt,
-    deliveryConfirmedAt: row.delivery_confirmed_at || row.deliveryConfirmedAt,
-    riderName: row.rider_name || row.riderName,
-    riderPhone: row.rider_phone || row.riderPhone,
-    distributionRecordId: row.distribution_record_id || row.distributionRecordId,
+    cancellationReason: row.cancellation_reason,
+    ngoName: row.ngo_name,
+    confirmedAt: row.confirmed_at,
+    riderAssignedAt: row.rider_assigned_at,
+    collectedAt: row.collected_at,
+    deliveredAt: row.delivered_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    foodTitle: row.food_title || row.title,
+    foodCategory: row.category,
+    foodType: row.food_type,
+    foodImageUrl: row.image_url,
+    pickupAddress: row.pickup_address,
+    pickupCity: row.pickup_city || row.city,
+    pickupLat: row.pickup_lat,
+    pickupLng: row.pickup_lng,
+    availableUntil: row.available_until,
+    donorId: row.donor_id,
+    donorName: row.donor_name,
+    donorPhone: row.donor_phone,
+    deliveryTaskId: row.delivery_task_id,
+    deliveryStatus: row.delivery_status,
+    dropoffCode: row.dropoff_code,
+    dropoffAddress: row.dropoff_address,
+    dropoffLat: row.dropoff_lat,
+    dropoffLng: row.dropoff_lng,
+    pickupConfirmedAt: row.pickup_confirmed_at,
+    deliveryConfirmedAt: row.delivery_confirmed_at,
+    riderId: row.rider_id,
+    riderUserId: row.rider_user_id,
+    riderName: row.rider_name,
+    riderPhone: row.rider_phone,
+    distributionRecordId: row.distribution_record_id,
     quantityReceived: row.quantity_received != null ? Number(row.quantity_received) : undefined,
     quantityDistributed: row.quantity_distributed != null ? Number(row.quantity_distributed) : undefined,
     quantityRemaining: row.quantity_remaining != null ? Number(row.quantity_remaining) : undefined,
-    distributionStatus: row.distribution_status || row.distributionStatus,
+    distributionStatus: row.distribution_status,
   };
 }
 
 function mapDeliveryTask(row: any): DeliveryTask {
   return {
     id: row.id,
-    foodListingId: row.food_listing_id || row.foodListingId,
-    claimId: row.claim_id || row.claimId,
-    riderId: row.rider_id || row.riderId,
-    donorId: row.donor_id || row.donorId,
-    ngoId: row.ngo_id || row.ngoId,
-    pickupAddress: row.pickup_address || row.pickupAddress,
-    pickupLat: row.pickup_lat || row.pickupLat,
-    pickupLng: row.pickup_lng || row.pickupLng,
-    dropoffAddress: row.dropoff_address || row.dropoffAddress,
-    dropoffLat: row.dropoff_lat || row.dropoffLat,
-    dropoffLng: row.dropoff_lng || row.dropoffLng,
-    foodTitle: row.food_title || row.foodTitle,
-    servingsRequired: Number(row.servings_required ?? row.servingsRequired ?? 1),
-    quantityUnit: row.quantity_unit || row.quantityUnit || 'servings',
-    pickupWindowStart: row.pickup_window_start || row.pickupWindowStart,
-    pickupWindowEnd: row.pickup_window_end || row.pickupWindowEnd,
-    collectionDeadline: row.collection_deadline || row.collectionDeadline,
+    foodListingId: row.food_listing_id,
+    claimId: row.claim_id,
+    riderId: row.rider_id,
+    donorId: row.donor_id,
+    ngoId: row.ngo_id,
+    assignmentType: row.assignment_type || 'ngo_delivery',
+    pickupAddress: row.pickup_address,
+    pickupLat: row.pickup_lat,
+    pickupLng: row.pickup_lng,
+    dropoffAddress: row.dropoff_address,
+    dropoffLat: row.dropoff_lat,
+    dropoffLng: row.dropoff_lng,
+    foodTitle: row.food_title,
+    servingsRequired: Number(row.servings_required ?? 1),
+    quantityUnit: row.quantity_unit || 'servings',
+    pickupWindowStart: row.pickup_window_start,
+    pickupWindowEnd: row.pickup_window_end,
+    collectionDeadline: row.collection_deadline,
     status: row.status,
-    pickupCode: row.pickup_code || row.pickupCode,
-    dropoffCode: row.dropoff_code || row.dropoffCode,
-    pickupConfirmedAt: row.pickup_confirmed_at || row.pickupConfirmedAt,
+    pickupConfirmedAt: row.pickup_confirmed_at,
     servingsCollected: row.servings_collected != null ? Number(row.servings_collected) : undefined,
-    collectionDiscrepancy: row.collection_discrepancy || row.collectionDiscrepancy,
-    deliveryConfirmedAt: row.delivery_confirmed_at || row.deliveryConfirmedAt,
+    collectionDiscrepancy: row.collection_discrepancy,
+    deliveryConfirmedAt: row.delivery_confirmed_at,
     servingsDelivered: row.servings_delivered != null ? Number(row.servings_delivered) : undefined,
-    incidentReported: row.incident_reported || false,
-    incidentType: row.incident_type || row.incidentType,
-    incidentNotes: row.incident_notes || row.incidentNotes,
+    incidentReported: !!row.incident_reported,
+    incidentType: row.incident_type,
+    incidentNotes: row.incident_notes,
     instructions: row.instructions,
-    estimatedKm: row.estimated_km || row.estimatedKm,
-    riderAssignedAt: row.rider_assigned_at || row.riderAssignedAt,
-    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
-    updatedAt: row.updated_at || row.updatedAt || new Date().toISOString(),
-    foodType: row.food_type || row.foodType,
-    foodCategory: row.category || row.foodCategory,
-    foodImageUrl: row.image_url || row.foodImageUrl,
-    donorName: row.donor_name || row.donorName,
-    ngoName: row.ngo_name || row.ngoName,
-    ngoOrgName: row.ngo_org_name || row.ngoOrgName,
-    servingsClaimed: row.servings_claimed || row.servingsClaimed,
-    riderName: row.rider_name || row.riderName,
-    riderPhone: row.rider_phone || row.riderPhone,
+    estimatedKm: row.estimated_km,
+    riderAssignedAt: row.rider_assigned_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    foodType: row.food_type,
+    foodCategory: row.category,
+    foodImageUrl: row.image_url,
+    donorName: row.donor_name,
+    donorPhone: row.donor_phone,
+    ngoName: row.ngo_name,
+    ngoOrgName: row.ngo_org_name,
+    ngoPhone: row.ngo_phone,
+    servingsClaimed: row.servings_claimed,
+    riderName: row.rider_name,
+    riderPhone: row.rider_phone,
+    riderUserId: row.rider_user_id,
   };
 }
 
 function mapDistributionRecord(row: any): DistributionRecord {
   return {
     id: row.id,
-    foodListingId: row.food_listing_id || row.foodListingId,
-    claimId: row.claim_id || row.claimId,
-    deliveryTaskId: row.delivery_task_id || row.deliveryTaskId,
-    ngoId: row.ngo_id || row.ngoId,
-    recordedBy: row.recorded_by || row.recordedBy,
-    quantityReceived: Number(row.quantity_received ?? row.quantityReceived ?? 0),
-    quantityDistributed: Number(row.quantity_distributed ?? row.quantityDistributed ?? 0),
-    quantityRemaining: Number(row.quantity_remaining ?? row.quantityRemaining ?? 0),
-    quantityRejected: Number(row.quantity_rejected ?? row.quantityRejected ?? 0),
-    quantityUnit: row.quantity_unit || row.quantityUnit || 'servings',
-    distributionDate: row.distribution_date || row.distributionDate,
-    distributionTime: row.distribution_time || row.distributionTime,
-    distributionLocation: row.distribution_location || row.distributionLocation,
-    distributionMethod: row.distribution_method || row.distributionMethod || 'direct',
+    foodListingId: row.food_listing_id,
+    claimId: row.claim_id,
+    deliveryTaskId: row.delivery_task_id,
+    ngoId: row.ngo_id,
+    recordedBy: row.recorded_by,
+    quantityReceived: Number(row.quantity_received ?? 0),
+    quantityDistributed: Number(row.quantity_distributed ?? 0),
+    quantityRemaining: Number(row.quantity_remaining ?? 0),
+    quantityRejected: Number(row.quantity_rejected ?? 0),
+    quantityUnit: row.quantity_unit || 'servings',
+    distributionDate: row.distribution_date,
+    distributionTime: row.distribution_time,
+    distributionLocation: row.distribution_location,
+    distributionMethod: row.distribution_method || 'direct',
     peopleServed: row.people_served != null ? Number(row.people_served) : undefined,
     mealPortions: row.meal_portions != null ? Number(row.meal_portions) : undefined,
     status: row.status,
-    conditionNotes: row.condition_notes || row.conditionNotes,
-    safetyConcern: row.safety_concern || false,
-    safetyNotes: row.safety_notes || row.safetyNotes,
-    evidenceUrl: row.evidence_url || row.evidenceUrl,
-    isVerified: row.is_verified || false,
-    receiptConfirmedAt: row.receipt_confirmed_at || row.receiptConfirmedAt,
-    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
-    updatedAt: row.updated_at || row.updatedAt || new Date().toISOString(),
+    conditionNotes: row.condition_notes,
+    safetyConcern: !!row.safety_concern,
+    safetyNotes: row.safety_notes,
+    evidenceUrl: row.evidence_url,
+    isVerified: !!row.is_verified,
+    receiptConfirmedAt: row.receipt_confirmed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
 export const ClaimsService = {
-  // ── NGO Claiming ──────────────────────────────────────
+  // ── Unified Atomic First-Acceptance-Wins (NGO or Rider) ──────────────────
+  async acceptDonation(
+    foodListingId: string,
+    servings?: number,
+    pickupTime?: string,
+    notes?: string
+  ): Promise<{ acceptedBy: 'ngo' | 'rider'; claimId?: string; deliveryTaskId?: string; status: string }> {
+    if (!isValidUUID(foodListingId)) {
+      throw new Error('Invalid food donation ID');
+    }
+
+    const { data, error } = await supabase.rpc('accept_donation', {
+      p_food_listing_id: foodListingId,
+      p_servings: servings ?? null,
+      p_pickup_time: pickupTime || null,
+      p_notes: notes || null,
+    });
+
+    if (!error && data) {
+      return {
+        acceptedBy: data.accepted_by,
+        claimId: data.claim_id,
+        deliveryTaskId: data.delivery_task_id,
+        status: data.status,
+      };
+    }
+
+    if (error && error.code !== 'PGRST202') {
+      throw new Error(error.message || 'Could not accept food donation.');
+    }
+
+    // Legacy fallback only when accept_donation RPC is not yet applied (calls claim_food RPC)
+    const { data: claimId, error: claimErr } = await supabase.rpc('claim_food', {
+      p_food_listing_id: foodListingId,
+      p_servings: servings ?? 1,
+      p_pickup_time: pickupTime || null,
+      p_notes: notes || null,
+    });
+
+    if (claimErr) {
+      throw new Error(claimErr.message || 'Claim failed. Another user may have already accepted this donation.');
+    }
+
+    return {
+      acceptedBy: 'ngo',
+      claimId: claimId as string,
+      status: 'confirmed',
+    };
+  },
+
+  // ── NGO Claiming ─────────────────────────────────────────────────────────
   async claimFood(
     foodListingId: string,
     servings: number,
     pickupTime?: string,
     notes?: string
   ): Promise<string> {
-    const safeFoodListingId = toSafeUUID(foodListingId);
-
-    if (isValidUUID(safeFoodListingId)) {
-      try {
-        const { data, error } = await supabase.rpc('claim_food', {
-          p_food_listing_id: safeFoodListingId,
-          p_servings: servings,
-          p_pickup_time: pickupTime || null,
-          p_notes: notes || null,
-        });
-        if (!error && data) return data as string;
-      } catch {
-        // Fall through to resilient fallback
-      }
-    }
-
-    // RESILIENT FALLBACK:
-    // Direct table operations so claiming never fails even before SQL migration
-    const { data: { user } } = await supabase.auth.getUser();
-    const safeNgoUserId = toSafeUUID(user?.id, DEMO_RECORD_UUIDS.ngo);
-
-    let listing: any = null;
-    if (isValidUUID(safeFoodListingId)) {
-      const { data: foundListing } = await supabase
-        .from('food_listings')
-        .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
-        .eq('id', safeFoodListingId)
-        .maybeSingle();
-      listing = foundListing;
-    }
-
-    // If listing not found in DB or mock listing
-    const listingTitle = listing?.title || 'Nutritious Prepared Food';
-    const listingCategory = listing?.category || 'cooked_meals';
-    const listingFoodType = listing?.food_type || 'veg';
-    const listingImageUrl = listing?.image_url;
-    const listingAddress = listing?.pickup_address || 'Central Community Hub, Bhopal';
-    const listingCity = listing?.city || 'Bhopal';
-    const listingAvailableUntil = listing?.available_until || new Date(Date.now() + 4 * 3600 * 1000).toISOString();
-    const safeDonorId = toSafeUUID(listing?.donor_id, DEMO_RECORD_UUIDS.donor);
-    const donorName = listing?.donor?.full_name || 'Food Donor';
-
-    if (listing) {
-      if (listing.available_servings < servings) {
-        throw new Error(`Only ${listing.available_servings} servings available`);
-      }
-      const newAvailable = Math.max(0, listing.available_servings - servings);
-      const newStatus = newAvailable === 0 ? 'reserved' : 'partially_reserved';
-
-      // Update food listing
-      await supabase
-        .from('food_listings')
-        .update({ available_servings: newAvailable, status: newStatus })
-        .eq('id', safeFoodListingId);
-    }
-
-    // Record in reservations table
-    let reservationId: string | undefined;
-    if (isValidUUID(safeFoodListingId) && isValidUUID(safeNgoUserId)) {
-      try {
-        const { data: res } = await supabase
-          .from('reservations')
-          .insert({
-            food_listing_id: safeFoodListingId,
-            user_id: safeNgoUserId,
-            servings: servings,
-            status: 'confirmed',
-            pickup_time: pickupTime || null,
-            notes: notes || null,
-          })
-          .select('id')
-          .maybeSingle();
-        reservationId = res?.id;
-      } catch {}
-    }
-
-    const claimId = crypto.randomUUID();
-    const taskId = crypto.randomUUID();
-    const pickupCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const dropoffCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-    const newClaim: NgoClaim = {
-      id: claimId,
-      foodListingId: safeFoodListingId,
-      ngoId: safeNgoUserId,
-      reservationId,
-      servingsClaimed: servings,
-      status: 'awaiting_rider',
-      pickupTime,
-      notes,
-      foodTitle: listingTitle,
-      foodCategory: listingCategory,
-      foodType: listingFoodType,
-      foodImageUrl: listingImageUrl,
-      pickupAddress: listingAddress,
-      pickupCity: listingCity,
-      availableUntil: listingAvailableUntil,
-      donorName,
-      deliveryTaskId: taskId,
-      deliveryStatus: 'awaiting_rider',
-      pickupCode,
-      dropoffCode,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    const newTask: DeliveryTask = {
-      id: taskId,
-      foodListingId: safeFoodListingId,
-      claimId,
-      donorId: safeDonorId,
-      ngoId: safeNgoUserId,
-      foodTitle: listingTitle,
-      foodType: listingFoodType,
-      foodCategory: listingCategory,
-      foodImageUrl: listingImageUrl,
-      donorName,
-      pickupAddress: listingAddress,
-      pickupLat: listing?.latitude ?? 23.2384,
-      pickupLng: listing?.longitude ?? 77.4042,
-      dropoffAddress: 'NGO Community Distribution Center',
-      servingsRequired: servings,
-      quantityUnit: 'servings',
-      collectionDeadline: listingAvailableUntil,
-      status: 'awaiting_rider',
-      pickupCode,
-      dropoffCode,
-      incidentReported: false,
-      instructions: notes,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Store in local cache
-    const claims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-    setLocalStore(LS_CLAIMS_KEY, [newClaim, ...claims]);
-
-    const tasks = getLocalStore<DeliveryTask>(LS_TASKS_KEY);
-    setLocalStore(LS_TASKS_KEY, [newTask, ...tasks]);
-
-    // Attempt direct insert to ngo_claims & delivery_tasks if tables exist
-    if (isValidUUID(safeFoodListingId) && isValidUUID(safeNgoUserId)) {
-      try {
-        await supabase.from('ngo_claims').insert({
-          id: claimId,
-          food_listing_id: safeFoodListingId,
-          ngo_id: safeNgoUserId,
-          reservation_id: reservationId,
-          servings_claimed: servings,
-          status: 'awaiting_rider',
-          pickup_time: pickupTime,
-          notes,
-        });
-        await supabase.from('delivery_tasks').insert({
-          id: taskId,
-          food_listing_id: safeFoodListingId,
-          claim_id: claimId,
-          donor_id: safeDonorId,
-          ngo_id: safeNgoUserId,
-          pickup_address: listingAddress,
-          pickup_lat: listing?.latitude,
-          pickup_lng: listing?.longitude,
-          dropoff_address: 'NGO Distribution Center',
-          food_title: listingTitle,
-          servings_required: servings,
-          status: 'awaiting_rider',
-          pickup_code: pickupCode,
-          dropoff_code: dropoffCode,
-        });
-      } catch {}
-    }
-
-    // Send persistent notification to donor
-    if (isValidUUID(safeDonorId)) {
-      try {
-        await supabase.from('notifications').insert({
-          user_id: safeDonorId,
-          type: 'donation_claimed',
-          title: 'Food Donation Claimed',
-          message: `${servings} servings of "${listingTitle}" have been claimed by an NGO. A rider is being assigned.`,
-        });
-      } catch {}
-    }
-
-    return claimId;
+    const res = await ClaimsService.acceptDonation(foodListingId, servings, pickupTime, notes);
+    return res.claimId || res.deliveryTaskId || foodListingId;
   },
 
   async createDeliveryTask(claimId: string): Promise<string> {
-    const safeClaimId = toSafeUUID(claimId);
-    if (isValidUUID(safeClaimId)) {
-      try {
-        const { data, error } = await supabase.rpc('create_delivery_task', {
-          p_claim_id: safeClaimId,
-        });
-        if (!error && data) return data as string;
-      } catch {}
+    if (!isValidUUID(claimId)) throw new Error('Invalid claim ID');
+    const { data, error } = await supabase.rpc('create_delivery_task', {
+      p_claim_id: claimId,
+    });
+    if (error || !data) {
+      throw new Error(error?.message || 'Failed to create delivery task');
     }
-
-    // Direct fallback
-    let claim: any = null;
-    if (isValidUUID(safeClaimId)) {
-      const { data } = await supabase
-        .from('ngo_claims')
-        .select('*, food:food_listings(*)')
-        .eq('id', safeClaimId)
-        .maybeSingle();
-      claim = data;
-    }
-    if (!claim) {
-      const localClaims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-      claim = localClaims.find(c => c.id === claimId || c.id === safeClaimId);
-    }
-
-    if (!claim) throw new Error('Claim not found');
-
-    const pickupCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const dropoffCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const taskId = crypto.randomUUID();
-    const safeListingId = toSafeUUID(claim.food_listing_id || claim.foodListingId);
-    const safeDonorId = toSafeUUID(claim.food?.donor_id || claim.donorId, DEMO_RECORD_UUIDS.donor);
-    const safeNgoId = toSafeUUID(claim.ngo_id || claim.ngoId, DEMO_RECORD_UUIDS.ngo);
-
-    if (isValidUUID(safeClaimId) && isValidUUID(safeListingId)) {
-      try {
-        const { data: task, error: taskErr } = await supabase
-          .from('delivery_tasks')
-          .insert({
-            id: taskId,
-            claim_id: safeClaimId,
-            food_listing_id: safeListingId,
-            donor_id: safeDonorId,
-            ngo_id: safeNgoId,
-            pickup_address: claim.food?.pickup_address || claim.pickupAddress,
-            pickup_lat: claim.food?.latitude,
-            pickup_lng: claim.food?.longitude,
-            food_title: claim.food?.title || claim.foodTitle || 'Prepared Food',
-            servings_required: claim.servings_claimed || claim.servingsClaimed || 1,
-            status: 'awaiting_rider',
-            pickup_code: pickupCode,
-            dropoff_code: dropoffCode,
-          })
-          .select()
-          .maybeSingle();
-
-        if (!taskErr && task?.id) return task.id;
-      } catch {}
-    }
-    return taskId;
+    return data as string;
   },
 
   async cancelClaim(claimId: string, reason?: string): Promise<boolean> {
-    const safeClaimId = toSafeUUID(claimId);
-    if (isValidUUID(safeClaimId)) {
-      try {
-        const { data, error } = await supabase.rpc('cancel_ngo_claim', {
-          p_claim_id: safeClaimId,
-          p_reason: reason || null,
-        });
-        if (!error) return !!data;
-      } catch {}
-    }
-
-    // Fallback: update local store
-    const claims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-    const updated = claims.map(c => (c.id === claimId || c.id === safeClaimId) ? { ...c, status: 'cancelled', cancellationReason: reason } : c);
-    setLocalStore(LS_CLAIMS_KEY, updated);
-    return true;
+    if (!isValidUUID(claimId)) throw new Error('Invalid claim ID');
+    const { data, error } = await supabase.rpc('cancel_ngo_claim', {
+      p_claim_id: claimId,
+      p_reason: reason || null,
+    });
+    if (error) throw new Error(error.message || 'Failed to cancel claim');
+    return !!data;
   },
 
-  // ── NGO Claims Dashboard ───────────────────────────────
+  // ── NGO Claims Dashboard ─────────────────────────────────────────────────
   async getMyClaims(ngoId: string): Promise<NgoClaim[]> {
-    const safeNgoId = toSafeUUID(ngoId, DEMO_RECORD_UUIDS.ngo);
-    try {
-      const { data, error } = await supabase
-        .from('ngo_claims_dashboard_view')
-        .select('*')
-        .eq('ngo_id', safeNgoId)
-        .order('created_at', { ascending: false });
-      if (!error && data) return data.map(mapClaim);
-    } catch {}
+    if (!isValidUUID(ngoId)) return [];
+    const { data, error } = await supabase
+      .from('ngo_claims_dashboard_view')
+      .select('*')
+      .eq('ngo_id', ngoId)
+      .order('created_at', { ascending: false });
 
-    // Fallback: merge remote reservations with local claims
-    const local = getLocalStore<NgoClaim>(LS_CLAIMS_KEY).filter(c => c.ngoId === safeNgoId || c.ngoId === ngoId);
-    try {
-      const { data: resData } = await supabase
-        .from('reservations')
-        .select('*, food:food_listings(*, donor:profiles!food_listings_donor_id_fkey(*))')
-        .eq('user_id', safeNgoId)
-        .order('created_at', { ascending: false });
+    if (!error && data) return data.map(mapClaim);
 
-      if (resData && resData.length > 0) {
-        const fromRes: NgoClaim[] = resData.map(r => ({
-          id: r.id,
-          foodListingId: r.food_listing_id,
-          ngoId: r.user_id,
-          reservationId: r.id,
-          servingsClaimed: r.servings,
-          status: r.status === 'confirmed' ? 'awaiting_rider' : r.status,
-          pickupTime: r.pickup_time,
-          notes: r.notes,
-          foodTitle: r.food?.title,
-          foodCategory: r.food?.category,
-          foodType: r.food?.food_type,
-          foodImageUrl: r.food?.image_url,
-          pickupAddress: r.food?.pickup_address,
-          pickupCity: r.food?.city,
-          availableUntil: r.food?.available_until,
-          donorName: r.food?.donor?.full_name || 'Food Donor',
-          dropoffCode: '482910',
-          createdAt: r.created_at,
-          updatedAt: r.updated_at,
-        }));
+    // Fallback to direct ngo_claims query if view fails
+    const { data: directClaims } = await supabase
+      .from('ngo_claims')
+      .select('*, food:food_listings(*, donor:profiles!food_listings_donor_id_fkey(*))')
+      .eq('ngo_id', ngoId)
+      .order('created_at', { ascending: false });
 
-        // Deduplicate
-        const seen = new Set(local.map(l => l.id));
-        for (const item of fromRes) {
-          if (!seen.has(item.id)) local.push(item);
-        }
-      }
-    } catch {}
-
-    return local;
+    if (!directClaims) return [];
+    return directClaims.map((r: any) =>
+      mapClaim({
+        ...r,
+        food_title: r.food?.title,
+        category: r.food?.category,
+        food_type: r.food?.food_type,
+        image_url: r.food?.image_url,
+        pickup_address: r.food?.pickup_address,
+        pickup_city: r.food?.city,
+        pickup_lat: r.food?.latitude,
+        pickup_lng: r.food?.longitude,
+        available_until: r.food?.available_until,
+        donor_id: r.food?.donor_id,
+        donor_name: r.food?.donor?.full_name,
+        donor_phone: r.food?.donor?.phone,
+      })
+    );
   },
 
   async getClaimById(claimId: string): Promise<NgoClaim | null> {
-    const safeClaimId = toSafeUUID(claimId);
-    if (isValidUUID(safeClaimId)) {
-      try {
-        const { data, error } = await supabase
-          .from('ngo_claims_dashboard_view')
-          .select('*')
-          .eq('id', safeClaimId)
-          .maybeSingle();
-        if (!error && data) return mapClaim(data);
-      } catch {}
-    }
-
-    const local = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-    return local.find(c => c.id === claimId || c.id === safeClaimId) || null;
+    if (!isValidUUID(claimId)) return null;
+    const { data, error } = await supabase
+      .from('ngo_claims_dashboard_view')
+      .select('*')
+      .eq('id', claimId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return mapClaim(data);
   },
 
   async getClaimsForDonation(foodListingId: string): Promise<NgoClaim[]> {
-    const safeListingId = toSafeUUID(foodListingId);
-    if (isValidUUID(safeListingId)) {
-      try {
-        const { data, error } = await supabase
-          .from('ngo_claims')
-          .select('*')
-          .eq('food_listing_id', safeListingId)
-          .order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) return data.map(mapClaim);
-      } catch {}
-    }
-
-    const local = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-    return local.filter(c => c.foodListingId === foodListingId || c.foodListingId === safeListingId);
+    if (!isValidUUID(foodListingId)) return [];
+    const { data, error } = await supabase
+      .from('ngo_claims')
+      .select('*')
+      .eq('food_listing_id', foodListingId)
+      .order('created_at', { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapClaim);
   },
 
-  // ── Delivery Tasks (Rider Workflow) ────────────────────
-  async getAvailableDeliveryTasks(): Promise<DeliveryTask[]> {
-    try {
-      const { data, error } = await supabase
-        .from('rider_tasks_view')
-        .select('*')
-        .eq('status', 'awaiting_rider')
-        .order('created_at', { ascending: false });
-      if (!error && data) return data.map(mapDeliveryTask);
-    } catch {}
+  // ── Delivery Tasks & Direct Food Opportunities (Rider Workflow) ──────────
+  async getAvailableDeliveryTasks(riderLat?: number, riderLng?: number): Promise<DeliveryTask[]> {
+    const results: DeliveryTask[] = [];
 
-    // Fallback: check delivery_tasks or local store
-    try {
-      const { data: dtData } = await supabase
-        .from('delivery_tasks')
-        .select('*')
-        .eq('status', 'awaiting_rider');
-      if (dtData && dtData.length > 0) return dtData.map(mapDeliveryTask);
-    } catch {}
+    // 1. Existing delivery tasks awaiting a rider (NGO claimed first)
+    const { data: viewTasks, error } = await supabase
+      .from('rider_tasks_view')
+      .select('*')
+      .eq('status', 'awaiting_rider')
+      .order('created_at', { ascending: false });
 
-    return getLocalStore<DeliveryTask>(LS_TASKS_KEY).filter(t => t.status === 'awaiting_rider');
+    if (!error && viewTasks) {
+      for (const row of viewTasks) {
+        const mapped = mapDeliveryTask(row);
+        if (
+          riderLat != null &&
+          riderLng != null &&
+          mapped.pickupLat != null &&
+          mapped.pickupLng != null
+        ) {
+          mapped.distanceKm = LocationService.calculateDistance(
+            riderLat,
+            riderLng,
+            mapped.pickupLat,
+            mapped.pickupLng
+          );
+        }
+        results.push(mapped);
+      }
+    }
+
+    // 2. Nearby unclaimed food listings where a rider can win First-Acceptance-Wins directly
+    const { data: openFood } = await supabase
+      .from('food_listings')
+      .select('*, donor:profiles!food_listings_donor_id_fkey(full_name, phone)')
+      .eq('status', 'available')
+      .gt('available_servings', 0)
+      .gt('available_until', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    if (openFood) {
+      const existingFoodIds = new Set(results.map((r) => r.foodListingId));
+      for (const fl of openFood) {
+        if (existingFoodIds.has(fl.id)) continue;
+        const dist =
+          riderLat != null && riderLng != null && fl.latitude != null && fl.longitude != null
+            ? LocationService.calculateDistance(riderLat, riderLng, fl.latitude, fl.longitude)
+            : undefined;
+        results.push({
+          id: fl.id,
+          foodListingId: fl.id,
+          donorId: fl.donor_id,
+          assignmentType: 'rider_direct_pickup',
+          pickupAddress: fl.pickup_address || fl.city || 'Donor Location',
+          pickupLat: fl.latitude,
+          pickupLng: fl.longitude,
+          dropoffAddress: 'Community Distribution / Shelter',
+          foodTitle: fl.title,
+          servingsRequired: fl.available_servings,
+          quantityUnit: fl.quantity_unit || 'servings',
+          collectionDeadline: fl.available_until,
+          status: 'awaiting_rider',
+          incidentReported: false,
+          instructions: fl.description,
+          createdAt: fl.created_at,
+          updatedAt: fl.updated_at,
+          foodType: fl.food_type,
+          foodCategory: fl.category,
+          foodImageUrl: fl.image_url,
+          donorName: fl.donor?.full_name || 'Donor',
+          donorPhone: fl.donor?.phone,
+          isDirectFoodOpportunity: true,
+          distanceKm: dist,
+        });
+      }
+    }
+
+    return results.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
   },
 
   async getMyDeliveryTasks(riderUserId: string): Promise<DeliveryTask[]> {
-    const safeRiderUserId = toSafeUUID(riderUserId, DEMO_RECORD_UUIDS.rider);
-    try {
-      const { data: riderData } = await supabase
-        .from('riders')
-        .select('id')
-        .eq('user_id', safeRiderUserId)
-        .maybeSingle();
+    if (!isValidUUID(riderUserId)) return [];
+    const { data: riderData } = await supabase
+      .from('riders')
+      .select('id')
+      .eq('user_id', riderUserId)
+      .maybeSingle();
 
-      const riderId = riderData?.id || safeRiderUserId;
-      if (isValidUUID(riderId)) {
-        const { data, error } = await supabase
-          .from('rider_tasks_view')
-          .select('*')
-          .eq('rider_id', riderId)
-          .order('created_at', { ascending: false });
-        if (!error && data) return data.map(mapDeliveryTask);
-      }
-    } catch {}
+    if (!riderData?.id) return [];
 
-    return getLocalStore<DeliveryTask>(LS_TASKS_KEY).filter(t => t.riderId === safeRiderUserId || t.riderId === riderUserId);
+    const { data, error } = await supabase
+      .from('rider_tasks_view')
+      .select('*')
+      .eq('rider_id', riderData.id)
+      .order('created_at', { ascending: false });
+
+    if (error || !data) return [];
+    return data.map(mapDeliveryTask);
   },
 
   async getDeliveryTaskById(taskId: string): Promise<DeliveryTask | null> {
-    const safeTaskId = toSafeUUID(taskId);
-    if (isValidUUID(safeTaskId)) {
-      try {
-        const { data, error } = await supabase
-          .from('rider_tasks_view')
-          .select('*')
-          .eq('id', safeTaskId)
-          .maybeSingle();
-        if (!error && data) return mapDeliveryTask(data);
-      } catch {}
-    }
-
-    const tasks = getLocalStore<DeliveryTask>(LS_TASKS_KEY);
-    return tasks.find(t => t.id === taskId || t.id === safeTaskId) || null;
+    if (!isValidUUID(taskId)) return null;
+    const { data, error } = await supabase
+      .from('rider_tasks_view')
+      .select('*')
+      .eq('id', taskId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return mapDeliveryTask(data);
   },
 
   async acceptDeliveryJob(taskId: string): Promise<boolean> {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Authentication required');
-    const safeRiderId = toSafeUUID(user.id, DEMO_RECORD_UUIDS.rider);
-    const safeTaskId = toSafeUUID(taskId);
+    if (!isValidUUID(taskId)) throw new Error('Invalid delivery task ID');
 
-    if (isValidUUID(safeTaskId)) {
-      try {
-        const { data, error } = await supabase.rpc('accept_delivery_job', {
-          p_task_id: safeTaskId,
-        });
-        if (!error && data) return true;
-      } catch {}
-    }
-
-    // Fallback: update local store & table
-    const tasks = getLocalStore<DeliveryTask>(LS_TASKS_KEY);
-    const updated = tasks.map(t => {
-      if (t.id === taskId || t.id === safeTaskId) {
-        return {
-          ...t,
-          riderId: safeRiderId,
-          riderName: user.user_metadata?.full_name || 'Volunteer Rider',
-          status: 'going_to_pickup',
-          riderAssignedAt: new Date().toISOString(),
-        };
-      }
-      return t;
+    const { data, error } = await supabase.rpc('accept_delivery_job', {
+      p_task_id: taskId,
     });
-    setLocalStore(LS_TASKS_KEY, updated);
 
-    // Also update associated claim in local store
-    const task = tasks.find(t => t.id === taskId || t.id === safeTaskId);
-    if (task?.claimId) {
-      const claims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-      setLocalStore(
-        LS_CLAIMS_KEY,
-        claims.map(c => c.id === task.claimId ? { ...c, status: 'rider_assigned', deliveryStatus: 'going_to_pickup' } : c)
-      );
+    if (error) {
+      throw new Error(error.message || 'This delivery job was already taken by another rider.');
     }
-
-    if (isValidUUID(safeTaskId)) {
-      try {
-        await supabase
-          .from('delivery_tasks')
-          .update({ rider_id: safeRiderId, status: 'going_to_pickup', rider_assigned_at: new Date().toISOString() })
-          .eq('id', safeTaskId);
-      } catch {}
+    if (!data) {
+      throw new Error('This delivery job is no longer available.');
     }
-
     return true;
   },
 
@@ -751,60 +542,15 @@ export const ClaimsService = {
     servingsCollected: number,
     discrepancyNotes?: string
   ): Promise<boolean> {
-    const safeTaskId = toSafeUUID(taskId);
-    if (isValidUUID(safeTaskId)) {
-      try {
-        const { data, error } = await supabase.rpc('confirm_pickup', {
-          p_task_id: safeTaskId,
-          p_pickup_code: pickupCode,
-          p_servings_collected: servingsCollected,
-          p_discrepancy_notes: discrepancyNotes || null,
-        });
-        if (!error && data) return true;
-      } catch {}
-    }
-
-    // Fallback: update task
-    const tasks = getLocalStore<DeliveryTask>(LS_TASKS_KEY);
-    const updated = tasks.map(t => {
-      if (t.id === taskId || t.id === safeTaskId) {
-        return {
-          ...t,
-          status: 'food_collected',
-          servingsCollected,
-          pickupConfirmedAt: new Date().toISOString(),
-          collectionDiscrepancy: discrepancyNotes,
-        };
-      }
-      return t;
+    if (!isValidUUID(taskId)) throw new Error('Invalid task ID');
+    const { data, error } = await supabase.rpc('confirm_pickup', {
+      p_task_id: taskId,
+      p_pickup_code: pickupCode.trim(),
+      p_servings_collected: servingsCollected,
+      p_discrepancy_notes: discrepancyNotes || null,
     });
-    setLocalStore(LS_TASKS_KEY, updated);
-
-    // Update claim
-    const task = tasks.find(t => t.id === taskId || t.id === safeTaskId);
-    if (task?.claimId) {
-      const claims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-      setLocalStore(
-        LS_CLAIMS_KEY,
-        claims.map(c => c.id === task.claimId ? { ...c, status: 'food_collected', deliveryStatus: 'food_collected' } : c)
-      );
-    }
-
-    if (isValidUUID(safeTaskId)) {
-      try {
-        await supabase
-          .from('delivery_tasks')
-          .update({
-            status: 'food_collected',
-            servings_collected: servingsCollected,
-            pickup_confirmed_at: new Date().toISOString(),
-            collection_discrepancy: discrepancyNotes || null,
-          })
-          .eq('id', safeTaskId);
-      } catch {}
-    }
-
-    return true;
+    if (error) throw new Error(error.message || 'Pickup verification failed');
+    return !!data;
   },
 
   async confirmDeliveryToNgo(
@@ -812,133 +558,78 @@ export const ClaimsService = {
     dropoffCode: string,
     servingsDelivered: number
   ): Promise<boolean> {
-    const safeTaskId = toSafeUUID(taskId);
-    if (isValidUUID(safeTaskId)) {
-      try {
-        const { data, error } = await supabase.rpc('confirm_delivery_to_ngo', {
-          p_task_id: safeTaskId,
-          p_dropoff_code: dropoffCode,
-          p_servings_delivered: servingsDelivered,
-        });
-        if (!error && data) return true;
-      } catch {}
-    }
-
-    // Fallback
-    const tasks = getLocalStore<DeliveryTask>(LS_TASKS_KEY);
-    const updated = tasks.map(t => {
-      if (t.id === taskId || t.id === safeTaskId) {
-        return {
-          ...t,
-          status: 'delivered',
-          servingsDelivered,
-          deliveryConfirmedAt: new Date().toISOString(),
-        };
-      }
-      return t;
+    if (!isValidUUID(taskId)) throw new Error('Invalid task ID');
+    const { data, error } = await supabase.rpc('confirm_delivery_to_ngo', {
+      p_task_id: taskId,
+      p_dropoff_code: (dropoffCode || '').trim(),
+      p_servings_delivered: servingsDelivered,
     });
-    setLocalStore(LS_TASKS_KEY, updated);
-
-    // Update claim
-    const task = tasks.find(t => t.id === taskId || t.id === safeTaskId);
-    if (task?.claimId) {
-      const claims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-      setLocalStore(
-        LS_CLAIMS_KEY,
-        claims.map(c => c.id === task.claimId ? { ...c, status: 'delivered', deliveryStatus: 'delivered' } : c)
-      );
-    }
-
-    if (isValidUUID(safeTaskId)) {
-      try {
-        await supabase
-          .from('delivery_tasks')
-          .update({
-            status: 'delivered',
-            servings_delivered: servingsDelivered,
-            delivery_confirmed_at: new Date().toISOString(),
-          })
-          .eq('id', safeTaskId);
-      } catch {}
-    }
-
-    return true;
+    if (error) throw new Error(error.message || 'Delivery verification failed');
+    return !!data;
   },
 
-  async reportIncident(
-    taskId: string,
-    incidentType: string,
-    notes: string
-  ): Promise<boolean> {
-    const safeTaskId = toSafeUUID(taskId);
-    if (isValidUUID(safeTaskId)) {
-      try {
-        const { data, error } = await supabase.rpc('report_delivery_incident', {
-          p_task_id: safeTaskId,
-          p_incident_type: incidentType,
-          p_notes: notes,
-        });
-        if (!error && data) return true;
-      } catch {}
-    }
-
-    const tasks = getLocalStore<DeliveryTask>(LS_TASKS_KEY);
-    const updated = tasks.map(t => {
-      if (t.id === taskId || t.id === safeTaskId) {
-        return {
-          ...t,
-          incidentReported: true,
-          incidentType,
-          incidentNotes: notes,
-        };
-      }
-      return t;
+  async reportIncident(taskId: string, incidentType: string, notes: string): Promise<boolean> {
+    if (!isValidUUID(taskId)) throw new Error('Invalid task ID');
+    const { data, error } = await supabase.rpc('report_delivery_incident', {
+      p_task_id: taskId,
+      p_incident_type: incidentType,
+      p_notes: notes,
     });
-    setLocalStore(LS_TASKS_KEY, updated);
-    return true;
+    if (error) throw new Error(error.message || 'Failed to report incident');
+    return !!data;
   },
 
-  async updateDeliveryTaskStatus(taskId: string, status: string): Promise<boolean> {
-    const safeTaskId = toSafeUUID(taskId);
-    const tasks = getLocalStore<DeliveryTask>(LS_TASKS_KEY);
-    setLocalStore(
-      LS_TASKS_KEY,
-      tasks.map(t => (t.id === taskId || t.id === safeTaskId) ? { ...t, status, updatedAt: new Date().toISOString() } : t)
-    );
+  async reassignDeliveryTask(taskId: string, reason?: string): Promise<boolean> {
+    if (!isValidUUID(taskId)) throw new Error('Invalid task ID');
+    const { data, error } = await supabase.rpc('reassign_donation', {
+      p_task_id: taskId,
+      p_reason: reason || null,
+    });
+    if (error) throw new Error(error.message || 'Failed to reassign task');
+    return !!data;
+  },
 
-    if (isValidUUID(safeTaskId)) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return true;
+  async updateDeliveryTaskStatus(taskId: string, status: string, notes?: string): Promise<boolean> {
+    if (!isValidUUID(taskId)) throw new Error('Invalid task ID');
 
-        const safeUserId = toSafeUUID(user.id, DEMO_RECORD_UUIDS.rider);
-        // Look up rider row if user is rider
-        const { data: rider } = await supabase
-          .from('riders')
-          .select('id')
-          .eq('user_id', safeUserId)
-          .maybeSingle();
+    const { data, error } = await supabase.rpc('update_donation_status', {
+      p_task_id: taskId,
+      p_new_status: status,
+      p_notes: notes || null,
+    });
 
-        const riderId = rider?.id;
-
-        let query = supabase
-          .from('delivery_tasks')
-          .update({ status, updated_at: new Date().toISOString() })
-          .eq('id', safeTaskId);
-
-        // If user is a rider, ensure they can only update their own assigned task
-        if (riderId && isValidUUID(riderId)) {
-          query = query.eq('rider_id', riderId);
-        }
-
-        await query;
-      } catch {}
+    if (!error) return !!data;
+    if (error.code !== 'PGRST202') {
+      throw new Error(error.message || 'Failed to update status');
     }
 
+    // Fallback only if update_donation_status RPC is not yet deployed
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error('Authentication required');
+
+    const { data: rider } = await supabase
+      .from('riders')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    let query = supabase
+      .from('delivery_tasks')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', taskId);
+
+    if (rider?.id) {
+      query = query.eq('rider_id', rider.id);
+    }
+
+    const { error: updErr } = await query;
+    if (updErr) throw new Error(updErr.message);
     return true;
   },
 
-  // ── NGO Receipt & Distribution (Phases 7 & 8) ──────────
+  // ── NGO Receipt & Distribution ───────────────────────────────────────────
   async confirmNgoReceipt(
     taskId: string,
     quantityReceived: number,
@@ -946,103 +637,40 @@ export const ClaimsService = {
     safetyConcern?: boolean,
     safetyNotes?: string
   ): Promise<string> {
-    const safeTaskId = toSafeUUID(taskId);
-    if (isValidUUID(safeTaskId)) {
-      try {
-        const { data, error } = await supabase.rpc('confirm_ngo_receipt', {
-          p_task_id: safeTaskId,
-          p_quantity_received: quantityReceived,
-          p_condition_notes: conditionNotes || null,
-          p_safety_concern: safetyConcern || false,
-          p_safety_notes: safetyNotes || null,
-        });
-        if (!error && data) return data as string;
-      } catch {}
+    if (!isValidUUID(taskId)) throw new Error('Invalid task ID');
+    const { data, error } = await supabase.rpc('confirm_ngo_receipt', {
+      p_task_id: taskId,
+      p_quantity_received: quantityReceived,
+      p_condition_notes: conditionNotes || null,
+      p_safety_concern: !!safetyConcern,
+      p_safety_notes: safetyNotes || null,
+    });
+    if (error || !data) {
+      throw new Error(error?.message || 'Failed to confirm receipt');
     }
-
-    // Fallback: create distribution record in store
-    const { data: { user } } = await supabase.auth.getUser();
-    const safeNgoId = toSafeUUID(user?.id, DEMO_RECORD_UUIDS.ngo);
-    const task = (getLocalStore<DeliveryTask>(LS_TASKS_KEY)).find(t => t.id === taskId || t.id === safeTaskId);
-    const distId = crypto.randomUUID();
-
-    const record: DistributionRecord = {
-      id: distId,
-      foodListingId: task?.foodListingId || crypto.randomUUID(),
-      claimId: task?.claimId,
-      deliveryTaskId: safeTaskId,
-      ngoId: safeNgoId,
-      recordedBy: safeNgoId,
-      quantityReceived,
-      quantityDistributed: 0,
-      quantityRemaining: quantityReceived,
-      quantityRejected: safetyConcern ? quantityReceived : 0,
-      quantityUnit: 'servings',
-      distributionDate: new Date().toISOString().slice(0, 10),
-      distributionMethod: 'direct',
-      status: 'pending',
-      conditionNotes,
-      safetyConcern: !!safetyConcern,
-      safetyNotes,
-      isVerified: true,
-      receiptConfirmedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    const dists = getLocalStore<DistributionRecord>(LS_DISTS_KEY);
-    setLocalStore(LS_DISTS_KEY, [record, ...dists]);
-
-    // Update claim status to delivered / distribution_in_progress
-    if (task?.claimId) {
-      const claims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-      setLocalStore(
-        LS_CLAIMS_KEY,
-        claims.map(c => c.id === task.claimId ? {
-          ...c,
-          status: 'distribution_in_progress',
-          deliveryStatus: 'delivered',
-          distributionRecordId: distId,
-          quantityReceived,
-          quantityDistributed: 0,
-          quantityRemaining: quantityReceived,
-          distributionStatus: 'pending',
-        } : c)
-      );
-    }
-
-    return distId;
+    return data as string;
   },
 
   async getDistributionRecords(ngoId: string): Promise<DistributionRecord[]> {
-    const safeNgoId = toSafeUUID(ngoId, DEMO_RECORD_UUIDS.ngo);
-    try {
-      const { data, error } = await supabase
-        .from('distribution_records')
-        .select('*')
-        .eq('ngo_id', safeNgoId)
-        .order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) return data.map(mapDistributionRecord);
-    } catch {}
-
-    return getLocalStore<DistributionRecord>(LS_DISTS_KEY).filter(d => d.ngoId === safeNgoId || d.ngoId === ngoId);
+    if (!isValidUUID(ngoId)) return [];
+    const { data, error } = await supabase
+      .from('distribution_records')
+      .select('*')
+      .eq('ngo_id', ngoId)
+      .order('created_at', { ascending: false });
+    if (error || !data) return [];
+    return data.map(mapDistributionRecord);
   },
 
   async getDistributionRecord(id: string): Promise<DistributionRecord | null> {
-    const safeId = toSafeUUID(id);
-    if (isValidUUID(safeId)) {
-      try {
-        const { data, error } = await supabase
-          .from('distribution_records')
-          .select('*')
-          .eq('id', safeId)
-          .maybeSingle();
-        if (!error && data) return mapDistributionRecord(data);
-      } catch {}
-    }
-
-    const dists = getLocalStore<DistributionRecord>(LS_DISTS_KEY);
-    return dists.find(d => d.id === id || d.id === safeId) || null;
+    if (!isValidUUID(id)) return null;
+    const { data, error } = await supabase
+      .from('distribution_records')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !data) return null;
+    return mapDistributionRecord(data);
   },
 
   async recordDistribution(
@@ -1054,165 +682,74 @@ export const ClaimsService = {
     distributionLocation?: string,
     notes?: string
   ): Promise<boolean> {
-    const safeDistId = toSafeUUID(distributionRecordId);
-    if (isValidUUID(safeDistId)) {
-      try {
-        const { data, error } = await supabase.rpc('record_distribution', {
-          p_distribution_record_id: safeDistId,
-          p_quantity_to_distribute: quantityToDistribute,
-          p_people_served: peopleServed || null,
-          p_meal_portions: mealPortions || null,
-          p_distribution_method: distributionMethod || 'direct',
-          p_distribution_location: distributionLocation || null,
-          p_notes: notes || null,
-        });
-        if (!error && data) return true;
-      } catch {}
-    }
-
-    // Fallback: update distribution records store
-    const dists = getLocalStore<DistributionRecord>(LS_DISTS_KEY);
-    const updated = dists.map(d => {
-      if (d.id === distributionRecordId || d.id === safeDistId) {
-        const newDist = d.quantityDistributed + quantityToDistribute;
-        const newRem = Math.max(0, d.quantityRemaining - quantityToDistribute);
-        const newStatus = newRem === 0 ? 'completed' : 'in_progress';
-        return {
-          ...d,
-          quantityDistributed: newDist,
-          quantityRemaining: newRem,
-          peopleServed: (d.peopleServed || 0) + (peopleServed || 0),
-          mealPortions: (d.mealPortions || 0) + (mealPortions || quantityToDistribute),
-          distributionMethod: distributionMethod || d.distributionMethod,
-          distributionLocation: distributionLocation || d.distributionLocation,
-          status: newStatus,
-          conditionNotes: notes || d.conditionNotes,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      return d;
+    if (!isValidUUID(distributionRecordId)) throw new Error('Invalid distribution record ID');
+    const { data, error } = await supabase.rpc('record_distribution', {
+      p_distribution_record_id: distributionRecordId,
+      p_quantity_to_distribute: quantityToDistribute,
+      p_people_served: peopleServed || null,
+      p_meal_portions: mealPortions || null,
+      p_distribution_method: distributionMethod || 'direct',
+      p_distribution_location: distributionLocation || null,
+      p_notes: notes || null,
     });
-    setLocalStore(LS_DISTS_KEY, updated);
-
-    // Update claim status if applicable
-    const target = dists.find(d => d.id === distributionRecordId || d.id === safeDistId);
-    if (target?.claimId) {
-      const newRem = Math.max(0, target.quantityRemaining - quantityToDistribute);
-      const claims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-      setLocalStore(
-        LS_CLAIMS_KEY,
-        claims.map(c => c.id === target.claimId ? {
-          ...c,
-          status: newRem === 0 ? 'distributed' : 'distribution_in_progress',
-          quantityDistributed: (c.quantityDistributed || 0) + quantityToDistribute,
-          quantityRemaining: newRem,
-          distributionStatus: newRem === 0 ? 'completed' : 'in_progress',
-        } : c)
-      );
-    }
-
-    // Record impact event safely
-    const { data: { user } } = await supabase.auth.getUser();
-    const safeUserId = toSafeUUID(user?.id, DEMO_RECORD_UUIDS.ngo);
-    if (safeUserId && isValidUUID(safeUserId)) {
-      try {
-        await supabase.from('impact_events').insert({
-          user_id: safeUserId,
-          event_type: 'food_rescued',
-          servings: quantityToDistribute,
-        });
-      } catch {}
-    }
-
-    return true;
+    if (error) throw new Error(error.message || 'Failed to record distribution');
+    return !!data;
   },
 
-  // ── Donor Dashboard Listings ───────────────────────────
+  // ── Donor Dashboard Listings ─────────────────────────────────────────────
   async getDonorDashboardListings(donorId: string): Promise<any[]> {
-    const safeDonorId = toSafeUUID(donorId, DEMO_RECORD_UUIDS.donor);
-    try {
-      const { data, error } = await supabase
-        .from('donor_dashboard_view')
-        .select('*')
-        .eq('donor_id', safeDonorId)
-        .order('created_at', { ascending: false });
-      if (!error && data) return data;
-    } catch {}
+    if (!isValidUUID(donorId)) return [];
+    const { data, error } = await supabase
+      .from('donor_dashboard_view')
+      .select('*')
+      .eq('donor_id', donorId)
+      .order('created_at', { ascending: false });
 
-    // Fallback: query food_listings and merge with claims store
+    if (!error && data) return data;
+
+    // Fallback: direct query to food_listings without fabricating dummy values
     const { data: listings } = await supabase
       .from('food_listings')
       .select('*')
-      .eq('donor_id', safeDonorId)
+      .eq('donor_id', donorId)
       .order('created_at', { ascending: false });
 
-    if (!listings) return [];
-
-    const localClaims = getLocalStore<NgoClaim>(LS_CLAIMS_KEY);
-    const localTasks = getLocalStore<DeliveryTask>(LS_TASKS_KEY);
-
-    return listings.map(l => {
-      const matchingClaim = localClaims.find(c => c.foodListingId === l.id);
-      const matchingTask = localTasks.find(t => t.foodListingId === l.id);
-      return {
-        id: l.id,
-        donor_id: l.donor_id,
-        title: l.title,
-        status: l.status,
-        servings: l.servings,
-        available_servings: l.available_servings,
-        pickup_address: l.pickup_address,
-        available_until: l.available_until,
-        created_at: l.created_at,
-        claim_id: matchingClaim?.id,
-        claim_status: matchingClaim?.status,
-        servings_claimed: matchingClaim?.servingsClaimed,
-        ngo_name: matchingClaim?.ngoName || 'Verified Community NGO',
-        delivery_task_id: matchingTask?.id,
-        delivery_status: matchingTask?.status,
-        rider_name: matchingTask?.riderName,
-        rider_phone: matchingTask?.riderPhone,
-        pickup_code: matchingTask?.pickupCode,
-        pickup_confirmed_at: matchingTask?.pickupConfirmedAt,
-        delivery_confirmed_at: matchingTask?.deliveryConfirmedAt,
-      };
-    });
+    return listings || [];
   },
 
-  // ── Real-time Subscriptions (Debounced & Channel-Cleaned) ────────────
-  subscribeToDeliveryTask(
-    taskId: string,
-    callback: (task: DeliveryTask) => void
-  ) {
-    const safeTaskId = toSafeUUID(taskId);
-    if (!isValidUUID(safeTaskId)) {
+  // ── Real-time Subscriptions ──────────────────────────────────────────────
+  subscribeToDeliveryTask(taskId: string, callback: (task: DeliveryTask) => void) {
+    if (!isValidUUID(taskId)) {
       return { unsubscribe: () => {} };
     }
 
-    const channelName = `delivery_task_${safeTaskId}_${Date.now()}`;
+    const channelName = `delivery_task_${taskId}_${Date.now()}`;
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'delivery_tasks',
-        filter: `id=eq.${safeTaskId}`,
-      }, async () => {
-        const updated = await ClaimsService.getDeliveryTaskById(safeTaskId);
-        if (updated) callback(updated);
-      })
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'delivery_tasks',
+          filter: `id=eq.${taskId}`,
+        },
+        async () => {
+          const updated = await ClaimsService.getDeliveryTaskById(taskId);
+          if (updated) callback(updated);
+        }
+      )
       .subscribe();
 
     return {
       unsubscribe: () => {
         supabase.removeChannel(channel);
-      }
+      },
     };
   },
 
   subscribeToMyClaims(ngoId: string, callback: () => void) {
-    const safeNgoId = toSafeUUID(ngoId, DEMO_RECORD_UUIDS.ngo);
-    if (!isValidUUID(safeNgoId)) {
+    if (!isValidUUID(ngoId)) {
       return { unsubscribe: () => {} };
     }
 
@@ -1221,30 +758,49 @@ export const ClaimsService = {
       clearTimeout(timeout);
       timeout = setTimeout(() => {
         callback();
-      }, 800);
+      }, 450);
     };
 
-    const channelName = `ngo_claims_${safeNgoId}_${Date.now()}`;
+    const channelName = `ngo_claims_${ngoId}_${Date.now()}`;
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'ngo_claims',
-        filter: `ngo_id=eq.${safeNgoId}`,
-      }, debounced)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'reservations',
-        filter: `user_id=eq.${safeNgoId}`,
-      }, debounced)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ngo_claims',
+          filter: `ngo_id=eq.${ngoId}`,
+        },
+        debounced
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'delivery_tasks',
+          filter: `ngo_id=eq.${ngoId}`,
+        },
+        debounced
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reservations',
+          filter: `user_id=eq.${ngoId}`,
+        },
+        debounced
+      )
       .subscribe();
 
     return {
       unsubscribe: () => {
+        clearTimeout(timeout);
         supabase.removeChannel(channel);
-      }
+      },
     };
   },
 
@@ -1254,30 +810,42 @@ export const ClaimsService = {
       clearTimeout(timeout);
       timeout = setTimeout(() => {
         callback();
-      }, 800);
+      }, 450);
     };
 
     const channelName = `tasks_avail_${Date.now()}`;
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'delivery_tasks',
-        filter: 'status=eq.awaiting_rider',
-      }, debounced)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'delivery_tasks',
+        },
+        debounced
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'food_listings',
+        },
+        debounced
+      )
       .subscribe();
 
     return {
       unsubscribe: () => {
+        clearTimeout(timeout);
         supabase.removeChannel(channel);
-      }
+      },
     };
   },
 
   subscribeToDonorListings(donorId: string, callback: () => void) {
-    const safeDonorId = toSafeUUID(donorId, DEMO_RECORD_UUIDS.donor);
-    if (!isValidUUID(safeDonorId)) {
+    if (!isValidUUID(donorId)) {
       return { unsubscribe: () => {} };
     }
 
@@ -1286,31 +854,39 @@ export const ClaimsService = {
       clearTimeout(timeout);
       timeout = setTimeout(() => {
         callback();
-      }, 800);
+      }, 450);
     };
 
-    const channelName = `donor_listings_${safeDonorId}_${Date.now()}`;
+    const channelName = `donor_listings_${donorId}_${Date.now()}`;
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'delivery_tasks',
-        filter: `donor_id=eq.${safeDonorId}`,
-      }, debounced)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'food_listings',
-        filter: `donor_id=eq.${safeDonorId}`,
-      }, debounced)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'delivery_tasks',
+          filter: `donor_id=eq.${donorId}`,
+        },
+        debounced
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'food_listings',
+          filter: `donor_id=eq.${donorId}`,
+        },
+        debounced
+      )
       .subscribe();
 
     return {
       unsubscribe: () => {
         clearTimeout(timeout);
         supabase.removeChannel(channel);
-      }
+      },
     };
   },
 };

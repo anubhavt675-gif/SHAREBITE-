@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { DonationService, FALLBACK_DEMO_LISTINGS } from '../../services/donations';
+import { DonationService } from '../../services/donations';
 import { LocationService, type Coordinates } from '../../services/location';
 import { NGOService } from '../../services/ngo';
 import DiscoverFoodMap from '../../components/map/DiscoverFoodMap';
@@ -21,8 +21,6 @@ import { SkeletonCard } from '../../components/states/LoadingState';
 import { EmptyState } from '../../components/states/EmptyState';
 import type { FoodListing, NearbyNGO } from '../../types';
 import styles from './DiscoverPage.module.css';
-
-const MOCK_LISTINGS = FALLBACK_DEMO_LISTINGS;
 
 export default function DiscoverPage() {
   const navigate = useNavigate();
@@ -77,15 +75,15 @@ export default function DiscoverPage() {
 
         if (isMounted && coords) setUserCoords(coords);
 
-        // Fetch DB listings
-        const dbListings = await DonationService.getActiveListings();
+        // Fetch real DB listings (PostGIS nearby if GPS available, else all active)
+        const dbListings = coords
+          ? await DonationService.getNearbyListings(coords.latitude, coords.longitude, radiusKm)
+          : await DonationService.getActiveListings();
 
         if (isMounted) {
-          // If DB has listings, use them; if empty, use the rich mockup listings
-          const combined = dbListings.length > 0 ? dbListings : MOCK_LISTINGS;
-
           // Calculate real distances if coords are available
-          const withDist = combined.map((item) => {
+          const withDist = dbListings.map((item) => {
+            if (item.distanceKm != null) return item;
             if (coords && item.latitude && item.longitude) {
               const d = LocationService.calculateDistance(
                 coords.latitude,
@@ -100,19 +98,20 @@ export default function DiscoverPage() {
 
           setRawListings(withDist);
 
-          // Fetch nearby NGOs
+          // Fetch real verified nearby NGOs from Supabase
           if (coords) {
             const nearbyNGOList = await NGOService.getNearbyNGOs(
               coords.latitude,
               coords.longitude,
-              radiusKm
+              radiusKm,
+              true
             );
             setNgos(nearbyNGOList);
           }
         }
       } catch (err) {
         console.error('Error initializing Discover page:', err);
-        if (isMounted) setRawListings(MOCK_LISTINGS);
+        if (isMounted) setRawListings([]);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -120,10 +119,28 @@ export default function DiscoverPage() {
 
     initLocationAndData();
 
-    // Subscribe to realtime new listings
-    const sub = DonationService.subscribeToListings((newListing) => {
-      setRawListings((prev) => [newListing, ...prev]);
-    });
+    // Subscribe to realtime INSERT, UPDATE (e.g. claimed), and DELETE on food_listings
+    const sub = DonationService.subscribeToListings(
+      (newListing) => {
+        if (['available', 'partially_reserved'].includes(newListing.status) && newListing.availableServings > 0) {
+          setRawListings((prev) => (prev.some((p) => p.id === newListing.id) ? prev : [newListing, ...prev]));
+        }
+      },
+      (updatedListing) => {
+        setRawListings((prev) => {
+          const isStillOpen =
+            ['available', 'partially_reserved'].includes(updatedListing.status) &&
+            updatedListing.availableServings > 0;
+          if (!isStillOpen) {
+            return prev.filter((p) => p.id !== updatedListing.id);
+          }
+          return prev.map((p) => (p.id === updatedListing.id ? { ...p, ...updatedListing } : p));
+        });
+      },
+      (deletedId) => {
+        setRawListings((prev) => prev.filter((p) => p.id !== deletedId));
+      }
+    );
 
     return () => {
       isMounted = false;
@@ -358,7 +375,7 @@ export default function DiscoverPage() {
               <p className={styles.listCount}>
                 {loading
                   ? 'Finding donations...'
-                  : `${filteredListings.length} results found near ${userCoords?.city || 'Bhopal'}`}
+                  : `${filteredListings.length} results found${userCoords?.city ? ` near ${userCoords.city}` : ' nearby'}`}
               </p>
             </div>
 

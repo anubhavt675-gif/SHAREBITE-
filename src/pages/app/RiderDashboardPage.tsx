@@ -1,13 +1,15 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   MapPin, Clock, Package, Truck, CheckCircle, AlertTriangle,
-  Navigation, Phone, ChevronRight, X, Loader2, RefreshCw, MessageSquare
+  Navigation, Phone, ChevronRight, X, Loader2, RefreshCw, MessageSquare, RotateCcw
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ClaimsService, type DeliveryTask } from '../../services/claims';
-import { LocationService } from '../../services/location';
+import { LocationService, type Coordinates } from '../../services/location';
+import { ChatService } from '../../services/chat';
 import { supabase } from '../../lib/supabase';
+import LiveTrackingMap from '../../components/map/LiveTrackingMap';
 import { formatDistanceToNow } from 'date-fns';
 import styles from './RiderDashboard.module.css';
 
@@ -113,7 +115,7 @@ function DeliveryConfirmModal({ task, onClose, onSuccess }: DeliveryModalProps) 
 
   const submit = async () => {
     setError('');
-    if (!code.trim()) { setError('Enter the delivery verification code from the NGO'); return; }
+    if (task.ngoId && !code.trim()) { setError('Enter the delivery verification code from the NGO'); return; }
     setLoading(true);
     try {
       await ClaimsService.confirmDeliveryToNgo(task.id, code, servings);
@@ -226,27 +228,72 @@ function IncidentModal({ task, onClose, onSuccess }: IncidentModalProps) {
   );
 }
 
-function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => void }) {
+function TaskCard({
+  task,
+  userId,
+  riderCoords,
+  onRefresh,
+}: {
+  task: DeliveryTask;
+  userId?: string;
+  riderCoords: Coordinates | null;
+  onRefresh: () => void;
+}) {
+  const navigate = useNavigate();
   const [showPickupModal, setShowPickupModal] = useState(false);
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [riderCoords, setRiderCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-
-  useEffect(() => {
-    LocationService.getCurrentCoordinates()
-      .then(c => setRiderCoords(c))
-      .catch(() => {});
-  }, []);
 
   const acceptJob = async () => {
-    setError(''); setLoading(true);
+    setError('');
+    setLoading(true);
     try {
-      const ok = await ClaimsService.acceptDeliveryJob(task.id);
-      if (ok) { setSuccess('Job accepted! Navigate to pickup.'); onRefresh(); }
-      else setError('This job was already taken. Refresh for available tasks.');
+      if (task.isDirectFoodOpportunity) {
+        await ClaimsService.acceptDonation(task.foodListingId);
+        setSuccess('Pickup accepted! Navigate to the donor location.');
+      } else {
+        await ClaimsService.acceptDeliveryJob(task.id);
+        setSuccess('Delivery job accepted! Navigate to pickup.');
+      }
+      onRefresh();
+    } catch (e: any) {
+      setError(e.message || 'This opportunity was already claimed by another user.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenChat = async () => {
+    if (!userId) return;
+    const isCollected = ['food_collected', 'in_transit'].includes(task.status);
+    const recipient = (isCollected && task.ngoId) ? task.ngoId : task.donorId;
+    if (!recipient) {
+      navigate('/chat');
+      return;
+    }
+    try {
+      const conv = await ChatService.getOrCreateDirectConversation(userId, recipient, {
+        type: 'delivery',
+        relatedListingId: task.foodListingId,
+        relatedTaskId: task.isDirectFoodOpportunity ? undefined : task.id,
+        title: task.foodTitle || 'Delivery Coordination',
+      });
+      navigate(`/chat/${conv.id}`);
+    } catch {
+      navigate('/chat');
+    }
+  };
+
+  const handleReleaseTask = async () => {
+    if (!window.confirm('Release this pickup so another rider can take it?')) return;
+    setError('');
+    setLoading(true);
+    try {
+      await ClaimsService.reassignDeliveryTask(task.id, 'Released by rider before pickup');
+      onRefresh();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -285,15 +332,23 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
 
   const isOverdue = task.collectionDeadline && new Date(task.collectionDeadline) < new Date();
 
-  // Calculated distance & ETA using live rider coordinates when available
-  const etaInfo = (task.pickupLat && task.pickupLng)
-    ? LocationService.calculateEtaBetween(
-        riderCoords ? riderCoords.latitude : 23.2599,
-        riderCoords ? riderCoords.longitude : 77.4126,
-        task.pickupLat,
-        task.pickupLng
-      )
-    : { distanceKm: 2.1, text: '7 mins' };
+  // Calculated distance & ETA using actual rider GPS coordinates (never hardcoded fallback)
+  const etaInfo =
+    riderCoords && task.pickupLat && task.pickupLng
+      ? LocationService.calculateEtaBetween(
+          riderCoords.latitude,
+          riderCoords.longitude,
+          task.pickupLat,
+          task.pickupLng
+        )
+      : task.distanceKm != null
+      ? { distanceKm: task.distanceKm, ...LocationService.calculateEta(task.distanceKm) }
+      : null;
+
+  const isActiveAssignment = ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(task.status);
+  const contactPhone = ['food_collected', 'in_transit'].includes(task.status)
+    ? task.ngoPhone || task.donorPhone
+    : task.donorPhone || task.ngoPhone;
 
   return (
     <div className={styles.taskCard}>
@@ -312,13 +367,15 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
                 Deadline {deadline}
               </span>
             </span>
-            <span className={styles.taskMetaItem} style={{ color: '#0284c7', fontWeight: 600 }}>
-              📍 ~{etaInfo.distanceKm} km ({etaInfo.text})
-            </span>
+            {etaInfo && (
+              <span className={styles.taskMetaItem} style={{ color: '#0284c7', fontWeight: 600 }}>
+                📍 ~{etaInfo.distanceKm} km ({etaInfo.text})
+              </span>
+            )}
           </div>
         </div>
         <span className={`${styles.statusBadge} ${styles[`status_${task.status}`] || styles.status_pending}`}>
-          {STATUS_LABELS[task.status] || task.status}
+          {task.isDirectFoodOpportunity ? 'Direct Pickup' : (STATUS_LABELS[task.status] || task.status)}
         </span>
       </div>
 
@@ -330,38 +387,34 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
         <span className={styles.arrow}><ChevronRight size={16} /></span>
         <div className={styles.locationPin}>
           <MapPin size={12} color="#10b981" style={{ marginRight: 4 }} />
-          <strong>Deliver:</strong> {task.dropoffAddress || task.ngoOrgName || task.ngoName || 'NGO location'}
+          <strong>Deliver:</strong> {task.dropoffAddress || task.ngoOrgName || task.ngoName || 'Community destination'}
         </div>
       </div>
 
-      {/* Pickup code (shown to rider for donor verification) */}
-      {(task.status === 'rider_assigned' || task.status === 'going_to_pickup') && task.pickupCode && (
-        <div className={styles.codeBox}>
-          <div>
-            <div className={styles.codeLabel}>Show this code to the DONOR to verify pickup:</div>
-            <div className={styles.codeValue}>{task.pickupCode}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Dropoff code (shown to rider for NGO verification) */}
-      {(task.status === 'food_collected' || task.status === 'in_transit') && task.dropoffCode && (
-        <div className={styles.codeBox} style={{ background: '#eff6ff', borderColor: '#bfdbfe' }}>
-          <div>
-            <div className={styles.codeLabel}>Show this code to the NGO to verify delivery:</div>
-            <div className={styles.codeValue} style={{ color: '#1e40af' }}>{task.dropoffCode}</div>
-          </div>
-        </div>
+      {/* Live GPS Route Map for active rider deliveries (OTP codes never exposed on rider screen) */}
+      {isActiveAssignment && !task.isDirectFoodOpportunity && (
+        <LiveTrackingMap
+          deliveryTaskId={task.id}
+          taskStatus={task.status}
+          pickupLat={task.pickupLat}
+          pickupLng={task.pickupLng}
+          pickupLabel={task.pickupAddress || task.donorName || 'Donor Pickup'}
+          dropoffLat={task.dropoffLat}
+          dropoffLng={task.dropoffLng}
+          dropoffLabel={task.ngoOrgName || task.ngoName || task.dropoffAddress || 'Destination'}
+          height={200}
+        />
       )}
 
       {error && <div className={styles.errorMsg}>{error}</div>}
       {success && <div className={styles.successMsg}>{success}</div>}
 
       <div className={styles.actionsRow}>
-        {/* Accept job */}
+        {/* Accept job or direct pickup */}
         {task.status === 'awaiting_rider' && (
           <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={acceptJob} disabled={loading}>
-            {loading ? <Loader2 size={14} /> : <Truck size={14} />} Accept Job
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Truck size={14} />}
+            {task.isDirectFoodOpportunity ? 'Accept Pickup' : 'Accept Job'}
           </button>
         )}
 
@@ -417,15 +470,22 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
           </button>
         )}
 
-        {/* Chat with participants */}
-        {task.status !== 'completed' && task.status !== 'cancelled' && (
-          <Link
-            to="/chat"
+        {/* Chat with donor / NGO */}
+        {task.status !== 'completed' && task.status !== 'cancelled' && !task.isDirectFoodOpportunity && (
+          <button
+            type="button"
+            onClick={handleOpenChat}
             className={`${styles.btn} ${styles.btnOutline}`}
-            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             <MessageSquare size={14} /> Chat
-          </Link>
+          </button>
+        )}
+
+        {/* Release assignment before pickup */}
+        {['rider_assigned', 'going_to_pickup'].includes(task.status) && (
+          <button className={`${styles.btn} ${styles.btnOutline}`} onClick={handleReleaseTask} disabled={loading}>
+            <RotateCcw size={14} /> Release
+          </button>
         )}
 
         {/* Report incident */}
@@ -435,10 +495,10 @@ function TaskCard({ task, onRefresh }: { task: DeliveryTask; onRefresh: () => vo
           </button>
         )}
 
-        {/* Contact NGO */}
-        {task.riderPhone && task.status !== 'completed' && task.status !== 'cancelled' && (
+        {/* Contact Donor / NGO (fixed: never dials rider's own number) */}
+        {contactPhone && task.status !== 'completed' && task.status !== 'cancelled' && !task.isDirectFoodOpportunity && (
           <a
-            href={`tel:${task.riderPhone}`}
+            href={`tel:${contactPhone}`}
             className={`${styles.btn} ${styles.btnOutline}`}
             style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
@@ -467,6 +527,8 @@ export default function RiderDashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
   const [togglingOnline, setTogglingOnline] = useState(false);
+  const [riderCoords, setRiderCoords] = useState<Coordinates | null>(null);
+  const [gpsError, setGpsError] = useState('');
 
   const fetchData = useCallback(async (isSilent = false) => {
     if (!userId) return;
@@ -475,13 +537,12 @@ export default function RiderDashboardPage() {
 
     try {
       const [available, mine] = await Promise.all([
-        ClaimsService.getAvailableDeliveryTasks(),
+        ClaimsService.getAvailableDeliveryTasks(riderCoords?.latitude, riderCoords?.longitude),
         ClaimsService.getMyDeliveryTasks(userId),
       ]);
       setAvailableTasks(available);
       setMyTasks(mine);
 
-      // Get rider online status
       const { data: riderData } = await supabase
         .from('riders')
         .select('is_online')
@@ -492,7 +553,7 @@ export default function RiderDashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId]);
+  }, [userId, riderCoords?.latitude, riderCoords?.longitude]);
 
   useEffect(() => {
     fetchData(false);
@@ -502,34 +563,58 @@ export default function RiderDashboardPage() {
     return () => { sub.unsubscribe(); };
   }, [fetchData]);
 
-  // Live GPS Tracking: Broadcast location updates when online and on active task
+  // Live GPS Tracking: Broadcast rider coordinates whenever online (idle or active task)
   useEffect(() => {
+    if (!isOnline || !userId) return;
+    setGpsError('');
     const activeTask = myTasks.find(t => ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(t.status));
-    if (!isOnline || !activeTask || !userId) return;
 
-    const watchId = LocationService.watchLocation((coords) => {
-      LocationService.updateRiderLocation({
-        riderId: userId,
-        deliveryTaskId: activeTask.id,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-      }).catch(() => {});
+    const stopWatching = LocationService.watchAndBroadcastRiderLocation({
+      riderUserId: userId,
+      deliveryTaskId: activeTask?.id,
+      minIntervalMs: 5000,
+      minDistanceMeters: 15,
+      onPosition: (coords) => {
+        setRiderCoords(coords);
+        setGpsError('');
+      },
+      onError: (err) => {
+        setGpsError(err.message || 'Location permission denied. Enable GPS to share live location.');
+      },
     });
 
     return () => {
-      LocationService.clearWatch(watchId);
+      stopWatching();
     };
   }, [isOnline, myTasks, userId]);
 
   const toggleOnline = async () => {
     if (!userId) return;
     setTogglingOnline(true);
+    setGpsError('');
     try {
+      const nextOnline = !isOnline;
+      if (nextOnline) {
+        const gps = await LocationService.detectCurrentGPS();
+        if (gps.status === 'granted' && gps.latitude !== null && gps.longitude !== null) {
+          setRiderCoords({ latitude: gps.latitude, longitude: gps.longitude, accuracy: gps.accuracy ?? undefined });
+          await LocationService.updateRiderLocation({
+            riderId: userId,
+            latitude: gps.latitude,
+            longitude: gps.longitude,
+            accuracyM: gps.accuracy ?? undefined,
+          });
+        } else {
+          setGpsError(gps.errorMessage || 'GPS unavailable. Enable location permissions.');
+        }
+      }
+
+      const activeTask = myTasks.find(t => ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(t.status));
       await supabase
         .from('riders')
-        .update({ is_online: !isOnline, is_available: !isOnline })
+        .update({ is_online: nextOnline, is_available: nextOnline && !activeTask })
         .eq('user_id', userId);
-      setIsOnline(o => !o);
+      setIsOnline(nextOnline);
     } finally {
       setTogglingOnline(false);
     }
@@ -550,7 +635,11 @@ export default function RiderDashboardPage() {
       <div className={styles.statusRow}>
         <div className={isOnline ? styles.onlineDot : styles.offlineDot} />
         <span className={styles.statusText}>
-          {isOnline ? 'You are online — visible for delivery jobs' : 'You are offline — go online to receive jobs'}
+          {isOnline
+            ? riderCoords
+              ? `You are online · GPS active (${riderCoords.latitude.toFixed(4)}, ${riderCoords.longitude.toFixed(4)})`
+              : 'You are online — sharing live location for nearby pickups'
+            : 'You are offline — go online to receive nearby pickup alerts'}
         </span>
         <button
           className={`${styles.toggleBtn} ${isOnline ? styles.goOffline : styles.goOnline}`}
@@ -560,6 +649,7 @@ export default function RiderDashboardPage() {
           {isOnline ? 'Go Offline' : 'Go Online'}
         </button>
       </div>
+      {gpsError && <div className={styles.errorMsg} style={{ marginBottom: 12 }}>{gpsError}</div>}
 
       {/* Tabs */}
       <div className={styles.tabs}>
@@ -595,7 +685,7 @@ export default function RiderDashboardPage() {
         </div>
       ) : (
         displayTasks.map(task => (
-          <TaskCard key={task.id} task={task} onRefresh={fetchData} />
+          <TaskCard key={task.id} task={task} userId={userId} riderCoords={riderCoords} onRefresh={fetchData} />
         ))
       )}
     </div>

@@ -4,6 +4,7 @@ import { MapPin, Clock, Package, Plus, RefreshCw, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ClaimsService } from '../../services/claims';
 import { DonationService } from '../../services/donations';
+import LiveTrackingMap from '../../components/map/LiveTrackingMap';
 import { formatDistanceToNow } from 'date-fns';
 import styles from './DonorDonationsStatus.module.css';
 
@@ -186,6 +187,21 @@ export default function DonorDonationsStatus() {
                       {row.pickup_code}
                     </span>
                   </div>
+                )}
+
+                {/* Live Tracking Map for active delivery tasks */}
+                {row.delivery_task_id && ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(row.delivery_status) && (
+                  <LiveTrackingMap
+                    deliveryTaskId={row.delivery_task_id}
+                    taskStatus={row.delivery_status}
+                    pickupLat={row.latitude}
+                    pickupLng={row.longitude}
+                    pickupLabel={row.pickup_address || 'Pickup'}
+                    dropoffLat={row.dropoff_lat}
+                    dropoffLng={row.dropoff_lng}
+                    dropoffLabel={row.ngo_name || 'Destination'}
+                    height={180}
+                  />
                 )}
 
                 {/* Lifecycle timeline */}

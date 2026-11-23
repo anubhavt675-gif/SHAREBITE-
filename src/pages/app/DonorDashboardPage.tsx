@@ -9,10 +9,17 @@ import { useAuth } from '../../context/AuthContext';
 import { DonationService } from '../../services/donations';
 import { ImpactService } from '../../services/impact';
 import { ClaimsService, type DeliveryTask } from '../../services/claims';
-import { LocationService } from '../../services/location';
+import { ChatService } from '../../services/chat';
+import { NGOService } from '../../services/ngo';
+import LiveTrackingMap from '../../components/map/LiveTrackingMap';
 import { formatDistanceToNow } from 'date-fns';
-import type { FoodListing, ImpactStats } from '../../types';
+import type { FoodListing, ImpactStats, NearbyNGO } from '../../types';
 import styles from './DonorDashboardPage.module.css';
+
+interface DonorLiveTask extends DeliveryTask {
+  pickupCode?: string;
+  riderUserId?: string;
+}
 
 interface DonorDashboardProps {
   // Optional props
@@ -24,7 +31,8 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
   const userId = user?.id;
 
   const [listings, setListings] = useState<FoodListing[]>([]);
-  const [activeTasks, setActiveTasks] = useState<DeliveryTask[]>([]);
+  const [activeTasks, setActiveTasks] = useState<DonorLiveTask[]>([]);
+  const [nearbyNgos, setNearbyNgos] = useState<NearbyNGO[]>([]);
   const [impact, setImpact] = useState<ImpactStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,8 +52,8 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
       setListings(listingsData);
       setImpact(impactData);
 
-      // Extract delivery tasks with active riders from donor dashboard view
-      const liveTasks: DeliveryTask[] = [];
+      // Extract active delivery tasks with real coordinates, codes & rider details
+      const liveTasks: DonorLiveTask[] = [];
       for (const row of donorDashboardRows) {
         if (
           row.delivery_task_id &&
@@ -55,7 +63,8 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
             id: row.delivery_task_id,
             foodListingId: row.id,
             donorId: row.donor_id,
-            ngoId: row.ngo_id || '',
+            ngoId: row.ngo_id || undefined,
+            assignmentType: row.assignment_type,
             foodTitle: row.title,
             servingsRequired: row.servings_claimed || row.servings || 1,
             quantityUnit: 'servings',
@@ -63,10 +72,14 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
             pickupAddress: row.pickup_address,
             pickupLat: row.latitude,
             pickupLng: row.longitude,
-            pickupCode: row.pickup_code || '482910',
-            riderName: row.rider_name || 'Volunteer Delivery Partner',
-            riderPhone: row.rider_phone || '+91 98505 67890',
-            ngoName: row.ngo_name || 'Community Center NGO',
+            dropoffAddress: row.dropoff_address,
+            dropoffLat: row.dropoff_lat,
+            dropoffLng: row.dropoff_lng,
+            pickupCode: row.pickup_code || undefined,
+            riderUserId: row.rider_user_id || undefined,
+            riderName: row.rider_name || 'Assigned Rider',
+            riderPhone: row.rider_phone || undefined,
+            ngoName: row.ngo_name || (row.assignment_type === 'rider_direct_pickup' ? 'Community Relief Dropoff' : 'Accepted NGO'),
             createdAt: row.created_at,
             updatedAt: row.updated_at || new Date().toISOString(),
             incidentReported: false,
@@ -74,13 +87,20 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
         }
       }
       setActiveTasks(liveTasks);
+
+      // Load real nearby verified NGOs based on donor's latest listing or profile location
+      const refLat = listingsData.find((l) => l.latitude)?.latitude ?? user?.location?.latitude;
+      const refLng = listingsData.find((l) => l.longitude)?.longitude ?? user?.location?.longitude;
+      if (typeof refLat === 'number' && typeof refLng === 'number' && refLat !== 0 && refLng !== 0) {
+        NGOService.getNearbyNGOs(refLat, refLng, 20, true).then(setNearbyNgos).catch(() => {});
+      }
     } catch (err) {
       console.warn('Error loading donor dashboard:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId]);
+  }, [userId, user?.location?.latitude, user?.location?.longitude]);
 
   useEffect(() => {
     fetchDonorData(false);
@@ -96,7 +116,27 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
     };
   }, [fetchDonorData, userId]);
 
-  // Donations waiting for rider acceptance
+  const handleOpenChat = async (task: DonorLiveTask) => {
+    if (!userId) return;
+    const recipientId = task.riderUserId || task.ngoId;
+    if (!recipientId) {
+      navigate('/chat');
+      return;
+    }
+    try {
+      const conv = await ChatService.getOrCreateDirectConversation(userId, recipientId, {
+        type: 'delivery',
+        relatedListingId: task.foodListingId,
+        relatedTaskId: task.id,
+        title: task.foodTitle || 'Pickup Coordination',
+      });
+      navigate(`/chat/${conv.id}`);
+    } catch {
+      navigate('/chat');
+    }
+  };
+
+  // Donations waiting for acceptance
   const waitingDonations = useMemo(() => {
     return listings.filter(l => l.status === 'available' || l.status === 'partially_reserved');
   }, [listings]);
@@ -158,7 +198,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
             <Leaf size={22} />
           </div>
           <div>
-            <div className={styles.statValue}>{impact?.foodRedistributedKg ?? Math.round(listings.length * 12)} kg</div>
+            <div className={styles.statValue}>{impact?.foodRedistributedKg ?? 0} kg</div>
             <div className={styles.statLabel}>Food Rescued</div>
           </div>
         </div>
@@ -168,7 +208,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
             <Users size={22} />
           </div>
           <div>
-            <div className={styles.statValue}>{impact?.peopleReached ?? Math.round(listings.length * 28)}</div>
+            <div className={styles.statValue}>{impact?.peopleReached ?? 0}</div>
             <div className={styles.statLabel}>People Reached</div>
           </div>
         </div>
@@ -202,9 +242,14 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
 
           {activeTasks.map(task => {
             const isCollected = ['food_collected', 'in_transit', 'delivered'].includes(task.status);
-
-            // Calculate realistic ETA based on distance
-            const eta = LocationService.calculateEta(1.8);
+            const statusLabel =
+              task.status === 'delivered'
+                ? 'Delivered to NGO'
+                : task.status === 'in_transit' || task.status === 'food_collected'
+                ? 'In Transit to NGO'
+                : task.status === 'going_to_pickup'
+                ? 'Rider Arriving for Pickup'
+                : 'Rider Assigned — Heading to Pickup';
 
             return (
               <div key={task.id} className={styles.liveCard}>
@@ -216,7 +261,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
                   </div>
                   <div className={styles.etaBadge}>
                     <Clock size={14} />
-                    <span>{isCollected ? 'In Transit to NGO' : `Rider arriving in ~${eta.text}`}</span>
+                    <span>{statusLabel}</span>
                   </div>
                 </div>
 
@@ -242,7 +287,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
                         </a>
                       )}
                       <button
-                        onClick={() => navigate('/chat')}
+                        onClick={() => handleOpenChat(task)}
                         className={styles.chatBtn}
                       >
                         <MessageSquare size={14} /> Chat
@@ -250,16 +295,31 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
                     </div>
                   </div>
 
-                  {/* Pickup Verification Code Box */}
-                  <div className={styles.pickupCodeBox}>
-                    <div className={styles.codeExplainer}>
-                      <strong>Pickup Handover Verification Code</strong>
-                      Share this 6-character code with your rider upon arrival to verify food collection.
+                  {/* Live Zomato-Style GPS Map */}
+                  <LiveTrackingMap
+                    deliveryTaskId={task.id}
+                    taskStatus={task.status}
+                    pickupLat={task.pickupLat}
+                    pickupLng={task.pickupLng}
+                    pickupLabel={task.pickupAddress || 'Your Pickup Location'}
+                    dropoffLat={task.dropoffLat}
+                    dropoffLng={task.dropoffLng}
+                    dropoffLabel={task.ngoName || 'Destination'}
+                    height={220}
+                  />
+
+                  {/* Pickup Verification Code Box (only when real code exists) */}
+                  {task.pickupCode && (
+                    <div className={styles.pickupCodeBox}>
+                      <div className={styles.codeExplainer}>
+                        <strong>Pickup Handover Verification Code</strong>
+                        Share this 6-character code with your rider upon arrival to verify food collection.
+                      </div>
+                      <div className={styles.secretCode}>
+                        {task.pickupCode}
+                      </div>
                     </div>
-                    <div className={styles.secretCode}>
-                      {task.pickupCode || 'SB9821'}
-                    </div>
-                  </div>
+                  )}
 
                   {/* Interactive Stepper Timeline */}
                   <div className={styles.timeline}>
@@ -359,7 +419,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
                       <Users size={14} /> {listing.availableServings} servings
                     </span>
                     <span className={styles.metaItem}>
-                      <MapPin size={14} /> {listing.city || 'Central Delhi'}
+                      <MapPin size={14} /> {listing.city || 'Pickup location set'}
                     </span>
                     <span className={styles.metaItem}>
                       <Clock size={14} /> Available until {new Date(listing.availableUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -379,6 +439,39 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
           </div>
         )}
       </section>
+
+      {/* ── Nearby Verified NGOs Strip (Real Supabase data) ── */}
+      {nearbyNgos.length > 0 && (
+        <section style={{ marginBottom: 32 }}>
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>
+              <ShieldCheck size={20} color="#16a34a" /> Nearby Verified NGOs ({nearbyNgos.length})
+            </h2>
+            <Link to="/ngos" style={{ color: '#ea580c', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}>
+              View NGO Map &rarr;
+            </Link>
+          </div>
+          <div className={styles.donationsGrid}>
+            {nearbyNgos.slice(0, 3).map((ngo) => (
+              <div key={ngo.id} className={styles.donationCard}>
+                <div className={styles.cardBody}>
+                  <h3 className={styles.cardTitle}>{ngo.organizationName || ngo.fullName}</h3>
+                  <div className={styles.cardMeta}>
+                    <span className={styles.metaItem}>
+                      <MapPin size={14} /> {ngo.distanceKm} km away · {ngo.city || ngo.address || 'Nearby'}
+                    </span>
+                    {ngo.operatingHours && (
+                      <span className={styles.metaItem}>
+                        <Clock size={14} /> {ngo.operatingHours}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── 5. Completed Donations History Preview ── */}
       {completedDonations.length > 0 && (

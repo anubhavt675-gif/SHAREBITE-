@@ -7,7 +7,7 @@ import { DonationService } from '../../services/donations';
 import { ClaimsService } from '../../services/claims';
 import { PageLoader } from '../../components/states/LoadingState';
 import { EmptyState } from '../../components/states/EmptyState';
-import type { FoodListing } from '../../types';
+import type { FoodListing, DonationStatusHistoryItem } from '../../types';
 import styles from './DonationDetailPage.module.css';
 
 export default function DonationDetailPage() {
@@ -15,20 +15,26 @@ export default function DonationDetailPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [listing, setListing] = useState<FoodListing | null>(null);
+  const [history, setHistory] = useState<DonationStatusHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
+  const [claimResultRole, setClaimResultRole] = useState<'ngo' | 'rider'>('ngo');
   const [claimServings, setClaimServings] = useState(1);
   const [claimNotes, setClaimNotes] = useState('');
   const [error, setError] = useState('');
 
   const fetchListing = useCallback(() => {
     if (!id) return;
-    DonationService.getListingById(id)
-      .then(data => {
+    Promise.all([
+      DonationService.getListingById(id),
+      DonationService.getStatusHistory(id),
+    ])
+      .then(([data, hist]) => {
         setListing(data);
+        setHistory(hist);
         if (data && data.availableServings > 0) {
-          setClaimServings(Math.min(data.availableServings, 1));
+          setClaimServings(data.availableServings);
         }
       })
       .finally(() => setLoading(false));
@@ -43,12 +49,13 @@ export default function DonationDetailPage() {
     setClaiming(true);
     setError('');
     try {
-      // Use the secure transactional RPC for NGO claims
-      await ClaimsService.claimFood(listing.id, claimServings, undefined, claimNotes || undefined);
+      const res = await ClaimsService.acceptDonation(listing.id, claimServings, undefined, claimNotes || undefined);
+      setClaimResultRole(res.acceptedBy);
       setClaimed(true);
       fetchListing();
     } catch (err: any) {
-      setError(err.message || 'Failed to claim. Please try again.');
+      setError(err.message || 'Failed to accept donation. Another user may have claimed it first.');
+      fetchListing();
     } finally {
       setClaiming(false);
     }
@@ -61,9 +68,10 @@ export default function DonationDetailPage() {
   const hoursLeft = (new Date(listing.availableUntil).getTime() - Date.now()) / (1000 * 60 * 60);
   const isExpiringSoon = !isExpired && hoursLeft <= 2;
   const expiryText = isExpired ? 'Expired' : formatDistanceToNow(new Date(listing.availableUntil), { addSuffix: true });
-  const isNGO = user?.role === 'ngo' || user?.role === 'receiver';
-  const isVolunteer = user?.role === 'volunteer';
+  const isNGO = ['ngo', 'receiver', 'acceptor'].includes(user?.role || '');
+  const isRider = ['rider', 'volunteer'].includes(user?.role || '');
   const isDonor = listing.donorId === user?.id;
+  const canSeeExactAddress = isDonor || user?.role === 'admin' || claimed || listing.status !== 'available';
 
   return (
     <div className={styles.page}>
@@ -125,7 +133,9 @@ export default function DonationDetailPage() {
                   <MapPin size={16} color="var(--color-secondary)" />
                   <div>
                     <p className={styles.metaValue}>{listing.city}</p>
-                    <p className={styles.metaLabel}>{listing.pickupAddress}</p>
+                    <p className={styles.metaLabel}>
+                      {canSeeExactAddress ? listing.pickupAddress : 'Exact address shared once accepted'}
+                    </p>
                   </div>
                 </div>
               )}
@@ -178,6 +188,20 @@ export default function DonationDetailPage() {
                 )}
               </div>
             )}
+
+            {history.length > 0 && (
+              <div style={{ marginTop: 20, padding: 16, background: '#f9fafb', borderRadius: 10, border: '1px solid #e5e7eb' }}>
+                <h4 style={{ margin: '0 0 10px 0', fontSize: 13, fontWeight: 700, color: '#374151' }}>Live Status History</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: '#4b5563' }}>
+                  {history.map((h) => (
+                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span><strong>{h.newStatus.replace(/_/g, ' ')}</strong>{h.notes ? ` — ${h.notes}` : ''}</span>
+                      <span style={{ color: '#9ca3af', whiteSpace: 'nowrap' }}>{formatDistanceToNow(new Date(h.createdAt), { addSuffix: true })}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -204,13 +228,15 @@ export default function DonationDetailPage() {
             <div className={styles.successBanner} style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <CheckCircle size={20} />
-                <strong>Food Reserved Successfully!</strong>
+                <strong>{claimResultRole === 'rider' ? 'Pickup Accepted Successfully!' : 'Food Accepted Successfully!'}</strong>
               </div>
               <p style={{ margin: 0, fontSize: 13, lineHeight: 1.4 }}>
-                A delivery task has been created for verified volunteer riders. You can track pickup progress and delivery verification in your claims dashboard.
+                {claimResultRole === 'rider'
+                  ? 'You won this pickup assignment. Head to your Rider Dashboard for live navigation and verification.'
+                  : 'A delivery task has been created and nearby riders have been notified. Track live progress in My Claims.'}
               </p>
               <Link
-                to="/my-claims"
+                to={claimResultRole === 'rider' ? '/rider-dashboard' : '/my-claims'}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -225,26 +251,30 @@ export default function DonationDetailPage() {
                   marginTop: 4,
                 }}
               >
-                Track in My Claims <ArrowRight size={14} />
+                {claimResultRole === 'rider' ? 'Open Rider Dashboard' : 'Track in My Claims'} <ArrowRight size={14} />
               </Link>
             </div>
-          ) : (isNGO || isVolunteer) && (listing.status === 'available' || listing.status === 'partially_reserved') && !isDonor ? (
+          ) : (isNGO || isRider) && (listing.status === 'available' || listing.status === 'partially_reserved') && !isDonor ? (
             <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Reserve for Your Community</h4>
+              <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
+                {isRider ? 'Accept Food Pickup' : 'Accept Food for Your NGO'}
+              </h4>
               
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Servings to claim (Max: {listing.availableServings})
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={listing.availableServings}
-                  value={claimServings}
-                  onChange={(e) => setClaimServings(Math.max(1, Math.min(listing.availableServings, parseInt(e.target.value) || 1)))}
-                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }}
-                />
-              </div>
+              {isNGO && (
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                    Servings to claim (Max: {listing.availableServings})
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={listing.availableServings}
+                    value={claimServings}
+                    onChange={(e) => setClaimServings(Math.max(1, Math.min(listing.availableServings, parseInt(e.target.value) || 1)))}
+                    style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }}
+                  />
+                </div>
+              )}
 
               <div>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
@@ -252,7 +282,7 @@ export default function DonationDetailPage() {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Volunteer arriving by 4:00 PM"
+                  placeholder="e.g. Arriving within 20 minutes"
                   value={claimNotes}
                   onChange={(e) => setClaimNotes(e.target.value)}
                   style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }}
@@ -260,7 +290,11 @@ export default function DonationDetailPage() {
               </div>
 
               <button className={styles.claimBtn} onClick={handleClaim} disabled={claiming || listing.availableServings <= 0}>
-                {claiming ? 'Reserving...' : `Reserve ${claimServings} Serving${claimServings > 1 ? 's' : ''}`}
+                {claiming
+                  ? 'Confirming...'
+                  : isRider
+                  ? `Accept Pickup (${listing.availableServings} Servings)`
+                  : `Accept ${claimServings} Serving${claimServings > 1 ? 's' : ''}`}
               </button>
             </div>
           ) : null}

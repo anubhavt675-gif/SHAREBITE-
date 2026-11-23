@@ -61,14 +61,24 @@ export default function AdminPage() {
 
   const handleVerify = async (userId: string, currentStatus: boolean) => {
     setUpdatingId(userId);
+    const nextStatus = currentStatus ? 'rejected' : 'verified';
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ is_verified: !currentStatus })
-        .eq('id', userId);
+      const { error: rpcErr } = await supabase.rpc('admin_verify_profile', {
+        p_profile_id: userId,
+        p_status: nextStatus,
+        p_notes: null,
+      });
 
-      if (!error) {
+      if (!rpcErr) {
         setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_verified: !currentStatus } : u));
+      } else {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ is_verified: !currentStatus, verification_status: nextStatus })
+          .eq('id', userId);
+        if (!error) {
+          setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_verified: !currentStatus } : u));
+        }
       }
     } catch (err) {
       console.error('Failed to update verification status:', err);
@@ -293,7 +303,7 @@ export default function AdminPage() {
               <div>
                 <strong>Supabase Database & Realtime</strong>
                 <p style={{ color: 'var(--color-muted)', fontSize: 'var(--font-size-xs)' }}>
-                  Connected to yxqnfvwbqowbbyfzgkdm.supabase.co
+                  Connected to {(import.meta.env.VITE_SUPABASE_URL || 'https://lzyuvgbhpkiqxscqxggq.supabase.co').replace(/^https?:\/\//, '')}
                 </p>
               </div>
             </div>

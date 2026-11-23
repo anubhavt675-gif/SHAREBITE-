@@ -6,145 +6,6 @@ import { ChatService } from '../../services/chat';
 import type { Conversation, ChatMessage } from '../../types';
 import styles from './ChatPage.module.css';
 
-// Fallback high-fidelity sample conversations
-const SAMPLE_CONVERSATIONS: Conversation[] = [
-  {
-    id: 'sample-conv-1',
-    type: 'donation',
-    title: 'Vegetable Rice + Dal Pickup',
-    lastMessageAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    participants: [
-      {
-        id: 'p1',
-        conversationId: 'sample-conv-1',
-        userId: 'ngo-user-1',
-        user: {
-          id: 'ngo-user-1',
-          name: 'Bhopal Food Seva NGO',
-          fullName: 'Bhopal Food Seva NGO',
-          role: 'ngo',
-          email: 'contact@bhopalfoodseva.org',
-          phone: '+91 98260 12345',
-          isVerified: true,
-          totalDonations: 0,
-          totalRescues: 48,
-          createdAt: '',
-          updatedAt: '',
-        } as any,
-      },
-    ],
-    lastMessage: {
-      id: 'm1',
-      conversationId: 'sample-conv-1',
-      senderId: 'ngo-user-1',
-      content: 'Our volunteer is on the way to collect the 25 servings of rice.',
-      messageType: 'text',
-      isRead: true,
-      createdAt: new Date(Date.now() - 10 * 60000).toISOString(),
-    },
-  },
-  {
-    id: 'sample-conv-2',
-    type: 'delivery',
-    title: 'Rider Delivery Coordination',
-    lastMessageAt: new Date(Date.now() - 3600000).toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    participants: [
-      {
-        id: 'p2',
-        conversationId: 'sample-conv-2',
-        userId: 'rider-user-1',
-        user: {
-          id: 'rider-user-1',
-          name: 'Rahul Sharma (Rider)',
-          fullName: 'Rahul Sharma',
-          role: 'rider',
-          email: 'rahul@sharebite.app',
-          phone: '+91 98930 54321',
-          isVerified: true,
-          totalDonations: 0,
-          totalRescues: 120,
-          createdAt: '',
-          updatedAt: '',
-        } as any,
-      },
-    ],
-    lastMessage: {
-      id: 'm2',
-      conversationId: 'sample-conv-2',
-      senderId: 'rider-user-1',
-      content: 'Arrived at the pickup location. Waiting outside gate 2.',
-      messageType: 'text',
-      isRead: false,
-      createdAt: new Date(Date.now() - 35 * 60000).toISOString(),
-    },
-  },
-];
-
-const INITIAL_MESSAGES: Record<string, ChatMessage[]> = {
-  'sample-conv-1': [
-    {
-      id: 'sm1',
-      conversationId: 'sample-conv-1',
-      senderId: 'system',
-      content: 'Claim confirmed. Food donation reserved for Bhopal Food Seva NGO.',
-      messageType: 'system',
-      isRead: true,
-      createdAt: new Date(Date.now() - 40 * 60000).toISOString(),
-    },
-    {
-      id: 'sm2',
-      conversationId: 'sample-conv-1',
-      senderId: 'ngo-user-1',
-      content: 'Hello! Thank you for the generous donation. Is everything packaged in containers?',
-      messageType: 'text',
-      isRead: true,
-      createdAt: new Date(Date.now() - 25 * 60000).toISOString(),
-    },
-    {
-      id: 'sm3',
-      conversationId: 'sample-conv-1',
-      senderId: 'current-user',
-      content: 'Yes, 25 meal boxes packed fresh and warm ready for pickup.',
-      messageType: 'text',
-      isRead: true,
-      createdAt: new Date(Date.now() - 18 * 60000).toISOString(),
-    },
-    {
-      id: 'sm4',
-      conversationId: 'sample-conv-1',
-      senderId: 'ngo-user-1',
-      content: 'Our volunteer is on the way to collect the 25 servings of rice.',
-      messageType: 'text',
-      isRead: true,
-      createdAt: new Date(Date.now() - 10 * 60000).toISOString(),
-    },
-  ],
-  'sample-conv-2': [
-    {
-      id: 'sm5',
-      conversationId: 'sample-conv-2',
-      senderId: 'system',
-      content: 'Rider Rahul Sharma assigned to pickup task.',
-      messageType: 'system',
-      isRead: true,
-      createdAt: new Date(Date.now() - 50 * 60000).toISOString(),
-    },
-    {
-      id: 'sm6',
-      conversationId: 'sample-conv-2',
-      senderId: 'rider-user-1',
-      content: 'Arrived at the pickup location. Waiting outside gate 2.',
-      messageType: 'text',
-      isRead: true,
-      createdAt: new Date(Date.now() - 35 * 60000).toISOString(),
-    },
-  ],
-};
-
 export default function ChatPage() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
@@ -158,48 +19,54 @@ export default function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. Fetch conversations
+  // 1. Fetch real conversations from Supabase
   useEffect(() => {
     async function loadConversations() {
       if (!user) return;
       try {
         const dbConvs = await ChatService.getUserConversations(user.id);
-        if (dbConvs.length > 0) {
-          setConversations(dbConvs);
-          setActiveConvId(conversationId || dbConvs[0].id);
+        setConversations(dbConvs);
+        if (conversationId && dbConvs.some((c) => c.id === conversationId)) {
+          setActiveConvId(conversationId);
+        } else if (dbConvs.length > 0) {
+          setActiveConvId(dbConvs[0].id);
         } else {
-          setConversations(SAMPLE_CONVERSATIONS);
-          setActiveConvId(conversationId || SAMPLE_CONVERSATIONS[0].id);
+          setActiveConvId(null);
         }
       } catch {
-        setConversations(SAMPLE_CONVERSATIONS);
-        setActiveConvId(conversationId || SAMPLE_CONVERSATIONS[0].id);
+        setConversations([]);
+        setActiveConvId(null);
       }
     }
     loadConversations();
   }, [user, conversationId]);
 
-  // 2. Fetch messages for active conversation
+  // 2. Fetch messages & subscribe to realtime incoming messages (deduplicated)
   useEffect(() => {
-    if (!activeConvId) return;
-
-    // Check if it's sample conversation
-    if (INITIAL_MESSAGES[activeConvId]) {
-      setMessages(INITIAL_MESSAGES[activeConvId]);
+    if (!activeConvId || !user) {
+      setMessages([]);
       return;
     }
 
-    ChatService.getMessages(activeConvId).then(setMessages);
+    ChatService.getMessages(activeConvId).then((msgs) => {
+      setMessages(msgs);
+      ChatService.markMessagesAsRead(activeConvId, user.id);
+    });
 
-    // Subscribe to realtime incoming messages
     const sub = ChatService.subscribeToMessages(activeConvId, (newMsg) => {
-      setMessages((prev) => [...prev, newMsg]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === newMsg.id)) return prev;
+        return [...prev, newMsg];
+      });
+      if (newMsg.senderId !== user.id) {
+        ChatService.markMessagesAsRead(activeConvId, user.id);
+      }
     });
 
     return () => {
       sub.unsubscribe();
     };
-  }, [activeConvId]);
+  }, [activeConvId, user]);
 
   // Scroll to bottom on new message
   useEffect(() => {
@@ -219,8 +86,9 @@ export default function ChatPage() {
     setInputText('');
     setSending(true);
 
+    const optId = `opt-${Date.now()}`;
     const optimisticMsg: ChatMessage = {
-      id: `opt-${Date.now()}`,
+      id: optId,
       conversationId: activeConvId,
       senderId: user.id,
       content: text,
@@ -232,15 +100,19 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, optimisticMsg]);
 
     try {
-      if (!activeConvId.startsWith('sample-')) {
-        await ChatService.sendMessage({
-          conversationId: activeConvId,
-          senderId: user.id,
-          content: text,
-        });
-      }
+      const saved = await ChatService.sendMessage({
+        conversationId: activeConvId,
+        senderId: user.id,
+        content: text,
+      });
+      setMessages((prev) => {
+        const withoutOpt = prev.filter((m) => m.id !== optId);
+        if (withoutOpt.some((m) => m.id === saved.id)) return withoutOpt;
+        return [...withoutOpt, saved];
+      });
     } catch (err) {
       console.error('Failed to send message:', err);
+      setMessages((prev) => prev.filter((m) => m.id !== optId));
     } finally {
       setSending(false);
     }

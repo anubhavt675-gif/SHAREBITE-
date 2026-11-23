@@ -130,6 +130,12 @@ export class ChatService {
       user: p.profiles ? mapProfileToUser(p.profiles) : undefined,
     }));
 
+    const { count: unreadCount } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('conversation_id', conv.id)
+      .eq('is_read', false);
+
     return {
       id: conv.id,
       type: conv.type,
@@ -140,6 +146,7 @@ export class ChatService {
       createdAt: conv.created_at,
       updatedAt: conv.updated_at,
       participants: mappedParticipants,
+      unreadCount: unreadCount || 0,
       lastMessage: lastMsg
         ? {
             id: lastMsg.id,
@@ -259,6 +266,27 @@ export class ChatService {
   }
 
   /**
+   * Mark incoming messages in a conversation as read
+   */
+  static async markMessagesAsRead(conversationId: string, currentUserId: string): Promise<void> {
+    if (!isValidUUID(conversationId) || !isValidUUID(currentUserId)) return;
+    try {
+      await supabase
+        .from('messages')
+        .update({ is_read: true })
+        .eq('conversation_id', conversationId)
+        .neq('sender_id', currentUserId)
+        .eq('is_read', false);
+
+      await supabase
+        .from('conversation_participants')
+        .update({ last_read_at: new Date().toISOString() })
+        .eq('conversation_id', conversationId)
+        .eq('user_id', currentUserId);
+    } catch {}
+  }
+
+  /**
    * Subscribe to new incoming messages for a conversation
    */
   static subscribeToMessages(
@@ -266,7 +294,7 @@ export class ChatService {
     onMessage: (msg: ChatMessage) => void
   ) {
     const channel = supabase
-      .channel(`chat:${conversationId}`)
+      .channel(`chat:${conversationId}:${Date.now()}`)
       .on(
         'postgres_changes',
         {
@@ -282,7 +310,7 @@ export class ChatService {
             .from('profiles')
             .select('id, full_name, avatar_url, role')
             .eq('id', row.sender_id)
-            .single();
+            .maybeSingle();
 
           onMessage({
             id: row.id,

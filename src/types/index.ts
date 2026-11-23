@@ -31,6 +31,15 @@ export type NotificationType =
   | 'listing_expiring'
   | 'partner_verified'
   | 'donation_claimed'
+  | 'food_nearby'
+  | 'pickup_nearby'
+  | 'donation_already_claimed'
+  | 'donation_cancelled'
+  | 'donation_reassigned'
+  | 'pickup_started'
+  | 'rider_assigned'
+  | 'delivery_completed'
+  | 'new_donation'
   | 'system';
 
 export type FoodCategory =
@@ -70,10 +79,23 @@ export interface User {
   location?: Location;
   isVerified: boolean;
   verificationStatus?: string;
+  isAvailable?: boolean;
+  serviceRadiusKm?: number;
+  operatingHours?: string;
+  dailyCapacity?: number;
   totalDonations: number;
   totalRescues: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface LocationCaptureResult {
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
+  timestamp: string;
+  status: 'granted' | 'denied' | 'unavailable';
+  errorMessage?: string;
 }
 
 export interface FoodListing {
@@ -91,6 +113,9 @@ export interface FoodListing {
   city?: string;
   latitude?: number;
   longitude?: number;
+  locationAccuracyM?: number;
+  locationCapturedAt?: string;
+  notificationRadiusKm?: number;
   availableFrom: string;
   availableUntil: string;
   status: FoodStatus;
@@ -137,9 +162,37 @@ export interface AppNotification {
   type: NotificationType;
   title: string;
   body: string;
-  data?: Record<string, string>;
+  data?: Record<string, any>;
+  actionUrl?: string;
+  relatedFoodId?: string;
+  relatedDeliveryId?: string;
   isRead: boolean;
   createdAt: string;
+}
+
+export interface DonationStatusHistoryItem {
+  id: string;
+  foodListingId: string;
+  deliveryTaskId?: string;
+  claimId?: string;
+  previousStatus?: string;
+  newStatus: string;
+  changedBy?: string;
+  actorRole?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface NearbyRider {
+  riderId: string;
+  userId: string;
+  name: string;
+  vehicleType: string;
+  rating: number;
+  isOnline: boolean;
+  isAvailable: boolean;
+  lastLocationAt?: string;
+  distanceKm: number;
 }
 
 export interface ImpactStats {
@@ -181,6 +234,9 @@ export interface CreateFoodListingForm {
   pickupTime?: string;
   latitude?: number;
   longitude?: number;
+  locationAccuracyM?: number;
+  locationCapturedAt?: string;
+  notificationRadiusKm?: number;
   availableFrom: string;
   availableUntil: string;
   isUrgent: boolean;
@@ -245,6 +301,7 @@ export interface RiderLocationUpdate {
   longitude: number;
   heading?: number;
   speed?: number;
+  accuracyM?: number;
   recordedAt: string;
 }
 
@@ -259,6 +316,10 @@ export interface NearbyNGO {
   longitude: number;
   avatarUrl?: string;
   isVerified: boolean;
+  isAvailable?: boolean;
+  serviceRadiusKm?: number;
+  operatingHours?: string;
+  dailyCapacity?: number;
   distanceKm: number;
 }
 

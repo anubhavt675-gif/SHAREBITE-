@@ -1,11 +1,16 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Package, Truck, CheckCircle, X, MapPin, Clock,
   Users, Loader2, RefreshCw, ChevronDown, ChevronUp,
-  ShieldCheck, PieChart
+  ShieldCheck, PieChart, MessageSquare, LocateFixed
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ClaimsService, type NgoClaim, type DistributionRecord } from '../../services/claims';
+import { NGOService } from '../../services/ngo';
+import { LocationService } from '../../services/location';
+import { ChatService } from '../../services/chat';
+import LiveTrackingMap from '../../components/map/LiveTrackingMap';
 import { formatDistanceToNow } from 'date-fns';
 import styles from './NGOClaimsDashboard.module.css';
 
@@ -264,13 +269,34 @@ function DistributionForm({ record, onSuccess }: DistributionFormProps) {
   );
 }
 
-function ClaimCard({ claim, onRefresh }: { claim: NgoClaim; onRefresh: () => void }) {
+function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: string; onRefresh: () => void }) {
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [distribution, setDistribution] = useState<DistributionRecord | null>(null);
   const [loadingDist, setLoadingDist] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState('');
+
+  const handleOpenChat = async () => {
+    if (!userId) return;
+    const recipient = claim.riderUserId || claim.donorId;
+    if (!recipient) {
+      navigate('/chat');
+      return;
+    }
+    try {
+      const conv = await ChatService.getOrCreateDirectConversation(userId, recipient, {
+        type: 'delivery',
+        relatedListingId: claim.foodListingId,
+        relatedTaskId: claim.deliveryTaskId,
+        title: claim.foodTitle || 'Food Claim Coordination',
+      });
+      navigate(`/chat/${conv.id}`);
+    } catch {
+      navigate('/chat');
+    }
+  };
 
   const loadDistribution = useCallback(async () => {
     if (!claim.distributionRecordId) return;
@@ -372,8 +398,23 @@ function ClaimCard({ claim, onRefresh }: { claim: NgoClaim; onRefresh: () => voi
         )}
       </div>
 
-      {/* Delivery codes — show pickup code to NGO for verification */}
-      {claim.dropoffCode && ['rider_assigned', 'food_collected', 'in_transit', 'delivered'].includes(claim.deliveryStatus || '') && (
+      {/* Live Rider Tracking Map when rider is assigned */}
+      {claim.deliveryTaskId && ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(claim.deliveryStatus || '') && (
+        <LiveTrackingMap
+          deliveryTaskId={claim.deliveryTaskId}
+          taskStatus={claim.deliveryStatus || 'rider_assigned'}
+          pickupLat={claim.pickupLat}
+          pickupLng={claim.pickupLng}
+          pickupLabel={claim.pickupAddress || claim.donorName || 'Donor Pickup'}
+          dropoffLat={claim.dropoffLat}
+          dropoffLng={claim.dropoffLng}
+          dropoffLabel={claim.ngoName || 'Your NGO'}
+          height={200}
+        />
+      )}
+
+      {/* Delivery codes — show dropoff code to NGO for verification */}
+      {claim.dropoffCode && ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit', 'delivered'].includes(claim.deliveryStatus || '') && (
         <div className={`${styles.codeBox} ${styles.codeBoxDropoff}`}>
           <ShieldCheck size={20} color="#1e40af" />
           <div>
@@ -395,6 +436,12 @@ function ClaimCard({ claim, onRefresh }: { claim: NgoClaim; onRefresh: () => voi
         {canConfirmReceipt && (
           <button className={`${styles.btn} ${styles.btnSuccess}`} onClick={() => setShowReceiptModal(true)}>
             <CheckCircle size={14} /> Confirm Receipt
+          </button>
+        )}
+
+        {!['cancelled', 'expired', 'distributed'].includes(claim.status) && (
+          <button className={`${styles.btn} ${styles.btnOutline}`} onClick={handleOpenChat}>
+            <MessageSquare size={14} /> Chat
           </button>
         )}
 
@@ -434,12 +481,60 @@ function ClaimCard({ claim, onRefresh }: { claim: NgoClaim; onRefresh: () => voi
 }
 
 export default function NGOClaimsDashboard() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const userId = user?.id;
   const [tab, setTab] = useState<'active' | 'completed' | 'cancelled'>('active');
   const [claims, setClaims] = useState<NgoClaim[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isAvailable, setIsAvailable] = useState<boolean>(user?.isAvailable ?? true);
+  const [serviceRadiusKm, setServiceRadiusKm] = useState<number>(user?.serviceRadiusKm ?? 15);
+  const [updatingLocation, setUpdatingLocation] = useState(false);
+  const [ngoStatusMsg, setNgoStatusMsg] = useState('');
+
+  useEffect(() => {
+    if (user?.isAvailable !== undefined) setIsAvailable(user.isAvailable);
+    if (user?.serviceRadiusKm !== undefined) setServiceRadiusKm(user.serviceRadiusKm);
+  }, [user?.isAvailable, user?.serviceRadiusKm]);
+
+  const handleToggleAvailability = async () => {
+    if (!userId) return;
+    const next = !isAvailable;
+    setIsAvailable(next);
+    const ok = await NGOService.updateAvailability(userId, { isAvailable: next });
+    if (ok) {
+      setNgoStatusMsg(next ? 'NGO status set to Accepting Donations' : 'NGO status paused');
+      refreshUser();
+    }
+  };
+
+  const handleRadiusChange = async (nextRadius: number) => {
+    setServiceRadiusKm(nextRadius);
+    if (!userId) return;
+    await NGOService.updateAvailability(userId, { serviceRadiusKm: nextRadius });
+    setNgoStatusMsg(`Alert radius updated to ${nextRadius} km`);
+  };
+
+  const handleUpdateNgoGPS = async () => {
+    if (!userId) return;
+    setUpdatingLocation(true);
+    setNgoStatusMsg('');
+    const gps = await LocationService.detectCurrentGPS();
+    if (gps.status === 'granted' && gps.latitude !== null && gps.longitude !== null) {
+      const rev = await LocationService.reverseGeocode(gps.latitude, gps.longitude);
+      await NGOService.updateAvailability(userId, {
+        latitude: gps.latitude,
+        longitude: gps.longitude,
+        address: rev?.address,
+        city: rev?.city,
+      });
+      setNgoStatusMsg(`NGO GPS updated (${gps.latitude.toFixed(4)}, ${gps.longitude.toFixed(4)})`);
+      refreshUser();
+    } else {
+      setNgoStatusMsg(gps.errorMessage || 'Could not detect GPS location.');
+    }
+    setUpdatingLocation(false);
+  };
 
   const fetchClaims = useCallback(async (isSilent = false) => {
     if (!userId) return;
@@ -473,6 +568,37 @@ export default function NGOClaimsDashboard() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>My Claims & Distribution</h1>
         <p className={styles.pageSubtitle}>Manage your food claims and record distribution to beneficiaries</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 12 }}>
+          <button
+            type="button"
+            className={`${styles.btn} ${isAvailable ? styles.btnSuccess : styles.btnOutline}`}
+            onClick={handleToggleAvailability}
+          >
+            {isAvailable ? 'Accepting Food Donations' : 'Paused (Not Accepting)'}
+          </button>
+          <select
+            aria-label="Service radius"
+            value={serviceRadiusKm}
+            onChange={(e) => handleRadiusChange(Number(e.target.value))}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 13, background: '#fff' }}
+          >
+            <option value={5}>Radius: 5 km</option>
+            <option value={10}>Radius: 10 km</option>
+            <option value={15}>Radius: 15 km</option>
+            <option value={20}>Radius: 20 km</option>
+            <option value={30}>Radius: 30 km</option>
+          </select>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.btnOutline}`}
+            onClick={handleUpdateNgoGPS}
+            disabled={updatingLocation}
+          >
+            {updatingLocation ? <Loader2 size={14} className="animate-spin" /> : <LocateFixed size={14} />}
+            Update NGO GPS
+          </button>
+          {ngoStatusMsg && <span style={{ fontSize: 12, color: '#4b5563' }}>{ngoStatusMsg}</span>}
+        </div>
       </div>
 
       <div className={styles.tabs}>
@@ -508,7 +634,7 @@ export default function NGOClaimsDashboard() {
         </div>
       ) : (
         displayClaims.map(claim => (
-          <ClaimCard key={claim.id} claim={claim} onRefresh={fetchClaims} />
+          <ClaimCard key={claim.id} claim={claim} userId={userId} onRefresh={fetchClaims} />
         ))
       )}
     </div>

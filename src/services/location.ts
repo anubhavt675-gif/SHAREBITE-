@@ -1,10 +1,19 @@
 import { supabase } from '../lib/supabase';
-import type { RiderLocationUpdate } from '../types';
+import type { LocationCaptureResult, RiderLocationUpdate } from '../types';
 
 export interface Coordinates {
   latitude: number;
   longitude: number;
   city?: string;
+  accuracy?: number;
+  timestamp?: string;
+}
+
+export interface RoadRouteResult {
+  coordinates: [number, number][];
+  distanceKm: number;
+  durationMin: number;
+  isRoadRoute: boolean;
 }
 
 export interface GeocodeResult {
@@ -189,11 +198,19 @@ export class LocationService {
   }
 
   /**
-   * Get the current device coordinates via HTML5 Geolocation API with graceful fallback
+   * Detect exact device GPS coordinates with explicit permission/error reporting.
+   * Never returns hardcoded fallback coordinates.
    */
-  static async getCurrentCoordinates(): Promise<Coordinates> {
-    if (!navigator.geolocation) {
-      return DEFAULT_COORDINATES;
+  static async detectCurrentGPS(): Promise<LocationCaptureResult> {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      return {
+        latitude: null,
+        longitude: null,
+        accuracy: null,
+        timestamp: new Date().toISOString(),
+        status: 'unavailable',
+        errorMessage: 'Geolocation is not supported by this browser/device.',
+      };
     }
 
     return new Promise((resolve) => {
@@ -202,15 +219,43 @@ export class LocationService {
           resolve({
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
+            accuracy: typeof position.coords.accuracy === 'number' ? Math.round(position.coords.accuracy) : null,
+            timestamp: new Date(position.timestamp || Date.now()).toISOString(),
+            status: 'granted',
           });
         },
         (error) => {
-          console.warn('Geolocation access failed or denied:', error.message);
-          resolve(DEFAULT_COORDINATES);
+          const isDenied = error.code === error.PERMISSION_DENIED;
+          resolve({
+            latitude: null,
+            longitude: null,
+            accuracy: null,
+            timestamp: new Date().toISOString(),
+            status: isDenied ? 'denied' : 'unavailable',
+            errorMessage: isDenied
+              ? 'Location permission was denied. Please enable GPS access in your browser or click/drag the pin on the map manually.'
+              : error.message || 'Unable to detect your GPS location. Please place the pin on the map manually.',
+          });
         },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     });
+  }
+
+  /**
+   * Get the current device coordinates via HTML5 Geolocation API with graceful fallback for passive map centering
+   */
+  static async getCurrentCoordinates(): Promise<Coordinates> {
+    const res = await LocationService.detectCurrentGPS();
+    if (res.status === 'granted' && res.latitude !== null && res.longitude !== null) {
+      return {
+        latitude: res.latitude,
+        longitude: res.longitude,
+        accuracy: res.accuracy ?? undefined,
+        timestamp: res.timestamp,
+      };
+    }
+    return DEFAULT_COORDINATES;
   }
 
   /**
@@ -226,11 +271,105 @@ export class LocationService {
         onLocation({
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
+          accuracy: typeof pos.coords.accuracy === 'number' ? Math.round(pos.coords.accuracy) : undefined,
+          timestamp: new Date(pos.timestamp || Date.now()).toISOString(),
         });
       },
       onError,
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
     );
+  }
+
+  /**
+   * Throttled & distance-gated GPS broadcaster for online riders (saves battery & DB writes)
+   */
+  static watchAndBroadcastRiderLocation(params: {
+    riderUserId: string;
+    deliveryTaskId?: string;
+    minIntervalMs?: number;
+    minDistanceMeters?: number;
+    onPosition?: (coords: Coordinates) => void;
+    onError?: (err: GeolocationPositionError) => void;
+  }): () => void {
+    const minIntervalMs = params.minIntervalMs ?? 5000;
+    const minDistanceKm = (params.minDistanceMeters ?? 15) / 1000;
+    let lastSentAt = 0;
+    let lastLat: number | null = null;
+    let lastLng: number | null = null;
+
+    const watchId = LocationService.watchLocation((coords) => {
+      params.onPosition?.(coords);
+      const now = Date.now();
+      const elapsed = now - lastSentAt;
+      const movedKm =
+        lastLat !== null && lastLng !== null
+          ? LocationService.calculateDistance(lastLat, lastLng, coords.latitude, coords.longitude)
+          : Infinity;
+
+      if (elapsed >= minIntervalMs || movedKm >= minDistanceKm) {
+        lastSentAt = now;
+        lastLat = coords.latitude;
+        lastLng = coords.longitude;
+        LocationService.updateRiderLocation({
+          riderId: params.riderUserId,
+          deliveryTaskId: params.deliveryTaskId,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracyM: coords.accuracy,
+        }).catch(() => {});
+      }
+    }, params.onError);
+
+    return () => {
+      LocationService.clearWatch(watchId);
+    };
+  }
+
+  /**
+   * Fetch real road route polyline from OSRM with straight-line fallback
+   */
+  static async fetchRoadRoute(
+    fromLat: number,
+    fromLng: number,
+    toLat: number,
+    toLng: number
+  ): Promise<RoadRouteResult> {
+    const fallbackDist = LocationService.calculateDistance(fromLat, fromLng, toLat, toLng);
+    const fallbackEta = LocationService.calculateEta(fallbackDist);
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4500);
+      const url = `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`;
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const json = await res.json();
+        const route = json?.routes?.[0];
+        if (route?.geometry?.coordinates?.length > 1) {
+          const coords: [number, number][] = route.geometry.coordinates.map(
+            (c: [number, number]) => [c[1], c[0]]
+          );
+          return {
+            coordinates: coords,
+            distanceKm: Math.round((route.distance / 1000) * 10) / 10,
+            durationMin: Math.max(1, Math.round(route.duration / 60)),
+            isRoadRoute: true,
+          };
+        }
+      }
+    } catch {}
+
+    return {
+      coordinates: [
+        [fromLat, fromLng],
+        [toLat, toLng],
+      ],
+      distanceKm: fallbackDist,
+      durationMin: fallbackEta.minutes,
+      isRoadRoute: false,
+    };
   }
 
   static clearWatch(watchId: number | null): void {
@@ -297,31 +436,42 @@ export class LocationService {
     longitude: number;
     heading?: number;
     speed?: number;
+    accuracyM?: number;
   }): Promise<void> {
     try {
-      // Resolve the riders.id (PK) from the auth user UUID (user_id FK)
-      // These are two different UUIDs — riders.id != auth.users.id
-      let riderRowId = params.riderId; // fallback (may fail FK if wrong, but better than nothing)
-      try {
-        const { data: riderRow } = await supabase
-          .from('riders')
-          .select('id')
-          .eq('user_id', params.riderId)
-          .maybeSingle();
-        if (riderRow?.id) riderRowId = riderRow.id;
-      } catch {}
-
-      // 1. Record historical update in rider_location_updates (uses riders.id PK)
-      await supabase.from('rider_location_updates').insert({
-        rider_id: riderRowId,
-        delivery_task_id: params.deliveryTaskId || null,
-        latitude: params.latitude,
-        longitude: params.longitude,
-        heading: params.heading || null,
-        speed: params.speed || null,
+      const { error: rpcErr } = await supabase.rpc('update_rider_location', {
+        p_lat: params.latitude,
+        p_lng: params.longitude,
+        p_accuracy_m: params.accuracyM ?? null,
+        p_heading: params.heading ?? null,
+        p_speed: params.speed ?? null,
+        p_delivery_task_id: params.deliveryTaskId || null,
       });
 
-      // 2. Update current position on riders table (filter by user_id, not id)
+      if (!rpcErr) return;
+      if (rpcErr.code !== 'PGRST202') {
+        console.warn('Rider location RPC warning:', rpcErr.message);
+        return;
+      }
+
+      // Fallback only if migration RPC is not yet deployed
+      const { data: riderRow } = await supabase
+        .from('riders')
+        .select('id')
+        .eq('user_id', params.riderId)
+        .maybeSingle();
+
+      if (riderRow?.id && params.deliveryTaskId) {
+        await supabase.from('rider_location_updates').insert({
+          rider_id: riderRow.id,
+          delivery_task_id: params.deliveryTaskId,
+          latitude: params.latitude,
+          longitude: params.longitude,
+          heading: params.heading ?? null,
+          speed: params.speed ?? null,
+        });
+      }
+
       await supabase
         .from('riders')
         .update({
@@ -340,10 +490,11 @@ export class LocationService {
    */
   static subscribeToDeliveryTracking(
     deliveryTaskId: string,
-    onLocation: (loc: RiderLocationUpdate) => void
+    onLocation: (loc: RiderLocationUpdate) => void,
+    onReconnect?: () => void
   ) {
     const channel = supabase
-      .channel(`rider-loc:${deliveryTaskId}`)
+      .channel(`rider-loc:${deliveryTaskId}:${Date.now()}`)
       .on(
         'postgres_changes',
         {
@@ -362,11 +513,16 @@ export class LocationService {
             longitude: row.longitude,
             heading: row.heading,
             speed: row.speed,
+            accuracyM: row.accuracy_m,
             recordedAt: row.recorded_at,
           });
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          onReconnect?.();
+        }
+      });
 
     return {
       unsubscribe: () => {
@@ -399,6 +555,7 @@ export class LocationService {
       longitude: data.longitude,
       heading: data.heading,
       speed: data.speed,
+      accuracyM: data.accuracy_m,
       recordedAt: data.recorded_at,
     };
   }

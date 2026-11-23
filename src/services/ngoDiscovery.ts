@@ -93,7 +93,7 @@ function osmElementToNGO(element: any): IndiaNGO | null {
   };
 }
 
-// ─── Supabase NGO table provider ──────────────────────────────────────────────
+// ─── Supabase NGOs + Verified Profiles + Partners provider ────────────────────
 
 async function fetchFromSupabase(params: {
   query?: string;
@@ -106,55 +106,84 @@ async function fetchFromSupabase(params: {
   page?: number;
   pageSize?: number;
 }): Promise<IndiaNGO[]> {
+  const results: IndiaNGO[] = [];
+
+  // 1. Real verified NGO accounts from profiles table (always exists in ShareBite)
   try {
-    let q = supabase.from('ngos').select('*').limit(params.pageSize || 50);
+    let pq = supabase
+      .from('profiles')
+      .select('id, full_name, organization_name, bio, address, city, latitude, longitude, phone, email, registration_number, is_verified, operating_hours, updated_at, created_at')
+      .in('role', ['ngo', 'receiver', 'acceptor'])
+      .eq('is_verified', true)
+      .limit(params.pageSize || 50);
 
     if (params.query) {
-      q = q.or(`name.ilike.%${params.query}%,city.ilike.%${params.query}%,description.ilike.%${params.query}%,registration_number.ilike.%${params.query}%`);
+      pq = pq.or(`organization_name.ilike.%${params.query}%,full_name.ilike.%${params.query}%,city.ilike.%${params.query}%`);
     }
-    if (params.city) q = q.ilike('city', `%${params.city}%`);
-    if (params.state) q = q.ilike('state', `%${params.state}%`);
-    if (params.categories && params.categories.length > 0) {
-      q = q.overlaps('categories', params.categories);
+    if (params.city) pq = pq.ilike('city', `%${params.city}%`);
+
+    const { data: profileNGOs } = await pq;
+    if (profileNGOs) {
+      for (const p of profileNGOs as any[]) {
+        results.push({
+          id: p.id,
+          name: p.organization_name || p.full_name || 'Verified NGO',
+          description: p.bio || undefined,
+          categories: ['food_distribution'],
+          address: p.address || undefined,
+          city: p.city || undefined,
+          latitude: p.latitude ?? undefined,
+          longitude: p.longitude ?? undefined,
+          phone: p.phone || undefined,
+          email: p.email || undefined,
+          registrationNumber: p.registration_number || undefined,
+          sourceName: 'ShareBite Verified NGO',
+          verificationStatus: p.is_verified ? 'sharebite_verified' : 'unverified',
+          acceptsFoodDonations: true,
+          operatingHours: p.operating_hours || undefined,
+          createdAt: p.created_at,
+          updatedAt: p.updated_at,
+        });
+      }
     }
+  } catch {}
 
-    if (params.page && params.pageSize) {
-      q = q.range((params.page - 1) * params.pageSize, params.page * params.pageSize - 1);
+  // 2. Real partners table records
+  try {
+    let partQ = supabase
+      .from('partners')
+      .select('*')
+      .eq('is_verified', true)
+      .limit(params.pageSize || 50);
+
+    if (params.query) {
+      partQ = partQ.or(`organization_name.ilike.%${params.query}%,city.ilike.%${params.query}%`);
     }
+    if (params.city) partQ = partQ.ilike('city', `%${params.city}%`);
 
-    const { data, error } = await q;
-    if (error || !data) return [];
+    const { data: partnerRows } = await partQ;
+    if (partnerRows) {
+      for (const row of partnerRows as any[]) {
+        results.push({
+          id: row.profile_id || row.id,
+          name: row.organization_name,
+          description: row.description || undefined,
+          categories: ['food_distribution'],
+          address: row.address || undefined,
+          city: row.city || undefined,
+          latitude: row.latitude ?? undefined,
+          longitude: row.longitude ?? undefined,
+          sourceName: 'ShareBite Partner',
+          verificationStatus: row.is_verified ? 'sharebite_verified' : 'unverified',
+          acceptsFoodDonations: true,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        });
+      }
+    }
+  } catch {}
 
-    return data.map((row: any): IndiaNGO => ({
-      id: row.id,
-      name: row.name,
-      slug: row.slug,
-      description: row.description,
-      categories: row.categories || [],
-      address: row.address,
-      city: row.city,
-      district: row.district,
-      state: row.state,
-      pincode: row.pincode,
-      latitude: row.latitude,
-      longitude: row.longitude,
-      phone: row.phone,
-      email: row.email,
-      website: row.website,
-      registrationNumber: row.registration_number,
-      sourceName: row.source_name || 'ShareBite',
-      sourceUrl: row.source_url,
-      verificationStatus: row.verification_status || 'source_listed',
-      acceptsFoodDonations: row.accepts_food_donations,
-      acceptsVolunteers: row.accepts_volunteers,
-      operatingHours: row.operating_hours,
-      lastVerifiedAt: row.last_verified_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  } catch {
-    return [];
-  }
+  return results;
 }
 
 // ─── Overpass query with retry & timeout ─────────────────────────────────────
@@ -1087,7 +1116,7 @@ export class NGODiscoveryService {
     if (id.startsWith('osm-')) return null;
 
     const { data, error } = await supabase
-      .from('ngos')
+      .from('profiles')
       .select('*')
       .eq('id', id)
       .maybeSingle();
@@ -1096,27 +1125,20 @@ export class NGODiscoveryService {
 
     return {
       id: data.id,
-      name: data.name,
-      description: data.description,
-      categories: data.categories || [],
-      address: data.address,
-      city: data.city,
-      district: data.district,
-      state: data.state,
-      pincode: data.pincode,
-      latitude: data.latitude,
-      longitude: data.longitude,
-      phone: data.phone,
-      email: data.email,
-      website: data.website,
-      registrationNumber: data.registration_number,
-      sourceName: data.source_name || 'ShareBite',
-      sourceUrl: data.source_url,
-      verificationStatus: data.verification_status || 'source_listed',
-      acceptsFoodDonations: data.accepts_food_donations,
-      acceptsVolunteers: data.accepts_volunteers,
-      operatingHours: data.operating_hours,
-      lastVerifiedAt: data.last_verified_at,
+      name: data.organization_name || data.full_name || 'Verified NGO',
+      description: data.bio || undefined,
+      categories: ['food_distribution'],
+      address: data.address || undefined,
+      city: data.city || undefined,
+      latitude: data.latitude ?? undefined,
+      longitude: data.longitude ?? undefined,
+      phone: data.phone || undefined,
+      email: data.email || undefined,
+      registrationNumber: data.registration_number || undefined,
+      sourceName: 'ShareBite',
+      verificationStatus: data.is_verified ? 'sharebite_verified' : 'unverified',
+      acceptsFoodDonations: true,
+      operatingHours: data.operating_hours || undefined,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     };

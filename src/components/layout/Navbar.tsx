@@ -44,30 +44,56 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [unreadCount, setUnreadCount] = useState(3);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const isApp = location.pathname.startsWith('/dashboard') ||
+    location.pathname.startsWith('/donor-') ||
+    location.pathname.startsWith('/rider-') ||
+    location.pathname.startsWith('/ngo-') ||
+    location.pathname.startsWith('/my-claims') ||
+    location.pathname.startsWith('/community-') ||
     location.pathname.startsWith('/donations') ||
     location.pathname.startsWith('/discover') ||
     location.pathname.startsWith('/map') ||
     location.pathname.startsWith('/requests') ||
     location.pathname.startsWith('/notifications') ||
     location.pathname.startsWith('/impact-dashboard') ||
+    location.pathname.startsWith('/chat') ||
+    location.pathname.startsWith('/ngos') ||
     location.pathname.startsWith('/profile') ||
     location.pathname.startsWith('/settings') ||
+    location.pathname.startsWith('/verification') ||
     location.pathname.startsWith('/admin');
 
   const userId = user?.id;
 
   useEffect(() => {
-    if (userId) {
-      NotificationsService.getUnreadCount(userId).then(count => {
+    if (!userId) {
+      setUnreadCount(0);
+      return;
+    }
+
+    const fetchUnread = () => {
+      NotificationsService.getUnreadCount(userId).then((count) => {
         setUnreadCount(count > 0 ? count : 0);
       });
-    }
-  }, [userId]);
+    };
+
+    fetchUnread();
+    const sub = NotificationsService.subscribeToNotifications(
+      userId,
+      () => {
+        setUnreadCount((c) => c + 1);
+      },
+      fetchUnread
+    );
+
+    return () => {
+      sub.unsubscribe();
+    };
+  }, [userId, location.pathname]);
 
   const handleLogout = async () => {
     await logout();

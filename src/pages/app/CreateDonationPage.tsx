@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Upload, ChevronLeft, ChevronRight, Check, ShieldCheck,
-  AlertCircle, MapPin, Loader2, CheckCircle2
+  AlertCircle, MapPin, Loader2, CheckCircle2, LocateFixed
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import { divIcon } from 'leaflet';
 import { useAuth } from '../../context/AuthContext';
 import { DonationService } from '../../services/donations';
 import { LocationService } from '../../services/location';
+import { NGOService } from '../../services/ngo';
 import type { CreateFoodListingForm, FoodType } from '../../types';
 import styles from './CreateDonationPage.module.css';
 import 'leaflet/dist/leaflet.css';
@@ -140,6 +141,9 @@ export default function CreateDonationPage() {
     safetyDeclarationSigned: false,
     latitude: undefined,
     longitude: undefined,
+    locationAccuracyM: undefined,
+    locationCapturedAt: undefined,
+    notificationRadiusKm: 15,
   });
 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -151,6 +155,10 @@ export default function CreateDonationPage() {
   const [geocoding, setGeocoding] = useState(false);
   const [geocodeError, setGeocodeError] = useState('');
   const [addressResolved, setAddressResolved] = useState(false);
+  const [gpsDetecting, setGpsDetecting] = useState(false);
+  const [gpsNotice, setGpsNotice] = useState<{ type: 'success' | 'warn'; text: string } | null>(null);
+  const [nearbyNgoCount, setNearbyNgoCount] = useState<number | null>(null);
+  const hasAutoDetectedGpsRef = useRef(false);
 
   // Refs for race-condition prevention and edit loading protection
   const latestAddressRef = useRef(form.pickupAddress);
@@ -285,6 +293,7 @@ export default function CreateDonationPage() {
     if (isNaN(lat) || isNaN(lng)) return;
     update('latitude', lat);
     update('longitude', lng);
+    update('locationCapturedAt', new Date().toISOString());
     setAddressResolved(true);
     setGeocodeError('');
 
@@ -302,6 +311,74 @@ export default function CreateDonationPage() {
       console.warn('Reverse geocode error:', revErr);
     }
   };
+
+  // Detect live device GPS coordinates via browser Geolocation API
+  const handleDetectGPS = async () => {
+    setGpsDetecting(true);
+    setGpsNotice(null);
+    setGeocodeError('');
+
+    const gps = await LocationService.detectCurrentGPS();
+    if (gps.status === 'granted' && gps.latitude !== null && gps.longitude !== null) {
+      isInitialLoadRef.current = true;
+      setForm((prev) => ({
+        ...prev,
+        latitude: gps.latitude!,
+        longitude: gps.longitude!,
+        locationAccuracyM: gps.accuracy ?? undefined,
+        locationCapturedAt: gps.timestamp,
+      }));
+      setAddressResolved(true);
+      setGpsNotice({
+        type: 'success',
+        text: `Live GPS locked${gps.accuracy ? ` (±${gps.accuracy}m accuracy)` : ''}. Drag the pin if you want to fine-tune.`,
+      });
+
+      try {
+        const rev = await LocationService.reverseGeocode(gps.latitude, gps.longitude);
+        if (rev) {
+          isInitialLoadRef.current = true;
+          setForm((prev) => ({
+            ...prev,
+            pickupAddress: rev.address || prev.pickupAddress,
+            city: rev.city || prev.city,
+          }));
+        }
+      } catch {}
+    } else {
+      setGpsNotice({
+        type: 'warn',
+        text: gps.errorMessage || 'GPS permission denied. Please enter your address or click directly on the map to place the pickup pin.',
+      });
+    }
+    setGpsDetecting(false);
+  };
+
+  // Auto-detect GPS when donor reaches Step 1 (for new listings without coordinates)
+  useEffect(() => {
+    if (step === 1 && !isEdit && !hasAutoDetectedGpsRef.current && form.latitude === undefined) {
+      hasAutoDetectedGpsRef.current = true;
+      handleDetectGPS();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, isEdit]);
+
+  // Refresh count of verified NGOs within the configured alert radius
+  useEffect(() => {
+    if (typeof form.latitude !== 'number' || typeof form.longitude !== 'number') {
+      setNearbyNgoCount(null);
+      return;
+    }
+    let active = true;
+    NGOService.getNearbyNGOs(form.latitude, form.longitude, form.notificationRadiusKm || 15, true)
+      .then((list) => {
+        if (active) setNearbyNgoCount(list.length);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [form.latitude, form.longitude, form.notificationRadiusKm]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -691,9 +768,32 @@ export default function CreateDonationPage() {
           <div className={styles.formSection}>
             <h2 className={styles.sectionTitle}>2. Pickup Logistics & Safety Declaration</h2>
 
-            {/* Address Field: Completely blank by default */}
+            {/* Address Field + Live GPS Detection */}
             <div className={styles.field}>
-              <label htmlFor="pickupAddress" className={styles.label}>Pickup Address *</label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                <label htmlFor="pickupAddress" className={styles.label} style={{ marginBottom: 0 }}>Pickup Address *</label>
+                <button
+                  type="button"
+                  onClick={handleDetectGPS}
+                  disabled={gpsDetecting}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '5px 12px',
+                    borderRadius: 8,
+                    border: '1.5px solid #ea580c',
+                    background: '#fff7ed',
+                    color: '#ea580c',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: gpsDetecting ? 'wait' : 'pointer',
+                  }}
+                >
+                  {gpsDetecting ? <Loader2 size={13} className="animate-spin" /> : <LocateFixed size={13} />}
+                  {gpsDetecting ? 'Detecting GPS...' : 'Use Current GPS Location'}
+                </button>
+              </div>
               <input
                 id="pickupAddress"
                 className={styles.input}
@@ -703,13 +803,19 @@ export default function CreateDonationPage() {
                 required
               />
 
+              {gpsNotice && (
+                <div className={`${styles.addressStatus} ${gpsNotice.type === 'success' ? styles.addressStatusSuccess : styles.addressStatusError}`}>
+                  {gpsNotice.type === 'success' ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />} {gpsNotice.text}
+                </div>
+              )}
+
               {geocoding && (
                 <div className={`${styles.addressStatus} ${styles.addressStatusLoading}`}>
                   <Loader2 size={13} className="animate-spin" /> Resolving address on map...
                 </div>
               )}
 
-              {addressResolved && !geocoding && hasCoords && (
+              {addressResolved && !geocoding && hasCoords && !gpsNotice && (
                 <div className={`${styles.addressStatus} ${styles.addressStatusSuccess}`}>
                   <CheckCircle2 size={13} /> Location verified on map ({form.latitude!.toFixed(4)}, {form.longitude!.toFixed(4)})
                 </div>
@@ -720,6 +826,33 @@ export default function CreateDonationPage() {
                   <AlertCircle size={13} /> {geocodeError}
                 </div>
               )}
+            </div>
+
+            {/* Configurable NGO & Rider Notification Radius */}
+            <div className={styles.field}>
+              <label htmlFor="notificationRadiusKm" className={styles.label}>
+                Nearby NGO &amp; Rider Alert Radius
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <select
+                  id="notificationRadiusKm"
+                  className={styles.input}
+                  style={{ maxWidth: 220 }}
+                  value={form.notificationRadiusKm || 15}
+                  onChange={(e) => update('notificationRadiusKm', Number(e.target.value))}
+                >
+                  <option value={5}>Within 5 KM</option>
+                  <option value={10}>Within 10 KM</option>
+                  <option value={15}>Within 15 KM</option>
+                  <option value={20}>Within 20 KM</option>
+                  <option value={30}>Within 30 KM</option>
+                </select>
+                {nearbyNgoCount !== null && (
+                  <span style={{ fontSize: 12, color: nearbyNgoCount > 0 ? '#16a34a' : '#6b7280', fontWeight: 600 }}>
+                    {nearbyNgoCount} verified NGO{nearbyNgoCount === 1 ? '' : 's'} within {form.notificationRadiusKm || 15} km will be notified immediately
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* City & Contact Phone */}
