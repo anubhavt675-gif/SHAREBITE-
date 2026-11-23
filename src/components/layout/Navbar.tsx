@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Bell, Menu, ChevronDown, User, LogOut, Settings, Search, MessageSquare } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { getRoleDashboardPath } from '../../services/auth';
+import { getSafeDashboardPath, normalizeRole } from '../../services/auth';
 import { NotificationsService } from '../../services/notifications';
 import UserAvatar from '../ui/UserAvatar';
 import styles from './Navbar.module.css';
@@ -68,6 +68,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
     location.pathname.startsWith('/admin');
 
   const userId = user?.id;
+  const canonicalRole = normalizeRole(user?.role);
 
   useEffect(() => {
     if (!userId) {
@@ -132,14 +133,14 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
               <Link to="/about" className={`${styles.navLink} ${location.pathname === '/about' ? styles.navLinkActive : ''}`}>About</Link>
               <Link to="/partners" className={`${styles.navLink} ${location.pathname === '/partners' ? styles.navLinkActive : ''}`}>Partners</Link>
             </>
-          ) : user.role === 'rider' || user.role === 'volunteer' ? (
+          ) : canonicalRole === 'rider' ? (
             <>
               <Link to="/rider-dashboard" className={`${styles.navLink} ${location.pathname === '/rider-dashboard' ? styles.navLinkActive : ''}`}>Rider Home</Link>
               <Link to="/map" className={`${styles.navLink} ${location.pathname === '/map' ? styles.navLinkActive : ''}`}>Live Map</Link>
               <Link to="/chat" className={`${styles.navLink} ${location.pathname === '/chat' ? styles.navLinkActive : ''}`}>Messages</Link>
               <Link to="/impact-dashboard" className={`${styles.navLink} ${location.pathname === '/impact-dashboard' ? styles.navLinkActive : ''}`}>Fleet Stats</Link>
             </>
-          ) : user.role === 'ngo' || user.role === 'receiver' || user.role === 'acceptor' ? (
+          ) : canonicalRole === 'ngo' ? (
             <>
               <Link to="/ngo-dashboard" className={`${styles.navLink} ${location.pathname === '/ngo-dashboard' ? styles.navLinkActive : ''}`}>NGO Hub</Link>
               <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Claim Food</Link>
@@ -147,12 +148,20 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
               <Link to="/requests" className={`${styles.navLink} ${location.pathname === '/requests' ? styles.navLinkActive : ''}`}>Distribution Log</Link>
               <Link to="/chat" className={`${styles.navLink} ${location.pathname === '/chat' ? styles.navLinkActive : ''}`}>Chat</Link>
             </>
-          ) : user.role === 'community' ? (
+          ) : canonicalRole === 'community' ? (
             <>
               <Link to="/community-dashboard" className={`${styles.navLink} ${location.pathname === '/community-dashboard' ? styles.navLinkActive : ''}`}>Community Home</Link>
               <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Find Free Meals</Link>
               <Link to="/requests" className={`${styles.navLink} ${location.pathname === '/requests' ? styles.navLinkActive : ''}`}>My Requests</Link>
               <Link to="/map" className={`${styles.navLink} ${location.pathname === '/map' ? styles.navLinkActive : ''}`}>Distribution Centers</Link>
+            </>
+          ) : canonicalRole === 'admin' ? (
+            <>
+              <Link to="/admin" className={`${styles.navLink} ${location.pathname === '/admin' ? styles.navLinkActive : ''}`}>Admin Command</Link>
+              <Link to="/donations" className={`${styles.navLink} ${location.pathname === '/donations' ? styles.navLinkActive : ''}`}>All Food Listings</Link>
+              <Link to="/rider-dashboard" className={`${styles.navLink} ${location.pathname === '/rider-dashboard' ? styles.navLinkActive : ''}`}>Fleet Ops</Link>
+              <Link to="/my-claims" className={`${styles.navLink} ${location.pathname === '/my-claims' ? styles.navLinkActive : ''}`}>NGO Claims</Link>
+              <Link to="/impact-dashboard" className={`${styles.navLink} ${location.pathname === '/impact-dashboard' ? styles.navLinkActive : ''}`}>Analytics</Link>
             </>
           ) : (
             /* Donor / Partner Default */
@@ -191,9 +200,9 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
               <button className={styles.userBtn} onClick={() => setShowUserMenu(s => !s)}>
                 <UserAvatar size={34} src={user.avatar} name={user.name} />
                 <div className={styles.userMetaCol}>
-                  <span className={styles.userNameText}>{user.name || 'Anubhav'}</span>
+                  <span className={styles.userNameText}>{user.name || 'Member'}</span>
                   <span className={styles.userRolePill}>
-                    {user.role ? (user.role.charAt(0).toUpperCase() + user.role.slice(1)) : 'Donor'}
+                    {canonicalRole ? (canonicalRole.charAt(0).toUpperCase() + canonicalRole.slice(1)) : 'Member'}
                   </span>
                 </div>
                 <ChevronDown size={14} className={styles.userChevron} />
@@ -202,25 +211,25 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
                 <div className={styles.userMenu}>
                   <div className={styles.userMenuHeader}>
                     <p className={styles.userMenuName}>{user.name}</p>
-                    <p className={styles.userMenuRole}>{user.role}</p>
+                    <p className={styles.userMenuRole}>{canonicalRole || user.role}</p>
                   </div>
-                  <Link to={getRoleDashboardPath(user.role)} className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
+                  <Link to={getSafeDashboardPath(user.role)} className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
                     Dashboard
                   </Link>
                   <Link to="/chat" className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
                     <MessageSquare size={14} /> Messages
                   </Link>
-                  {user.role === 'rider' && (
+                  {canonicalRole === 'rider' && (
                     <Link to="/rider-dashboard" className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
                       Rider Tasks
                     </Link>
                   )}
-                  {(user.role === 'ngo' || user.role === 'volunteer') && (
+                  {canonicalRole === 'ngo' && (
                     <Link to="/my-claims" className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
                       NGO Claims
                     </Link>
                   )}
-                  {user.role === 'donor' && (
+                  {canonicalRole === 'donor' && (
                     <Link to="/donor-donations" className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
                       My Food Donations
                     </Link>

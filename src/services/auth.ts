@@ -1,286 +1,251 @@
-// ShareBite — Auth Service (Web)
+// ShareBite — Authoritative Supabase Auth Service (Web)
 import { supabase } from '../lib/supabase';
-import { isValidUUID, DEMO_RECORD_UUIDS, LEGACY_DEMO_ID_MAP } from '../lib/uuid';
-import type { User, UserRole } from '../types';
+import type { CanonicalRole, User, UserRole } from '../types';
 
-const MOCK_STORAGE_KEY = 'sharebite_mock_session_user';
+const LEGACY_MOCK_STORAGE_KEY = 'sharebite_mock_session_user';
 const OAUTH_ROLE_KEY = 'sharebite_oauth_role';
+const COMMUNITY_IMPACT_CACHE_KEY = 'sharebite_community_impact';
+const PROFILE_FETCH_TIMEOUT_MS = 10000;
+
+let isVerifyingLogin = false;
+
+export type ProfileLoadResult =
+  | { status: 'ok'; user: User }
+  | { status: 'missing'; userId: string }
+  | { status: 'invalid_role'; userId: string; rawRole: string | null }
+  | { status: 'error'; message: string };
 
 /**
- * Maps a user's role to their designated dashboard route.
- * Never assigns the Rider dashboard or role as a fallback for other roles.
+ * Purges legacy mock auth storage and user-scoped session caches so stale
+ * demo accounts or previous sessions can never hijack a real user.
  */
-export function getRoleDashboardPath(role?: UserRole | string | null): string {
-  if (!role) return '/donor-dashboard';
-  switch (role) {
+export function clearLegacyAuthCaches(): void {
+  try {
+    localStorage.removeItem(LEGACY_MOCK_STORAGE_KEY);
+    localStorage.removeItem(OAUTH_ROLE_KEY);
+  } catch {
+    // Ignore storage access errors in restricted contexts
+  }
+  try {
+    sessionStorage.removeItem(COMMUNITY_IMPACT_CACHE_KEY);
+    sessionStorage.removeItem(LEGACY_MOCK_STORAGE_KEY);
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+/**
+ * Normalizes a database role string to a canonical application role.
+ * Returns null if the role is missing, empty, or unrecognized — never guesses.
+ */
+export function normalizeRole(rawRole?: string | null): CanonicalRole | null {
+  if (!rawRole || typeof rawRole !== 'string') return null;
+  const clean = rawRole.trim().toLowerCase();
+  switch (clean) {
+    case 'donor':
+    case 'partner':
+    case 'household':
+      return 'donor';
+    case 'ngo':
+    case 'acceptor':
+    case 'receiver':
+      return 'ngo';
     case 'rider':
     case 'volunteer':
-      return '/rider-dashboard';
+      return 'rider';
+    case 'community':
+      return 'community';
+    case 'admin':
+      return 'admin';
+    default:
+      return null;
+  }
+}
+
+export function isValidUserRole(rawRole?: string | null): boolean {
+  return normalizeRole(rawRole) !== null;
+}
+
+/**
+ * Maps an authoritative user role to its designated dashboard route.
+ * Returns null when the role is missing or invalid so callers render an
+ * error/setup UI instead of blindly routing to the wrong dashboard.
+ */
+export function getRoleDashboardPath(role?: UserRole | string | null): string | null {
+  const canonical = normalizeRole(role);
+  switch (canonical) {
+    case 'donor':
+      return '/donor-dashboard';
     case 'ngo':
-    case 'receiver':
-    case 'acceptor':
       return '/ngo-dashboard';
+    case 'rider':
+      return '/rider-dashboard';
     case 'community':
       return '/community-dashboard';
     case 'admin':
       return '/admin';
-    case 'donor':
-    case 'partner':
     default:
-      return '/donor-dashboard';
+      return null;
   }
 }
 
-export const DEMO_USERS: Record<string, User> = {
-  donor: {
-    id: DEMO_RECORD_UUIDS.donor,
-    name: 'Anubhav',
-    email: 'anubhav@sharebite.org',
-    phone: '+91 98101 23456',
-    role: 'donor',
-    organizationName: 'Community Kitchen',
-    avatar: '',
-    bio: 'Doing good today! 🌱 Committed to zero food waste and daily food drives.',
-    location: {
-      latitude: 28.6315,
-      longitude: 77.2167,
-      address: 'Connaught Place, Central Delhi',
-      city: 'Delhi',
-      pincode: '110001',
-    },
-    isVerified: true,
-    verificationStatus: 'verified',
-    totalDonations: 14,
-    totalRescues: 0,
-    createdAt: '2024-01-15T10:00:00.000Z',
-    updatedAt: '2024-01-15T10:00:00.000Z',
-  },
-  ngo: {
-    id: DEMO_RECORD_UUIDS.ngo,
-    name: 'Robin Hood Army Delhi',
-    email: 'ngo@sharebite.org',
-    phone: '+91 98202 34567',
-    role: 'ngo',
-    organizationName: 'Robin Hood Army (Delhi Chapter)',
-    registrationNumber: 'NGO-DEL-8921',
-    avatar: 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?w=150',
-    bio: 'Volunteer organization distributing food to homeless shelters, orphanages and slum clusters.',
-    location: {
-      latitude: 28.5244,
-      longitude: 77.2066,
-      address: 'Saket, South Delhi',
-      city: 'Delhi',
-      pincode: '110017',
-    },
-    isVerified: true,
-    verificationStatus: 'verified',
-    totalDonations: 0,
-    totalRescues: 54,
-    createdAt: '2024-01-10T10:00:00.000Z',
-    updatedAt: '2024-01-10T10:00:00.000Z',
-  },
-  rider: {
-    id: DEMO_RECORD_UUIDS.rider,
-    name: 'Kabir Sharma',
-    email: 'rider@sharebite.org',
-    phone: '+91 98505 67890',
-    role: 'rider',
-    organizationName: 'ShareBite Logistics Fleet',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    bio: 'Dedicated delivery rider transporting fresh surplus meals across Delhi NCR.',
-    location: {
-      latitude: 28.6139,
-      longitude: 77.2090,
-      address: 'Central Delhi',
-      city: 'Delhi',
-      pincode: '110001',
-    },
-    isVerified: true,
-    verificationStatus: 'verified',
-    totalDonations: 0,
-    totalRescues: 48,
-    createdAt: '2024-02-15T10:00:00.000Z',
-    updatedAt: '2024-02-15T10:00:00.000Z',
-  },
-  volunteer: {
-    id: DEMO_RECORD_UUIDS.volunteer,
-    name: 'Priya Patel',
-    email: 'volunteer@sharebite.org',
-    phone: '+91 98303 45678',
-    role: 'volunteer',
-    organizationName: 'City Angels Relief',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
-    bio: 'Passionate volunteer rider helping transport meals from restaurants to community centers.',
-    location: {
-      latitude: 28.5672,
-      longitude: 77.2100,
-      address: 'Green Park, South Delhi',
-      city: 'Delhi',
-      pincode: '110016',
-    },
-    isVerified: true,
-    verificationStatus: 'verified',
-    totalDonations: 6,
-    totalRescues: 39,
-    createdAt: '2024-02-01T10:00:00.000Z',
-    updatedAt: '2024-02-01T10:00:00.000Z',
-  },
-  admin: {
-    id: DEMO_RECORD_UUIDS.admin,
-    name: 'ShareBite Admin',
-    email: 'admin@sharebite.org',
-    phone: '+91 98404 56789',
-    role: 'admin',
-    organizationName: 'ShareBite Operations',
-    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
-    bio: 'Platform administration, verification verification, and safety operations.',
-    location: {
-      latitude: 28.6315,
-      longitude: 77.2167,
-      address: 'Barakhamba Road, New Delhi',
-      city: 'Delhi',
-      pincode: '110001',
-    },
-    isVerified: true,
-    verificationStatus: 'verified',
-    totalDonations: 40,
-    totalRescues: 95,
-    createdAt: '2023-12-01T10:00:00.000Z',
-    updatedAt: '2023-12-01T10:00:00.000Z',
-  },
-};
+/**
+ * Returns a valid route string for JSX <Link to={...}> elements.
+ */
+export function getSafeDashboardPath(role?: UserRole | string | null): string {
+  return getRoleDashboardPath(role) ?? '/dashboard';
+}
 
-function mapProfileToUser(profile: any): User {
-  const bio = profile.bio || '';
+/**
+ * Checks whether a user's authoritative role is permitted for a route guard.
+ */
+export function isRoleAllowed(
+  userRole: string | null | undefined,
+  allowedRoles: (UserRole | string)[]
+): boolean {
+  const canonicalUser = normalizeRole(userRole);
+  if (!canonicalUser) return false;
+  if (allowedRoles.includes(userRole as string)) return true;
+  return allowedRoles.some((allowed) => normalizeRole(allowed) === canonicalUser);
+}
+
+function getReadableRoleAndPortal(role: CanonicalRole): { label: string; portal: string } {
+  switch (role) {
+    case 'ngo':
+      return { label: 'Acceptor (NGO / Shelter)', portal: '/login/acceptor' };
+    case 'rider':
+      return { label: 'Rider', portal: '/login/rider' };
+    case 'community':
+      return { label: 'Community Member', portal: '/login/community' };
+    case 'admin':
+      return { label: 'Administrator', portal: '/login/donor' };
+    case 'donor':
+    default:
+      return { label: 'Food Donor', portal: '/login/donor' };
+  }
+}
+
+function mapProfileToUser(profile: Record<string, any>): User {
+  const bio = typeof profile.bio === 'string' ? profile.bio : '';
   const dobMatch = bio.startsWith('DOB: ') ? bio.replace('DOB: ', '').trim() : undefined;
+  const email = typeof profile.email === 'string' ? profile.email : '';
+  const fallbackName = email ? email.split('@')[0] : 'ShareBite Member';
+  const resolvedName =
+    (typeof profile.full_name === 'string' && profile.full_name.trim()) ||
+    (typeof profile.organization_name === 'string' && profile.organization_name.trim()) ||
+    fallbackName;
 
   return {
     id: profile.id,
-    name: profile.full_name || profile.organization_name || 'ShareBite Member',
-    email: profile.email || '',
+    name: resolvedName,
+    email,
     phone: profile.phone || '',
-    role: (profile.role as UserRole) || 'donor',
-    avatar: profile.avatar_url,
-    bio: profile.bio,
-    organizationName: profile.organization_name,
-    registrationNumber: profile.registration_number,
+    role: profile.role as UserRole,
+    avatar: profile.avatar_url || undefined,
+    bio: profile.bio || undefined,
+    organizationName: profile.organization_name || undefined,
+    registrationNumber: profile.registration_number || undefined,
     dateOfBirth: dobMatch,
-    location: profile.latitude ? {
-      latitude: profile.latitude,
-      longitude: profile.longitude,
-      address: profile.address || '',
-      city: profile.city || '',
-    } : profile.address ? {
-      latitude: 0,
-      longitude: 0,
-      address: profile.address,
-      city: profile.city || '',
-    } : undefined,
-    isVerified: profile.is_verified || false,
+    location:
+      profile.latitude != null && profile.longitude != null
+        ? {
+            latitude: Number(profile.latitude),
+            longitude: Number(profile.longitude),
+            address: profile.address || '',
+            city: profile.city || '',
+          }
+        : profile.address
+          ? {
+              latitude: 0,
+              longitude: 0,
+              address: profile.address,
+              city: profile.city || '',
+            }
+          : undefined,
+    isVerified: Boolean(profile.is_verified),
     verificationStatus: profile.verification_status || (profile.is_verified ? 'verified' : 'pending'),
     isAvailable: profile.is_available ?? true,
     serviceRadiusKm: profile.service_radius_km ?? 15,
-    operatingHours: profile.operating_hours,
-    dailyCapacity: profile.daily_capacity,
-    totalDonations: profile.total_donations || 0,
-    totalRescues: profile.total_rescues || 0,
+    operatingHours: profile.operating_hours || undefined,
+    dailyCapacity: profile.daily_capacity ?? undefined,
+    totalDonations: Number(profile.total_donations || 0),
+    totalRescues: Number(profile.total_rescues || 0),
     createdAt: profile.created_at,
     updatedAt: profile.updated_at,
   };
 }
 
-function getStoredMockUser(): User | null {
+async function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out. Please check your connection and retry.`));
+    }, ms);
+  });
   try {
-    const raw = localStorage.getItem(MOCK_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.id) return null;
-
-    // Discard or sanitize non-UUID IDs (e.g. legacy 'demo-donor-001')
-    if (!isValidUUID(parsed.id)) {
-      if (LEGACY_DEMO_ID_MAP[parsed.id]) {
-        parsed.id = LEGACY_DEMO_ID_MAP[parsed.id];
-        localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(parsed));
-        return parsed;
-      }
-      localStorage.removeItem(MOCK_STORAGE_KEY);
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
+    return await Promise.race([Promise.resolve(promise), timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
-function setStoredMockUser(user: User | null) {
-  try {
-    if (user) {
-      if (!isValidUUID(user.id) && LEGACY_DEMO_ID_MAP[user.id]) {
-        user = { ...user, id: LEGACY_DEMO_ID_MAP[user.id] };
-      }
-      localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(MOCK_STORAGE_KEY);
-    }
-    window.dispatchEvent(new CustomEvent('sharebite_auth_update', { detail: user }));
-  } catch {}
-}
-
 export const AuthService = {
-  getMockUser(): User | null {
-    return getStoredMockUser();
+  isLoginInFlight(): boolean {
+    return isVerifyingLogin;
   },
 
-  loginAsDemoRole(role: 'donor' | 'ngo' | 'rider' | 'volunteer' | 'admin'): User {
-    const target = DEMO_USERS[role] || DEMO_USERS.donor;
-    setStoredMockUser(target);
-    return target;
+  /**
+   * Fetches the user's authoritative profile row from Supabase `public.profiles`.
+   * Never fabricates a fallback role from metadata or localStorage.
+   */
+  async fetchAuthoritativeProfile(authUserId: string): Promise<ProfileLoadResult> {
+    try {
+      const { data: profile, error } = await withTimeout(
+        supabase.from('profiles').select('*').eq('id', authUserId).maybeSingle(),
+        PROFILE_FETCH_TIMEOUT_MS,
+        'Loading profile'
+      );
+
+      if (error) {
+        return {
+          status: 'error',
+          message: error.message || 'Unable to load your profile from the server.',
+        };
+      }
+
+      if (!profile) {
+        return { status: 'missing', userId: authUserId };
+      }
+
+      if (!normalizeRole(profile.role)) {
+        return {
+          status: 'invalid_role',
+          userId: authUserId,
+          rawRole: profile.role ?? null,
+        };
+      }
+
+      return { status: 'ok', user: mapProfileToUser(profile) };
+    } catch (err: any) {
+      return {
+        status: 'error',
+        message: err?.message || 'Network error while loading your account profile.',
+      };
+    }
   },
 
   async getCurrentUser(): Promise<User | null> {
-    // 1. Check active Supabase session FIRST
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        // Clear lingering mock storage when real auth session exists
-        if (localStorage.getItem(MOCK_STORAGE_KEY)) {
-          localStorage.removeItem(MOCK_STORAGE_KEY);
-        }
+    clearLegacyAuthCaches();
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session?.user) return null;
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .maybeSingle();
-
-        if (!profile) {
-          const meta = session.user.user_metadata || {};
-          return {
-            id: session.user.id,
-            name: meta.full_name || meta.name || 'User',
-            email: session.user.email || '',
-            phone: meta.phone || '',
-            role: (meta.role as UserRole) || 'donor',
-            isVerified: false,
-            verificationStatus: 'pending',
-            totalDonations: 0,
-            totalRescues: 0,
-            createdAt: session.user.created_at,
-            updatedAt: session.user.created_at,
-          };
-        }
-
-        return mapProfileToUser(profile);
-      }
-    } catch {
-      // Fall through to mock session if session check fails
-    }
-
-    // 2. Check local mock session (guaranteed valid UUID)
-    const mock = getStoredMockUser();
-    if (mock) return mock;
-
+    const result = await this.fetchAuthoritativeProfile(session.user.id);
+    if (result.status === 'ok') return result.user;
     return null;
+  },
+
+  loginAsDemoRole(_role: 'donor' | 'ngo' | 'rider' | 'volunteer' | 'admin'): User {
+    throw new Error('Demo login bypass is disabled. Please sign in with your registered ShareBite account.');
   },
 
   async resetPasswordForEmail(email: string): Promise<void> {
@@ -296,86 +261,72 @@ export const AuthService = {
     if (error) throw new Error(error.message);
   },
 
-  async login(email: string, password?: string, expectedRole?: UserRole | 'acceptor'): Promise<User> {
+  async login(
+    email: string,
+    password?: string,
+    expectedRole?: UserRole | 'acceptor'
+  ): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
-
-    // 1. Check if email matches pre-configured demo account
-    const matchedDemo = Object.values(DEMO_USERS).find(u => u.email.toLowerCase() === cleanEmail);
-    if (matchedDemo) {
-      setStoredMockUser(matchedDemo);
-      return matchedDemo;
+    if (!cleanEmail) {
+      throw new Error('Please enter your email address.');
     }
-
-    // 2. Real Supabase password authentication
     if (!password) {
       throw new Error('Please enter your password.');
     }
 
-    // Proactively clear any mock storage BEFORE initiating Supabase sign-in
-    // so onAuthStateChange doesn't catch stale mock users
-    setStoredMockUser(null);
+    clearLegacyAuthCaches();
+    isVerifyingLogin = true;
+
     try {
-      localStorage.removeItem(MOCK_STORAGE_KEY);
-    } catch {}
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password,
-    });
+      if (error) {
+        throw new Error(error.message || 'Invalid email or password.');
+      }
 
-    if (error) {
-      throw new Error(error.message || 'Invalid email or password.');
-    }
+      if (!data.user) {
+        throw new Error('Login failed. Please check your credentials.');
+      }
 
-    if (!data.user) {
-      throw new Error('Login failed. Please check your credentials.');
-    }
+      const profileResult = await this.fetchAuthoritativeProfile(data.user.id);
 
-    // Ensure mock user is purged
-    setStoredMockUser(null);
-    try {
-      localStorage.removeItem(MOCK_STORAGE_KEY);
-    } catch {}
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', data.user.id)
-      .maybeSingle();
-
-    let userObj: User;
-    if (profile) {
-      userObj = mapProfileToUser(profile);
-    } else {
-      const meta = data.user.user_metadata || {};
-      userObj = {
-        id: data.user.id,
-        name: meta.full_name || meta.name || 'User',
-        email: data.user.email || '',
-        phone: meta.phone || '',
-        role: (meta.role as UserRole) || 'donor',
-        isVerified: false,
-        verificationStatus: 'pending',
-        totalDonations: 0,
-        totalRescues: 0,
-        createdAt: data.user.created_at,
-        updatedAt: data.user.created_at,
-      };
-    }
-
-    // 3. Role mismatch verification check
-    if (expectedRole) {
-      const effectiveExpected = expectedRole === 'acceptor' ? 'ngo' : expectedRole;
-      if (userObj.role !== effectiveExpected) {
-        const readableUserRole = userObj.role === 'ngo' ? 'Acceptor (NGO / Shelter)' : userObj.role === 'donor' ? 'Food Donor' : userObj.role === 'rider' ? 'Rider' : userObj.role;
-        const correctLoginRoute = userObj.role === 'ngo' ? '/login/acceptor' : userObj.role === 'rider' ? '/login/rider' : '/login/donor';
+      if (profileResult.status === 'missing') {
         throw new Error(
-          `ROLE_MISMATCH: Your account is registered as a "${readableUserRole}". Please log in via the ${readableUserRole} portal at ${correctLoginRoute}.`
+          'PROFILE_MISSING: Your account exists, but your profile record is missing. Please contact support or retry setup.'
         );
       }
-    }
 
-    return userObj;
+      if (profileResult.status === 'invalid_role') {
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+        throw new Error(
+          'INVALID_ROLE: Your account does not have a valid role assigned. Please contact support.'
+        );
+      }
+
+      if (profileResult.status === 'error') {
+        throw new Error(profileResult.message);
+      }
+
+      const loadedUser = profileResult.user;
+      const actualCanonical = normalizeRole(loadedUser.role)!;
+      const expectedCanonical = expectedRole ? normalizeRole(expectedRole) : null;
+
+      // Admins have dedicated platform oversight access and can sign in through any portal.
+      if (expectedCanonical && actualCanonical !== 'admin' && actualCanonical !== expectedCanonical) {
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+        const { label, portal } = getReadableRoleAndPortal(actualCanonical);
+        throw new Error(
+          `ROLE_MISMATCH: Your account is registered as a "${label}". Please log in via the ${label} portal at ${portal}.`
+        );
+      }
+
+      return loadedUser;
+    } finally {
+      isVerifyingLogin = false;
+    }
   },
 
   async signup(data: {
@@ -391,9 +342,20 @@ export const AuthService = {
     dateOfBirth?: string;
   }): Promise<{ user: User; sessionExists: boolean }> {
     const cleanEmail = data.email.trim().toLowerCase();
-    const effectiveRole: UserRole = data.role === 'acceptor' ? 'ngo' : data.role;
+    const canonicalRequested = normalizeRole(data.role);
+    if (!canonicalRequested || canonicalRequested === 'admin') {
+      throw new Error('Invalid registration role selected.');
+    }
 
-    // 1. Real Supabase signup
+    const effectiveRole: UserRole =
+      data.role === 'acceptor'
+        ? 'ngo'
+        : data.role === 'community'
+          ? 'community'
+          : canonicalRequested;
+
+    clearLegacyAuthCaches();
+
     const { data: authData, error } = await supabase.auth.signUp({
       email: cleanEmail,
       password: data.password,
@@ -421,63 +383,78 @@ export const AuthService = {
 
     const sessionExists = !!authData.session;
     const userId = authData.user.id;
-
-    // 2. Safe profile creation / upsert
     const bioText = data.dateOfBirth ? `DOB: ${data.dateOfBirth}` : null;
-    const profilePayload: any = {
-      id: userId,
-      full_name: data.name,
-      email: cleanEmail,
-      phone: data.phone,
-      role: effectiveRole,
-      organization_name: data.organizationName || null,
-      registration_number: data.registrationNumber || null,
-      address: data.address || null,
-      city: data.city || null,
-      bio: bioText,
-      is_verified: false,
-      verification_status: 'pending',
-    };
 
-    try {
-      await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' });
-    } catch (upsertErr) {
-      console.warn('Profile upsert warning:', upsertErr);
-    }
-
-    // 3. For Riders: initialize row in riders table
-    if (effectiveRole === 'rider') {
-      try {
-        await supabase.from('riders').upsert({
-          user_id: userId,
-          name: data.name,
+    // Only issue RLS-authenticated client writes when a real session is active.
+    // When email confirmation is required, handle_new_user() trigger populates profiles safely from metadata.
+    if (sessionExists) {
+      const { error: upsertError } = await supabase.from('profiles').upsert(
+        {
+          id: userId,
+          full_name: data.name,
+          email: cleanEmail,
           phone: data.phone,
-          is_online: false,
-          is_available: true,
-          id_verified: false,
-        }, { onConflict: 'user_id' });
-      } catch (riderErr) {
-        console.warn('Rider record initialization warning:', riderErr);
-      }
-    }
-
-    // 4. For Acceptors / NGOs: initialize partners entry
-    if (effectiveRole === 'ngo' && data.organizationName) {
-      try {
-        await supabase.from('partners').upsert({
-          profile_id: userId,
-          organization_name: data.organizationName,
-          organization_type: 'ngo',
+          role: effectiveRole,
+          organization_name: data.organizationName || null,
+          registration_number: data.registrationNumber || null,
           address: data.address || null,
           city: data.city || null,
+          bio: bioText,
           is_verified: false,
-        }, { onConflict: 'profile_id' });
-      } catch (partnerErr) {
-        console.warn('Partners record initialization warning:', partnerErr);
+          verification_status: 'pending',
+        },
+        { onConflict: 'id' }
+      );
+
+      if (upsertError) {
+        console.warn('Profile upsert warning:', upsertError.message);
+      }
+
+      if (effectiveRole === 'rider') {
+        await supabase
+          .from('riders')
+          .upsert(
+            {
+              user_id: userId,
+              name: data.name,
+              phone: data.phone,
+              is_online: false,
+              is_available: true,
+              id_verified: false,
+            },
+            { onConflict: 'user_id' }
+          )
+          .then(({ error: riderErr }) => {
+            if (riderErr) console.warn('Rider init warning:', riderErr.message);
+          });
+      }
+
+      if (effectiveRole === 'ngo' && data.organizationName) {
+        await supabase
+          .from('partners')
+          .upsert(
+            {
+              profile_id: userId,
+              organization_name: data.organizationName,
+              organization_type: 'ngo',
+              address: data.address || null,
+              city: data.city || null,
+              is_verified: false,
+            },
+            { onConflict: 'profile_id' }
+          )
+          .then(({ error: partnerErr }) => {
+            if (partnerErr) console.warn('Partner init warning:', partnerErr.message);
+          });
+      }
+
+      const verifiedProfile = await this.fetchAuthoritativeProfile(userId);
+      if (verifiedProfile.status === 'ok') {
+        return { user: verifiedProfile.user, sessionExists: true };
       }
     }
 
-    const realUser: User = {
+    const pendingUser: User = {
       id: userId,
       name: data.name,
       email: cleanEmail,
@@ -494,287 +471,162 @@ export const AuthService = {
       updatedAt: authData.user.created_at,
     };
 
-    if (sessionExists) {
-      setStoredMockUser(null);
-    }
-
-    return { user: realUser, sessionExists };
+    return { user: pendingUser, sessionExists };
   },
 
   async signInWithGoogle(intendedRole: 'donor' | 'acceptor' | 'rider'): Promise<void> {
-    const effectiveRole = intendedRole === 'acceptor' ? 'ngo' : intendedRole;
+    const canonical = normalizeRole(intendedRole);
+    const effectiveRole: CanonicalRole = canonical && canonical !== 'admin' ? canonical : 'donor';
+
     try {
       localStorage.setItem(OAUTH_ROLE_KEY, effectiveRole);
+    } catch {
+      // Ignore storage failures
+    }
 
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
         },
-      });
+      },
+    });
 
-      if (error) throw error;
-    } catch (err: any) {
-      console.warn('Supabase Google OAuth issue:', err);
-      const msg = (err?.message || '').toLowerCase();
-      // If provider not configured or enabled in Supabase, fallback to verified Google user
-      if (
-        msg.includes('provider is not enabled') ||
-        msg.includes('unsupported provider') ||
-        msg.includes('not configured') ||
-        msg.includes('invalid provider') ||
-        msg.includes('failed to fetch')
-      ) {
-        const mockGoogleUser: User = {
-          id: `google-${effectiveRole}-${Date.now()}`,
-          name: `${effectiveRole.charAt(0).toUpperCase() + effectiveRole.slice(1)} (Google)`,
-          email: `${effectiveRole}.google@sharebite.org`,
-          phone: '+91 98765 43210',
-          role: effectiveRole as UserRole,
-          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-          bio: 'Google Account (Preview Mode)',
-          isVerified: false,
-          verificationStatus: 'pending',
-          totalDonations: effectiveRole === 'donor' ? 8 : 0,
-          totalRescues: effectiveRole === 'rider' ? 15 : 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        setStoredMockUser(mockGoogleUser);
-        window.location.href = getRoleDashboardPath(effectiveRole);
-        return;
-      }
-      throw new Error(err.message || 'Failed to start Google authentication.');
+    if (error) {
+      throw new Error(error.message || 'Google sign-in is unavailable right now. Please sign in with email & password.');
     }
   },
 
   async handleOAuthCallback(): Promise<User> {
     let activeUser: any = null;
 
-    // 1. Try getSession
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) activeUser = session.user;
-    } catch {}
-
-    // 2. If no session, try getUser directly
-    if (!activeUser) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) activeUser = user;
-      } catch {}
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session?.user) {
+      activeUser = sessionData.session.user;
     }
 
     if (!activeUser) {
-      const stored = getStoredMockUser();
-      if (stored) return stored;
-      throw new Error('Google authentication session was not found. Please try logging in with your email & password.');
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData.user) activeUser = userData.user;
     }
 
-    const user = activeUser;
-    const intendedRole = (localStorage.getItem(OAUTH_ROLE_KEY) as UserRole) || 'donor';
-    localStorage.removeItem(OAUTH_ROLE_KEY);
+    if (!activeUser) {
+      throw new Error('Authentication session was not found. Please sign in with your email & password.');
+    }
 
-    // Check if profile exists
+    let rawIntendedRole: string | null = null;
     try {
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (existingProfile) {
-        setStoredMockUser(null);
-        return mapProfileToUser(existingProfile);
-      }
-    } catch (e) {
-      console.warn('Profile fetch warning in OAuth callback:', e);
+      rawIntendedRole = localStorage.getItem(OAUTH_ROLE_KEY);
+      localStorage.removeItem(OAUTH_ROLE_KEY);
+    } catch {
+      rawIntendedRole = null;
     }
 
-    // Create profile with intended role from Google metadata
-    const meta = user.user_metadata || {};
-    const fullName = meta.full_name || meta.name || user.email?.split('@')[0] || 'ShareBite Member';
-    const profilePayload = {
-      id: user.id,
-      full_name: fullName,
-      email: user.email || '',
-      phone: meta.phone || '',
-      avatar_url: meta.avatar_url || meta.picture || null,
-      role: intendedRole,
-      is_verified: false,
-      verification_status: 'pending',
-    };
-
-    try {
-      await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' });
-    } catch (e) {
-      console.warn('Profile creation during OAuth callback warning:', e);
+    // 1. Always check existing authoritative DB profile FIRST — never overwrite an existing user's role.
+    const existingResult = await this.fetchAuthoritativeProfile(activeUser.id);
+    if (existingResult.status === 'ok') {
+      return existingResult.user;
+    }
+    if (existingResult.status === 'error') {
+      throw new Error(existingResult.message);
+    }
+    if (existingResult.status === 'invalid_role') {
+      throw new Error('Your account has an invalid role configuration. Please contact support.');
     }
 
-    if (intendedRole === 'rider') {
-      try {
-        await supabase.from('riders').upsert({
-          user_id: user.id,
-          name: fullName,
-          is_online: false,
-          is_available: true,
-          id_verified: false,
-        }, { onConflict: 'user_id' });
-      } catch {}
+    // 2. Profile does not exist yet: create initial profile with validated intended role (never admin).
+    const parsedIntended = normalizeRole(rawIntendedRole);
+    const initialRole: CanonicalRole =
+      parsedIntended && parsedIntended !== 'admin' ? parsedIntended : 'donor';
+
+    const meta = activeUser.user_metadata || {};
+    const fullName = meta.full_name || meta.name || activeUser.email?.split('@')[0] || 'ShareBite Member';
+
+    const { error: upsertError } = await supabase.from('profiles').upsert(
+      {
+        id: activeUser.id,
+        full_name: fullName,
+        email: activeUser.email || '',
+        phone: meta.phone || '',
+        avatar_url: meta.avatar_url || meta.picture || null,
+        role: initialRole,
+        is_verified: false,
+        verification_status: 'pending',
+      },
+      { onConflict: 'id' }
+    );
+
+    if (upsertError) {
+      throw new Error(upsertError.message || 'Could not initialize your ShareBite profile.');
     }
 
-    setStoredMockUser(null);
-    return {
-      id: user.id,
-      name: fullName,
-      email: user.email || '',
-      phone: meta.phone || '',
-      role: intendedRole,
-      avatar: meta.avatar_url || meta.picture,
-      isVerified: false,
-      verificationStatus: 'pending',
-      totalDonations: 0,
-      totalRescues: 0,
-      createdAt: user.created_at,
-      updatedAt: user.created_at,
-    };
+    if (initialRole === 'rider') {
+      await supabase
+        .from('riders')
+        .upsert(
+          {
+            user_id: activeUser.id,
+            name: fullName,
+            is_online: false,
+            is_available: true,
+            id_verified: false,
+          },
+          { onConflict: 'user_id' }
+        )
+        .then(({ error: riderErr }) => {
+          if (riderErr) console.warn('OAuth rider init warning:', riderErr.message);
+        });
+    }
+
+    const createdResult = await this.fetchAuthoritativeProfile(activeUser.id);
+    if (createdResult.status === 'ok') {
+      return createdResult.user;
+    }
+
+    throw new Error('Unable to verify your newly created profile. Please try again.');
   },
 
   async logout(): Promise<void> {
-    setStoredMockUser(null);
-    localStorage.removeItem(OAUTH_ROLE_KEY);
+    clearLegacyAuthCaches();
     try {
-      await supabase.auth.signOut();
-    } catch {}
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Ignore network errors during local sign-out
+      }
+    }
   },
 
   async updateProfile(userId: string, updates: Partial<User>): Promise<User> {
-    const mock = getStoredMockUser();
-    if (mock && (mock.id === userId || mock.email === updates.email)) {
-      const updated: User = {
-        ...mock,
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      };
-      setStoredMockUser(updated);
-      return updated;
+    // Only update editable personal fields; never send role or verification flags.
+    const payload: Record<string, any> = {};
+    if (updates.name !== undefined) payload.full_name = updates.name;
+    if (updates.phone !== undefined) payload.phone = updates.phone;
+    if (updates.email !== undefined) payload.email = updates.email;
+    if (updates.avatar !== undefined) payload.avatar_url = updates.avatar;
+    if (updates.bio !== undefined) payload.bio = updates.bio;
+    if (updates.organizationName !== undefined) payload.organization_name = updates.organizationName;
+    if (updates.location?.address !== undefined) payload.address = updates.location.address;
+    if (updates.location?.city !== undefined) payload.city = updates.location.city;
+    if (updates.location?.latitude !== undefined) payload.latitude = updates.location.latitude;
+    if (updates.location?.longitude !== undefined) payload.longitude = updates.location.longitude;
+
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error || !profile) {
+      throw new Error(error?.message || 'Profile update failed.');
     }
 
-    try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .update({
-          full_name: updates.name,
-          phone: updates.phone,
-          email: updates.email,
-          avatar_url: updates.avatar,
-          bio: updates.bio,
-          organization_name: updates.organizationName,
-          address: updates.location?.address,
-          city: updates.location?.city,
-          latitude: updates.location?.latitude,
-          longitude: updates.location?.longitude,
-        })
-        .eq('id', userId)
-        .select()
-        .single();
-
-      if (error || !profile) throw error || new Error('Profile update failed.');
-      return mapProfileToUser(profile);
-    } catch (err) {
-      if (mock) {
-        const updated = { ...mock, ...updates };
-        setStoredMockUser(updated);
-        return updated;
-      }
-      throw err;
-    }
-  },
-
-  onAuthStateChange(callback: (user: User | null) => void) {
-    const handleCustomEvent = (e: any) => {
-      callback(e.detail ?? null);
-    };
-    window.addEventListener('sharebite_auth_update', handleCustomEvent);
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      // 1. A real Supabase session ALWAYS takes absolute precedence over any local mock data
-      if (session?.user) {
-        // Purge mock storage so it never overrides or pollutes a real authenticated account
-        setStoredMockUser(null);
-        try {
-          localStorage.removeItem(MOCK_STORAGE_KEY);
-        } catch {}
-
-        try {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .maybeSingle();
-
-          if (profile) {
-            callback(mapProfileToUser(profile));
-            return;
-          } else {
-            const meta = session.user.user_metadata || {};
-            callback({
-              id: session.user.id,
-              name: meta.full_name || meta.name || 'User',
-              email: session.user.email || '',
-              phone: meta.phone || '',
-              role: (meta.role as UserRole) || 'donor',
-              isVerified: false,
-              verificationStatus: 'pending',
-              totalDonations: 0,
-              totalRescues: 0,
-              createdAt: session.user.created_at,
-              updatedAt: session.user.created_at,
-            });
-            return;
-          }
-        } catch {
-          const meta = session.user.user_metadata || {};
-          callback({
-            id: session.user.id,
-            name: meta.full_name || meta.name || 'User',
-            email: session.user.email || '',
-            phone: meta.phone || '',
-            role: (meta.role as UserRole) || 'donor',
-            isVerified: false,
-            verificationStatus: 'pending',
-            totalDonations: 0,
-            totalRescues: 0,
-            createdAt: session.user.created_at,
-            updatedAt: session.user.created_at,
-          });
-          return;
-        }
-      }
-
-      // 2. Only if there is NO real Supabase session, check for mock/demo session
-      const currentMock = getStoredMockUser();
-      if (currentMock) {
-        callback(currentMock);
-        return;
-      }
-
-      callback(null);
-    });
-
-    return {
-      data: {
-        subscription: {
-          unsubscribe: () => {
-            window.removeEventListener('sharebite_auth_update', handleCustomEvent);
-            subscription.unsubscribe();
-          },
-        },
-      },
-    };
+    return mapProfileToUser(profile);
   },
 };

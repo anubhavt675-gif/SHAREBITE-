@@ -8,130 +8,85 @@ import leafTopLeft from '../../assets/leaf_top_left.png';
 import authLeavesTopRight from '../../assets/auth_leaves_top_right.png';
 import styles from './RoleAuth.module.css';
 
+function getInitialOAuthError(): string | null {
+  const searchParams = new URLSearchParams(window.location.search);
+  const hash = window.location.hash.startsWith('#')
+    ? window.location.hash.substring(1)
+    : window.location.hash;
+  const hashParams = new URLSearchParams(hash);
+  const errorParam = searchParams.get('error') || hashParams.get('error');
+  const errorDesc = searchParams.get('error_description') || hashParams.get('error_description');
+  if (!errorParam) return null;
+  return errorDesc || errorParam || 'Authentication was cancelled or denied.';
+}
+
 export default function AuthCallbackPage() {
-  const { handleOAuthCallback, refreshUser } = useAuth();
+  const { handleOAuthCallback } = useAuth();
   const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
-  const [attempting, setAttempting] = useState(true);
+  const [error, setError] = useState<string | null>(() => getInitialOAuthError());
+  const [attempting, setAttempting] = useState(() => getInitialOAuthError() === null);
 
   useEffect(() => {
+    if (error) return;
     let mounted = true;
-
-    // 1. Inspect URL parameters and hash for any OAuth errors
     const searchParams = new URLSearchParams(window.location.search);
-    const hash = window.location.hash.startsWith('#')
-      ? window.location.hash.substring(1)
-      : window.location.hash;
-    const hashParams = new URLSearchParams(hash);
-
-    const errorParam = searchParams.get('error') || hashParams.get('error');
-    const errorDesc = searchParams.get('error_description') || hashParams.get('error_description');
-
-    if (errorParam) {
-      console.warn('OAuth redirect error detected in URL:', errorParam, errorDesc);
-      setError(errorDesc || errorParam || 'Authentication was cancelled or denied.');
-      setAttempting(false);
-      return;
-    }
 
     async function processAuth() {
       try {
-        // 2. If PKCE code exists in query params, exchange it first
         const code = searchParams.get('code');
         if (code) {
-          try {
-            await supabase.auth.exchangeCodeForSession(code);
-          } catch (codeErr) {
-            console.warn('exchangeCodeForSession warning:', codeErr);
+          const { error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeErr) {
+            console.warn('exchangeCodeForSession warning:', exchangeErr.message);
           }
         }
 
-        // 3. Fast check: is user already logged in?
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const u = await handleOAuthCallback();
-          await refreshUser();
-          if (mounted) {
-            navigate(getRoleDashboardPath(u?.role), { replace: true });
-            return;
-          }
-        }
-
-        // 4. Try callback with a 5-second timeout so it never hangs
         const timeoutPromise = new Promise<{ timeout: true }>((resolve) =>
-          setTimeout(() => resolve({ timeout: true }), 5000)
+          setTimeout(() => resolve({ timeout: true }), 8000)
         );
 
-        const authPromise = handleOAuthCallback().then(
-          (user) => ({ timeout: false as const, user }),
-          (err) => {
-            throw err;
-          }
-        );
+        const authPromise = handleOAuthCallback().then((user) => ({
+          timeout: false as const,
+          user,
+        }));
 
-        const raceResult = await Promise.race([authPromise, timeoutPromise]);
+        const result = await Promise.race([authPromise, timeoutPromise]);
 
-        if ('timeout' in raceResult && raceResult.timeout) {
-          // Timeout occurred: re-check if session was created in background
-          const { data: { session: lateSession } } = await supabase.auth.getSession();
-          if (lateSession?.user) {
-            const role = (lateSession.user.user_metadata?.role as any) || 'donor';
-            await refreshUser();
-            if (mounted) {
-              navigate(getRoleDashboardPath(role), { replace: true });
-              return;
-            }
-          }
+        if (!mounted) return;
 
-          if (mounted) {
-            setError(
-              'Google session could not be verified automatically. You can proceed directly to login or dashboard.'
-            );
-            setAttempting(false);
-          }
+        if ('timeout' in result && result.timeout) {
+          setError('Authentication verification timed out. Please retry or sign in with email & password.');
+          setAttempting(false);
           return;
         }
 
-        if (mounted && 'user' in raceResult) {
-          await refreshUser();
-          navigate(getRoleDashboardPath(raceResult.user?.role), { replace: true });
+        if ('user' in result) {
+          const targetPath = getRoleDashboardPath(result.user.role);
+          if (!targetPath) {
+            setError(`Your account role ("${result.user.role}") is unrecognized. Please contact support.`);
+            setAttempting(false);
+            return;
+          }
+          navigate(targetPath, { replace: true });
         }
       } catch (err: any) {
         console.error('OAuth callback failed:', err);
-        // If already logged in, ignore error and navigate
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const role = (session.user.user_metadata?.role as any) || 'donor';
-          navigate(getRoleDashboardPath(role), { replace: true });
-          return;
-        }
-
         if (mounted) {
           setError(
-            err.message ||
-              'Google authentication could not be completed. Please sign in with your email or try again.'
+            err?.message ||
+            'Google authentication could not be completed. Please sign in with your email or try again.'
           );
           setAttempting(false);
         }
       }
     }
 
-    processAuth();
-
-    // 5. Also listen to onAuthStateChange in case session is delayed
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user && mounted) {
-        await refreshUser();
-        const role = (session.user.user_metadata?.role as any) || 'donor';
-        navigate(getRoleDashboardPath(role), { replace: true });
-      }
-    });
+    void processAuth();
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
     };
-  }, [handleOAuthCallback, refreshUser, navigate]);
+  }, [error, handleOAuthCallback, navigate]);
 
   return (
     <div className={styles.page}>
@@ -181,24 +136,11 @@ export default function AuthCallbackPage() {
                   </button>
 
                   <Link
-                    to="/login"
+                    to="/register"
                     className={styles.googleBtn}
                     style={{ textDecoration: 'none', justifyContent: 'center' }}
                   >
                     <span>Sign In with Email & Password</span>
-                  </Link>
-
-                  <Link
-                    to="/register"
-                    style={{
-                      marginTop: 6,
-                      fontSize: '0.82rem',
-                      color: '#BD5927',
-                      fontWeight: 700,
-                      textDecoration: 'none',
-                    }}
-                  >
-                    ← Back to Role Registration
                   </Link>
                 </div>
               </>
@@ -215,7 +157,7 @@ export default function AuthCallbackPage() {
                   Verifying your account
                 </h2>
                 <p className={styles.cardSubtext} style={{ marginBottom: 20 }}>
-                  Syncing your account with ShareBite and preparing your dashboard...
+                  Syncing your authoritative role with ShareBite and preparing your dashboard...
                 </p>
 
                 {attempting && (
@@ -233,7 +175,7 @@ export default function AuthCallbackPage() {
                         textDecoration: 'underline',
                       }}
                     >
-                      Taking too long? Click here to open Dashboard →
+                      Taking too long? Click here to check Dashboard →
                     </button>
                   </div>
                 )}

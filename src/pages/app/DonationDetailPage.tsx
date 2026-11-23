@@ -176,8 +176,8 @@ export default function DonationDetailPage() {
               <div className={styles.donorCard}>
                 <div className={styles.donorAvatar}>
                   {listing.donor.avatar
-                    ? <img src={listing.donor.avatar} alt={listing.donor.name} />
-                    : <span>{listing.donor.name.charAt(0)}</span>}
+                    ? <img src={listing.donor.avatar} alt={listing.donor.name || 'Donor'} />
+                    : <span>{(listing.donor.name || 'D').charAt(0).toUpperCase()}</span>}
                 </div>
                 <div>
                   <p className={styles.donorName}>{listing.donor.name}</p>

@@ -150,7 +150,7 @@ export default function ChatPage() {
                     {other?.avatar ? (
                       <img src={other.avatar} alt={title} className={styles.avatarImg} />
                     ) : (
-                      <span>{title.charAt(0)}</span>
+                      <span>{(title || 'C').charAt(0).toUpperCase()}</span>
                     )}
                   </div>
                   <div className={styles.convMeta}>

@@ -153,6 +153,7 @@ export default function CreateDonationPage() {
 
   // Geocoding and map states
   const [geocoding, setGeocoding] = useState(false);
+  const [resolvingNext, setResolvingNext] = useState(false);
   const [geocodeError, setGeocodeError] = useState('');
   const [addressResolved, setAddressResolved] = useState(false);
   const [gpsDetecting, setGpsDetecting] = useState(false);
@@ -160,13 +161,24 @@ export default function CreateDonationPage() {
   const [nearbyNgoCount, setNearbyNgoCount] = useState<number | null>(null);
   const hasAutoDetectedGpsRef = useRef(false);
 
-  // Refs for race-condition prevention and edit loading protection
+  // Refs for race-condition prevention, edit loading protection, and scroll/focus
+  const cardRef = useRef<HTMLDivElement>(null);
   const latestAddressRef = useRef(form.pickupAddress);
   const isInitialLoadRef = useRef(false);
 
+  const buildGeocodeQuery = (address: string, city: string) => {
+    const cleanAddr = address.trim();
+    const cleanCity = city.trim();
+    if (!cleanAddr) return '';
+    if (cleanCity && !cleanAddr.toLowerCase().includes(cleanCity.toLowerCase())) {
+      return `${cleanAddr}, ${cleanCity}`;
+    }
+    return cleanAddr;
+  };
+
   useEffect(() => {
-    latestAddressRef.current = form.pickupAddress;
-  }, [form.pickupAddress]);
+    latestAddressRef.current = buildGeocodeQuery(form.pickupAddress, form.city);
+  }, [form.pickupAddress, form.city]);
 
   // Load existing food listing if in edit mode
   useEffect(() => {
@@ -233,9 +245,9 @@ export default function CreateDonationPage() {
   const update = (key: keyof CreateFoodListingForm, value: any) =>
     setForm((f) => ({ ...f, [key]: value }));
 
-  // Debounced geocoding when pickup address changes
+  // Debounced geocoding when pickup address or city changes
   useEffect(() => {
-    // If this change was triggered by initial edit form loading, preserve existing coordinates
+    // If this change was triggered by initial edit loading, GPS lock, or map pin placement, preserve existing coordinates
     if (isInitialLoadRef.current) {
       isInitialLoadRef.current = false;
       return;
@@ -244,24 +256,29 @@ export default function CreateDonationPage() {
     const addr = form.pickupAddress.trim();
     if (!addr || addr.length < 3) {
       setGeocoding((prev) => (prev ? false : prev));
-      setAddressResolved((prev) => (prev ? false : prev));
       setGeocodeError((prev) => (prev ? '' : prev));
       return;
     }
 
+    const query = buildGeocodeQuery(addr, form.city);
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       setGeocoding(true);
       setGeocodeError('');
 
       try {
-        const res = await LocationService.geocodeAddress(addr, controller.signal);
-        if (latestAddressRef.current.trim() === addr) {
+        let res = await LocationService.geocodeAddress(query, controller.signal);
+        if (!res && form.city.trim()) {
+          res = await LocationService.geocodeAddress(form.city.trim(), controller.signal);
+        }
+        if (latestAddressRef.current === query) {
           if (res) {
+            isInitialLoadRef.current = true;
             setForm((prev) => ({
               ...prev,
               latitude: res.latitude,
               longitude: res.longitude,
+              locationCapturedAt: prev.locationCapturedAt || new Date().toISOString(),
               city: prev.city.trim() ? prev.city : (res.city || prev.city),
             }));
             setAddressResolved(true);
@@ -286,26 +303,29 @@ export default function CreateDonationPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [form.pickupAddress]);
+  }, [form.pickupAddress, form.city]);
 
   // Handle marker drag or map click to manually place pin
   const handlePinPlaced = async (lat: number, lng: number) => {
     if (isNaN(lat) || isNaN(lng)) return;
-    update('latitude', lat);
-    update('longitude', lng);
-    update('locationCapturedAt', new Date().toISOString());
+    setForm((prev) => ({
+      ...prev,
+      latitude: lat,
+      longitude: lng,
+      locationCapturedAt: new Date().toISOString(),
+    }));
     setAddressResolved(true);
     setGeocodeError('');
 
     try {
       const rev = await LocationService.reverseGeocode(lat, lng);
       if (rev) {
-        if (!form.pickupAddress.trim()) {
-          update('pickupAddress', rev.address);
-        }
-        if (!form.city.trim() && rev.city) {
-          update('city', rev.city);
-        }
+        isInitialLoadRef.current = true;
+        setForm((prev) => ({
+          ...prev,
+          pickupAddress: prev.pickupAddress.trim() ? prev.pickupAddress : (rev.address || prev.pickupAddress),
+          city: prev.city.trim() ? prev.city : (rev.city || prev.city),
+        }));
       }
     } catch (revErr) {
       console.warn('Reverse geocode error:', revErr);
@@ -393,86 +413,158 @@ export default function CreateDonationPage() {
     reader.readAsDataURL(file);
   };
 
-  const validateStep = (currentStep: number): boolean => {
+  const focusField = (fieldId?: string) => {
+    if (!fieldId || typeof document === 'undefined') return;
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (typeof (el as HTMLElement).focus === 'function') {
+      try {
+        (el as HTMLElement).focus({ preventScroll: true });
+      } catch {
+        // Non-focusable container (e.g. map section)
+      }
+    }
+  };
+
+  const validateStep = (
+    currentStep: number,
+    overrideCoords?: { latitude?: number; longitude?: number }
+  ): { valid: boolean; focusId?: string } => {
     setError('');
     if (currentStep === 0) {
       if (!form.title.trim()) {
         setError('Please enter a food title.');
-        return false;
+        return { valid: false, focusId: 'foodTitle' };
       }
       if (!form.category) {
         setError('Please select a food category.');
-        return false;
+        return { valid: false, focusId: 'foodCategory' };
       }
       if (!form.servings || form.servings <= 0) {
         setError('Please enter a valid number of servings (minimum 1).');
-        return false;
+        return { valid: false, focusId: 'servings' };
       }
-      return true;
+      return { valid: true };
     }
 
     if (currentStep === 1) {
       if (!form.pickupAddress.trim()) {
-        setError('Pickup address is required. Please enter an address.');
-        return false;
+        setError('Pickup address is required. Please enter an address or click Use Current GPS Location.');
+        return { valid: false, focusId: 'pickupAddress' };
       }
       if (!form.city.trim()) {
         setError('City is required. Please specify a city.');
-        return false;
+        return { valid: false, focusId: 'city' };
       }
       if (!form.pickupDate) {
         setError('Pickup date is required.');
-        return false;
+        return { valid: false, focusId: 'pickupDate' };
       }
       if (!form.pickupTime) {
         setError('Pickup time is required.');
-        return false;
+        return { valid: false, focusId: 'pickupTime' };
       }
       if (!form.availableUntil) {
         setError('Latest collection deadline (expiry) is required.');
-        return false;
+        return { valid: false, focusId: 'availableUntil' };
       }
       const untilMs = new Date(form.availableUntil).getTime();
       if (isNaN(untilMs) || untilMs <= Date.now()) {
         setError('Latest collection deadline must be in the future.');
-        return false;
+        return { valid: false, focusId: 'availableUntil' };
       }
       if (form.availableFrom) {
         const fromMs = new Date(form.availableFrom).getTime();
         if (!isNaN(fromMs) && untilMs <= fromMs) {
           setError('Collection deadline must be after the pickup time.');
-          return false;
+          return { valid: false, focusId: 'availableUntil' };
         }
       }
+      const effectiveLat = overrideCoords?.latitude ?? form.latitude;
+      const effectiveLng = overrideCoords?.longitude ?? form.longitude;
       if (
+        effectiveLat === undefined ||
+        effectiveLng === undefined ||
+        isNaN(effectiveLat) ||
+        isNaN(effectiveLng)
+      ) {
+        setError('Please click on the map to pin your pickup location (or click Use Current GPS Location).');
+        return { valid: false, focusId: 'pickupMapSection' };
+      }
+      if (!form.safetyDeclarationSigned) {
+        setError('You must tick the Food Safety Certification checkbox before continuing.');
+        return { valid: false, focusId: 'safetyDeclaration' };
+      }
+      return { valid: true };
+    }
+
+    return { valid: true };
+  };
+
+  const handleNext = async () => {
+    if (resolvingNext) return;
+
+    let resolvedCoords: { latitude?: number; longitude?: number } | undefined;
+
+    if (step === 1) {
+      const missingCoords =
         form.latitude === undefined ||
         form.longitude === undefined ||
         isNaN(form.latitude) ||
-        isNaN(form.longitude)
-      ) {
-        setError('Please verify your pickup location on the map or click the map to place a pin.');
-        return false;
+        isNaN(form.longitude);
+
+      if (missingCoords && form.pickupAddress.trim()) {
+        setResolvingNext(true);
+        setError('');
+        try {
+          const query = buildGeocodeQuery(form.pickupAddress, form.city);
+          let res = query ? await LocationService.geocodeAddress(query) : null;
+          if (!res && form.city.trim()) {
+            res = await LocationService.geocodeAddress(form.city.trim());
+          }
+          if (res) {
+            isInitialLoadRef.current = true;
+            setForm((prev) => ({
+              ...prev,
+              latitude: res.latitude,
+              longitude: res.longitude,
+              locationCapturedAt: new Date().toISOString(),
+              city: prev.city.trim() ? prev.city : (res.city || prev.city),
+            }));
+            setAddressResolved(true);
+            setGeocodeError('');
+            resolvedCoords = { latitude: res.latitude, longitude: res.longitude };
+          }
+        } catch {
+          // Validation below will guide the donor to click the map pin
+        } finally {
+          setResolvingNext(false);
+        }
       }
-      if (!form.safetyDeclarationSigned) {
-        setError('You must sign the Food Safety Declaration before continuing.');
-        return false;
-      }
-      return true;
     }
 
-    return true;
-  };
-
-  const handleNext = () => {
-    if (validateStep(step)) {
+    const check = validateStep(step, resolvedCoords);
+    if (check.valid) {
       setStep((s) => s + 1);
+      cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      focusField(check.focusId);
     }
   };
 
   const handleSubmit = async () => {
-    if (!user || loading) return;
-    if (!validateStep(1)) {
+    if (loading) return;
+    if (!user) {
+      setError('Please sign in as a donor to publish a food donation.');
+      cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    const check = validateStep(1);
+    if (!check.valid) {
       setStep(1);
+      setTimeout(() => focusField(check.focusId), 50);
       return;
     }
     if (!form.safetyDeclarationSigned) {
@@ -545,7 +637,7 @@ export default function CreateDonationPage() {
         ))}
       </div>
 
-      <div className={styles.card}>
+      <div ref={cardRef} className={styles.card}>
         {error && (
           <div className={styles.errorBanner} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <AlertCircle size={18} />
@@ -937,7 +1029,7 @@ export default function CreateDonationPage() {
             </div>
 
             {/* Interactive Pickup Location Map */}
-            <div className={styles.field}>
+            <div id="pickupMapSection" className={styles.field}>
               <label className={styles.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <MapPin size={15} color="#ea580c" />
                 <span>Pickup Location Map (Draggable Marker) *</span>
@@ -1139,13 +1231,24 @@ export default function CreateDonationPage() {
           </div>
         )}
 
+        {error && (
+          <div className={styles.errorBanner} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18, marginBottom: 0 }}>
+            <AlertCircle size={18} />
+            <span>{error}</span>
+          </div>
+        )}
+
         {/* Navigation Buttons */}
         <div className={styles.navBtns}>
           {step > 0 && (
             <button
               type="button"
               className={styles.backBtn}
-              onClick={() => setStep((s) => s - 1)}
+              onClick={() => {
+                setError('');
+                setStep((s) => s - 1);
+              }}
+              disabled={resolvingNext || loading}
             >
               <ChevronLeft size={16} /> Back
             </button>
@@ -1156,8 +1259,9 @@ export default function CreateDonationPage() {
               type="button"
               className={styles.nextBtn}
               onClick={handleNext}
+              disabled={resolvingNext}
             >
-              Continue <ChevronRight size={16} />
+              {resolvingNext ? 'Verifying location...' : 'Continue'} {!resolvingNext && <ChevronRight size={16} />}
             </button>
           ) : (
             <button

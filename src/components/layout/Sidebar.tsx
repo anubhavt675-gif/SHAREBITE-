@@ -6,6 +6,7 @@ import {
   Truck, Package, Plus, MessageSquare, Heart, Building2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { normalizeRole } from '../../services/auth';
 import { ShareBiteLogo } from './Navbar';
 import UserAvatar from '../ui/UserAvatar';
 import styles from './Sidebar.module.css';
@@ -25,13 +26,12 @@ interface Props {
 
 export default function Sidebar({ open, onClose }: Props) {
   const { user } = useAuth();
-  const role = user?.role || 'donor';
+  const role = normalizeRole(user?.role) ?? 'donor';
 
   // Purpose-built navigation strictly segregated by trusted role
   const roleNavItems = useMemo<NavItem[]>(() => {
     switch (role) {
       case 'rider':
-      case 'volunteer':
         return [
           { to: '/rider-dashboard', icon: <Truck size={18} />, label: 'Rider Dashboard' },
           { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs' },
@@ -44,8 +44,6 @@ export default function Sidebar({ open, onClose }: Props) {
         ];
 
       case 'ngo':
-      case 'receiver':
-      case 'acceptor':
         return [
           { to: '/ngo-dashboard', icon: <LayoutGrid size={18} />, label: 'NGO Hub' },
           { to: '/discover', icon: <Search size={18} />, label: 'Claim Surplus Food', highlight: true },
@@ -83,7 +81,6 @@ export default function Sidebar({ open, onClose }: Props) {
         ];
 
       case 'donor':
-      case 'partner':
       default:
         return [
           { to: '/donor-dashboard', icon: <LayoutGrid size={18} />, label: 'Donor Dashboard' },
@@ -102,18 +99,14 @@ export default function Sidebar({ open, onClose }: Props) {
   const roleLabel = useMemo(() => {
     switch (role) {
       case 'rider':
-      case 'volunteer':
         return '🚴 Logistics Fleet Partner';
       case 'ngo':
-      case 'receiver':
-      case 'acceptor':
         return '🏛️ Community NGO Relief';
       case 'community':
         return '🤝 Community Member';
       case 'admin':
         return '🛡️ Platform Administrator';
       case 'donor':
-      case 'partner':
       default:
         return '🌱 Verified Food Donor';
     }

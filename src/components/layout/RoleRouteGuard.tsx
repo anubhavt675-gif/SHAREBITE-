@@ -1,8 +1,8 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { getRoleDashboardPath } from '../../services/auth';
-import { PageLoader } from '../states/LoadingState';
+import { getRoleDashboardPath, isRoleAllowed } from '../../services/auth';
+import AuthStateScreen from '../states/AuthStateScreen';
 import type { UserRole } from '../../types';
 
 interface RoleRouteGuardProps {
@@ -13,29 +13,50 @@ interface RoleRouteGuardProps {
 
 /**
  * RoleRouteGuard
- * Enforces role-based route access.
- * Prevents unauthorized users from accessing other roles' dashboards or actions.
- * If unauthorized, immediately redirects to their own designated role dashboard.
+ * Enforces role-based route access using authoritative profile roles.
+ * Includes an explicit self-redirect loop guard so unrecognized roles or
+ * mismatched destinations never trigger an infinite React redirect crash.
  */
 export default function RoleRouteGuard({ allowedRoles, children, fallbackPath }: RoleRouteGuardProps) {
-  const { user, loading } = useAuth();
+  const { user, authStatus, authError, retryAuth, logout } = useAuth();
+  const location = useLocation();
 
-  if (loading) {
-    return <PageLoader />;
+  if (authStatus === 'initializing' || authStatus === 'loading_profile') {
+    return <AuthStateScreen mode="loading" message="Verifying route permissions..." />;
+  }
+
+  if (authStatus === 'error' || authStatus === 'profile_missing' || authStatus === 'invalid_role') {
+    return (
+      <AuthStateScreen
+        mode={authStatus}
+        message={authError}
+        onRetry={retryAuth}
+        onSignOut={logout}
+      />
+    );
   }
 
   if (!user) {
     return <Navigate to="/register" replace />;
   }
 
-  const userRole = user.role;
-  const isAllowed = allowedRoles.includes(userRole);
+  if (!isRoleAllowed(user.role, allowedRoles)) {
+    const authoritativePath = getRoleDashboardPath(user.role);
+    const destination =
+      fallbackPath && fallbackPath !== '/dashboard' ? fallbackPath : authoritativePath;
 
-  if (!isAllowed) {
-    // Exclusively redirect to the user's own authoritative dashboard
-    const destination = fallbackPath && fallbackPath !== '/dashboard'
-      ? fallbackPath
-      : getRoleDashboardPath(userRole);
+    // Prevent infinite self-redirect loop if role is invalid or destination equals current pathname
+    if (!destination || destination === location.pathname) {
+      return (
+        <AuthStateScreen
+          mode="invalid_role"
+          message={`Your account role ("${user.role}") does not have permission to view this dashboard.`}
+          onRetry={retryAuth}
+          onSignOut={logout}
+        />
+      );
+    }
+
     return <Navigate to={destination} replace />;
   }
 

@@ -1,7 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getRoleDashboardPath } from '../../services/auth';
-import { PageLoader } from '../states/LoadingState';
+import AuthStateScreen from '../states/AuthStateScreen';
 
 /**
  * RoleBasedDashboard
@@ -9,10 +9,21 @@ import { PageLoader } from '../states/LoadingState';
  * dashboard matching their trusted profile role in Supabase.
  */
 export default function RoleBasedDashboard() {
-  const { user, loading } = useAuth();
+  const { user, authStatus, authError, retryAuth, logout } = useAuth();
 
-  if (loading) {
-    return <PageLoader />;
+  if (authStatus === 'initializing' || authStatus === 'loading_profile') {
+    return <AuthStateScreen mode="loading" message="Loading your dashboard..." />;
+  }
+
+  if (authStatus === 'error' || authStatus === 'profile_missing' || authStatus === 'invalid_role') {
+    return (
+      <AuthStateScreen
+        mode={authStatus}
+        message={authError}
+        onRetry={retryAuth}
+        onSignOut={logout}
+      />
+    );
   }
 
   if (!user) {
@@ -20,5 +31,16 @@ export default function RoleBasedDashboard() {
   }
 
   const destination = getRoleDashboardPath(user.role);
+  if (!destination) {
+    return (
+      <AuthStateScreen
+        mode="invalid_role"
+        message={`Unable to route account with role "${user.role}".`}
+        onRetry={retryAuth}
+        onSignOut={logout}
+      />
+    );
+  }
+
   return <Navigate to={destination} replace />;
 }

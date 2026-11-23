@@ -1,4 +1,4 @@
-﻿import { MapPin, Clock, Users, CheckCircle } from 'lucide-react';
+import { MapPin, Clock, Users, CheckCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { FoodListing } from '../../types';
 import styles from './FoodCard.module.css';
@@ -81,8 +81,8 @@ export function FoodCard({ listing, onClick, onClaim, compact }: FoodCardProps) 
           <div className={styles.donorRow}>
             <div className={styles.donorAvatar}>
               {listing.donor.avatar
-                ? <img src={listing.donor.avatar} alt={listing.donor.name} />
-                : <span>{listing.donor.name.charAt(0)}</span>
+                ? <img src={listing.donor.avatar} alt={listing.donor.name || 'Donor'} />
+                : <span>{(listing.donor.name || 'D').charAt(0).toUpperCase()}</span>
               }
             </div>
             <span className={styles.donorName}>{listing.donor.name}</span>

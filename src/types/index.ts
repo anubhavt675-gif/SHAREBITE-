@@ -1,7 +1,28 @@
 // ShareBite — TypeScript Type Definitions (web)
 // Shared with mobile app; matches Supabase schema
 
-export type UserRole = 'donor' | 'ngo' | 'receiver' | 'volunteer' | 'partner' | 'admin' | 'rider' | 'community' | 'acceptor';
+export type UserRole =
+  | 'donor'
+  | 'ngo'
+  | 'receiver'
+  | 'volunteer'
+  | 'partner'
+  | 'admin'
+  | 'rider'
+  | 'community'
+  | 'acceptor'
+  | 'household';
+
+export type CanonicalRole = 'donor' | 'ngo' | 'rider' | 'community' | 'admin';
+
+export type AuthStatus =
+  | 'initializing'
+  | 'loading_profile'
+  | 'authenticated'
+  | 'unauthenticated'
+  | 'profile_missing'
+  | 'invalid_role'
+  | 'error';
 
 export type FoodStatus =
   | 'available'

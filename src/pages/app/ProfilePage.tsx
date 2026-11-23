@@ -61,7 +61,7 @@ export default function ProfilePage() {
               <img src={user.avatar} alt={user.name} className={styles.avatarImg} />
             ) : (
               <div className={styles.avatarFallback}>
-                {user?.name.charAt(0).toUpperCase()}
+                {(user?.name || user?.email || 'U').charAt(0).toUpperCase()}
               </div>
             )}
             <input

@@ -93,9 +93,11 @@ export default function RiderRegisterPage({ initialMode }: { initialMode?: 'regi
       setLoading(true);
       try {
         const loggedInUser = await login(email.trim(), password, 'rider');
-        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
+        const targetPath = getRoleDashboardPath(loggedInUser.role);
+        if (targetPath) navigate(targetPath, { replace: true });
       } catch (err: any) {
-        setError(err.message || 'Login failed. Please check your credentials.');
+        const msg = err?.message || 'Login failed. Please check your credentials.';
+        setError(msg.replace(/^ROLE_MISMATCH:\s*/, ''));
       } finally {
         setLoading(false);
       }
@@ -132,14 +134,16 @@ export default function RiderRegisterPage({ initialMode }: { initialMode?: 'regi
       });
 
       if (res.sessionExists) {
-        navigate(getRoleDashboardPath(res.user.role), { replace: true });
+        const targetPath = getRoleDashboardPath(res.user.role);
+        if (targetPath) navigate(targetPath, { replace: true });
         return;
       }
 
       // Try automatic login
       try {
         const loggedInUser = await login(email.trim(), password, 'rider');
-        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
+        const targetPath = getRoleDashboardPath(loggedInUser.role);
+        if (targetPath) navigate(targetPath, { replace: true });
         return;
       } catch {
         setSuccess(true);

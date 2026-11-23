@@ -158,7 +158,8 @@ export default function RoleAuthPage({ forcedRole, initialMode }: RoleAuthPagePr
       setDonorLoading(true);
       try {
         const loggedInUser = await login(donorEmail.trim(), donorPassword, 'donor');
-        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
+        const dest = getRoleDashboardPath(loggedInUser.role);
+        if (dest) navigate(dest, { replace: true });
       } catch (err: any) {
         setDonorError(err.message || 'Login failed.');
       } finally {
@@ -187,7 +188,8 @@ export default function RoleAuthPage({ forcedRole, initialMode }: RoleAuthPagePr
       });
 
       if (res.sessionExists) {
-        navigate(getRoleDashboardPath(res.user.role), { replace: true });
+        const dest = getRoleDashboardPath(res.user.role);
+        if (dest) navigate(dest, { replace: true });
       } else {
         setDonorSuccess(true);
       }
@@ -212,7 +214,8 @@ export default function RoleAuthPage({ forcedRole, initialMode }: RoleAuthPagePr
       setAcceptorLoading(true);
       try {
         const loggedInUser = await login(acceptorEmail.trim(), acceptorPassword, 'acceptor');
-        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
+        const dest = getRoleDashboardPath(loggedInUser.role);
+        if (dest) navigate(dest, { replace: true });
       } catch (err: any) {
         setAcceptorError(err.message || 'Login failed.');
       } finally {
@@ -252,7 +255,8 @@ export default function RoleAuthPage({ forcedRole, initialMode }: RoleAuthPagePr
       });
 
       if (res.sessionExists) {
-        navigate(getRoleDashboardPath(res.user.role), { replace: true });
+        const dest = getRoleDashboardPath(res.user.role);
+        if (dest) navigate(dest, { replace: true });
       } else {
         setAcceptorSuccess(true);
       }
@@ -277,7 +281,8 @@ export default function RoleAuthPage({ forcedRole, initialMode }: RoleAuthPagePr
       setRiderLoading(true);
       try {
         const loggedInUser = await login(riderEmail.trim(), riderPassword, 'rider');
-        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
+        const dest = getRoleDashboardPath(loggedInUser.role);
+        if (dest) navigate(dest, { replace: true });
       } catch (err: any) {
         setRiderError(err.message || 'Login failed.');
       } finally {
@@ -311,7 +316,8 @@ export default function RoleAuthPage({ forcedRole, initialMode }: RoleAuthPagePr
       });
 
       if (res.sessionExists) {
-        navigate(getRoleDashboardPath(res.user.role), { replace: true });
+        const dest = getRoleDashboardPath(res.user.role);
+        if (dest) navigate(dest, { replace: true });
       } else {
         setRiderSuccess(true);
       }

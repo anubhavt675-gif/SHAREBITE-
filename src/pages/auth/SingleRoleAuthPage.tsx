@@ -122,8 +122,9 @@ export default function SingleRoleAuthPage({ forcedRole, initialMode }: SingleRo
     if (isLogin) {
       setLoading(true);
       try {
-        const loggedInUser = await login(email.trim(), password, activeRole === 'community' ? 'volunteer' : activeRole);
-        navigate(getRoleDashboardPath(loggedInUser.role), { replace: true });
+        const loggedInUser = await login(email.trim(), password, activeRole);
+        const dest = getRoleDashboardPath(loggedInUser.role);
+        if (dest) navigate(dest, { replace: true });
       } catch (err: any) {
         const msg = err.message || 'Login failed. Please check your credentials.';
         if (msg.includes('ROLE_MISMATCH:')) {
@@ -192,7 +193,7 @@ export default function SingleRoleAuthPage({ forcedRole, initialMode }: SingleRo
         name: activeRole === 'acceptor' ? contactPerson : fullName,
         phone: phone.trim() || '+91 9876543210',
         email: email.trim(),
-        role: activeRole === 'community' ? 'volunteer' : activeRole,
+        role: activeRole,
         password,
         organizationName: activeRole === 'acceptor' ? orgName : undefined,
         registrationNumber: activeRole === 'acceptor' ? regNumber : undefined,
@@ -201,7 +202,8 @@ export default function SingleRoleAuthPage({ forcedRole, initialMode }: SingleRo
       });
 
       if (res.sessionExists) {
-        navigate(getRoleDashboardPath(res.user.role), { replace: true });
+        const dest = getRoleDashboardPath(res.user.role);
+        if (dest) navigate(dest, { replace: true });
       } else {
         setSuccessConfirmation(true);
       }

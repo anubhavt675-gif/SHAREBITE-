@@ -46,9 +46,10 @@ export default function LoginPage() {
     setDemoLoading(role);
     try {
       const demoUser = await loginAsDemo(role);
-      navigate(getRoleDashboardPath(demoUser.role));
+      const dest = getRoleDashboardPath(demoUser.role);
+      if (dest) navigate(dest);
     } catch (err: any) {
-      setError(err.message || 'Demo login failed.');
+      setError(err.message || 'Demo login is disabled. Please sign in with a registered account.');
     } finally {
       setDemoLoading(null);
     }
@@ -57,14 +58,15 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!email) {
-      setError('Please enter your email.');
+    if (!email || !password) {
+      setError('Please enter both your email and password.');
       return;
     }
     setLoading(true);
     try {
-      const loggedInUser = await login(email, password || 'demo123');
-      navigate(getRoleDashboardPath(loggedInUser.role));
+      const loggedInUser = await login(email, password);
+      const dest = getRoleDashboardPath(loggedInUser.role);
+      if (dest) navigate(dest);
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
