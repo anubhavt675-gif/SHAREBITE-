@@ -53,6 +53,11 @@ const ALLERGEN_OPTIONS = ['Dairy', 'Gluten', 'Nuts', 'Peanuts', 'Soy', 'Eggs', '
 
 const STEPS = ['Food Details', 'Pickup & Safety', 'Review & Publish'];
 
+function formatLocalDateTime(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function createPickupPinIcon() {
   return divIcon({
     className: 'custom-pickup-pin',
@@ -244,6 +249,29 @@ export default function CreateDonationPage() {
 
   const update = (key: keyof CreateFoodListingForm, value: any) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  const [minDeadline] = useState(() => formatLocalDateTime(new Date(Date.now() + 5 * 60 * 1000)));
+
+  const setQuickDeadline = (hoursFromNow: number) => {
+    const now = new Date();
+    const target = new Date(now.getTime() + hoursFromNow * 60 * 60 * 1000);
+    const targetIsoLocal = formatLocalDateTime(target);
+    const nowLocal = formatLocalDateTime(now);
+    const [nowDate, nowTime] = nowLocal.split('T');
+
+    setForm((prev) => {
+      const nextDate = prev.pickupDate || nowDate;
+      const nextTime = prev.pickupTime || nowTime;
+      return {
+        ...prev,
+        pickupDate: nextDate,
+        pickupTime: nextTime,
+        availableFrom: prev.availableFrom || `${nextDate}T${nextTime}`,
+        availableUntil: targetIsoLocal,
+      };
+    });
+    setError('');
+  };
 
   // Debounced geocoding when pickup address or city changes
   useEffect(() => {
@@ -471,7 +499,15 @@ export default function CreateDonationPage() {
       }
       const untilMs = new Date(form.availableUntil).getTime();
       if (isNaN(untilMs) || untilMs <= Date.now()) {
-        setError('Latest collection deadline must be in the future.');
+        const nowFormatted = new Date().toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        setError(
+          `Latest collection deadline must be after now (${nowFormatted}). Click "+4 hrs" below or choose a later date & time.`
+        );
         return { valid: false, focusId: 'availableUntil' };
       }
       if (form.availableFrom) {
@@ -972,7 +1008,7 @@ export default function CreateDonationPage() {
               </div>
             </div>
 
-            {/* Pickup Date & Pickup Time: Completely blank by default */}
+            {/* Pickup Date & Pickup Time */}
             <div className={styles.twoCol}>
               <div className={styles.field}>
                 <label htmlFor="pickupDate" className={styles.label}>Pickup Date *</label>
@@ -985,8 +1021,18 @@ export default function CreateDonationPage() {
                     const d = e.target.value;
                     setForm((f) => {
                       const next = { ...f, pickupDate: d };
-                      if (d && f.pickupTime) next.availableFrom = `${d}T${f.pickupTime}`;
-                      else if (!d) next.availableFrom = '';
+                      if (d && f.pickupTime) {
+                        const fromStr = `${d}T${f.pickupTime}`;
+                        next.availableFrom = fromStr;
+                        const fromMs = new Date(fromStr).getTime();
+                        const currentUntilMs = f.availableUntil ? new Date(f.availableUntil).getTime() : 0;
+                        if (!f.availableUntil || isNaN(currentUntilMs) || currentUntilMs <= Math.max(fromMs, Date.now())) {
+                          const baseMs = !isNaN(fromMs) ? Math.max(fromMs, Date.now()) : Date.now();
+                          next.availableUntil = formatLocalDateTime(new Date(baseMs + 4 * 60 * 60 * 1000));
+                        }
+                      } else if (!d) {
+                        next.availableFrom = '';
+                      }
                       return next;
                     });
                   }}
@@ -1005,8 +1051,18 @@ export default function CreateDonationPage() {
                     const t = e.target.value;
                     setForm((f) => {
                       const next = { ...f, pickupTime: t };
-                      if (f.pickupDate && t) next.availableFrom = `${f.pickupDate}T${t}`;
-                      else if (!t) next.availableFrom = '';
+                      if (f.pickupDate && t) {
+                        const fromStr = `${f.pickupDate}T${t}`;
+                        next.availableFrom = fromStr;
+                        const fromMs = new Date(fromStr).getTime();
+                        const currentUntilMs = f.availableUntil ? new Date(f.availableUntil).getTime() : 0;
+                        if (!f.availableUntil || isNaN(currentUntilMs) || currentUntilMs <= Math.max(fromMs, Date.now())) {
+                          const baseMs = !isNaN(fromMs) ? Math.max(fromMs, Date.now()) : Date.now();
+                          next.availableUntil = formatLocalDateTime(new Date(baseMs + 4 * 60 * 60 * 1000));
+                        }
+                      } else if (!t) {
+                        next.availableFrom = '';
+                      }
                       return next;
                     });
                   }}
@@ -1015,15 +1071,44 @@ export default function CreateDonationPage() {
               </div>
             </div>
 
-            {/* Expiry Deadline: Completely blank by default */}
+            {/* Expiry Deadline with 1-click Future Quick-Pick */}
             <div className={styles.field}>
-              <label htmlFor="availableUntil" className={styles.label}>Latest Collection Deadline (Expiry) *</label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <label htmlFor="availableUntil" className={styles.label} style={{ marginBottom: 0 }}>
+                  Latest Collection Deadline (Expiry) *
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {[2, 4, 6, 12].map((hrs) => (
+                    <button
+                      key={hrs}
+                      type="button"
+                      onClick={() => setQuickDeadline(hrs)}
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: 20,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: '1.5px solid #ea580c',
+                        background: '#fff7ed',
+                        color: '#ea580c',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      +{hrs} hrs
+                    </button>
+                  ))}
+                </div>
+              </div>
               <input
                 id="availableUntil"
                 className={styles.input}
                 type="datetime-local"
+                min={minDeadline}
                 value={form.availableUntil || ''}
-                onChange={(e) => update('availableUntil', e.target.value)}
+                onChange={(e) => {
+                  update('availableUntil', e.target.value);
+                  if (error) setError('');
+                }}
                 required
               />
             </div>
