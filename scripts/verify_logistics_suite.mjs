@@ -103,8 +103,10 @@ async function checkLiveSchemaAndRpcs() {
   }
 
   // 3. Check Storage bucket food-images
-  const bucketRes = await fetch(`${SUPABASE_URL}/storage/v1/bucket/food-images`, {
-    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+  const bucketRes = await fetch(`${SUPABASE_URL}/storage/v1/object/list/food-images`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefix: '', limit: 1 }),
   });
   record('Storage Bucket: food-images', bucketRes.ok ? 'OK' : 'MISSING_MIGRATION', `HTTP ${bucketRes.status}`);
 

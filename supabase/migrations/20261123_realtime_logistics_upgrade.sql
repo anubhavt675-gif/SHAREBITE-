@@ -1466,7 +1466,7 @@ begin
   select * into v_food from public.food_listings where id = p_food_listing_id for update;
   if not found then raise exception 'Food listing not found'; end if;
 
-  if v_food.donor_id <> v_uid and public.get_auth_user_role() <> 'admin' then
+  if v_food.donor_id <> v_uid and coalesce(public.get_auth_user_role(), '') <> 'admin' then
     raise exception 'Only the donor can cancel this listing';
   end if;
 
@@ -1627,7 +1627,7 @@ security definer
 set search_path = public
 language plpgsql as $$
 begin
-  if public.get_auth_user_role() <> 'admin' then
+  if coalesce(public.get_auth_user_role(), '') <> 'admin' then
     raise exception 'Unauthorized: admin role required';
   end if;
 
@@ -1638,9 +1638,12 @@ begin
     updated_at = now()
   where id = p_profile_id;
 
-  update public.partners
-  set is_verified = (p_status = 'verified'), updated_at = now()
-  where profile_id = p_profile_id;
+  begin
+    update public.partners
+    set is_verified = (p_status = 'verified'), updated_at = now()
+    where profile_id = p_profile_id;
+  exception when undefined_column then null;
+  end;
 
   update public.riders
   set id_verified = (p_status = 'verified'), updated_at = now()
