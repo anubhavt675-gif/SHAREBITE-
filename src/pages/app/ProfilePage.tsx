@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
-import { Camera, CheckCircle, ShieldAlert, Truck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Camera, CheckCircle, ShieldAlert, Truck, Bike, Utensils } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { normalizeRole } from '../../services/auth';
+import { normalizeRole, getSafeDashboardPath } from '../../services/auth';
 import { ClaimsService, type RiderProfileRecord } from '../../services/claims';
 import { supabase } from '../../lib/supabase';
 import styles from './ProfilePage.module.css';
 
 export default function ProfilePage() {
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, switchRole } = useAuth();
+  const navigate = useNavigate();
+  const [switchingRole, setSwitchingRole] = useState(false);
   const isRider = normalizeRole(user?.role) === 'rider';
   const [riderRec, setRiderRec] = useState<RiderProfileRecord | null>(null);
   const [vehicleType, setVehicleType] = useState('bike');
@@ -197,7 +200,69 @@ export default function ProfilePage() {
             </div>
             <div className={styles.field}>
               <label className={styles.label}>Role</label>
-              <p className={styles.value} style={{ textTransform: 'capitalize' }}>{user?.role}</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <p className={styles.value} style={{ textTransform: 'capitalize', margin: 0 }}>{user?.role}</p>
+                {user?.role === 'donor' && (
+                  <button
+                    type="button"
+                    disabled={switchingRole}
+                    onClick={async () => {
+                      setSwitchingRole(true);
+                      try {
+                        const switched = await switchRole('rider');
+                        navigate(getSafeDashboardPath(switched.role));
+                      } finally {
+                        setSwitchingRole(false);
+                      }
+                    }}
+                    style={{
+                      background: '#FFF7ED',
+                      border: '1px solid #EA580C',
+                      color: '#EA580C',
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Bike size={13} /> {switchingRole ? 'Switching...' : 'Switch to Rider Mode'}
+                  </button>
+                )}
+                {user?.role === 'rider' && (
+                  <button
+                    type="button"
+                    disabled={switchingRole}
+                    onClick={async () => {
+                      setSwitchingRole(true);
+                      try {
+                        const switched = await switchRole('donor');
+                        navigate(getSafeDashboardPath(switched.role));
+                      } finally {
+                        setSwitchingRole(false);
+                      }
+                    }}
+                    style={{
+                      background: '#F0FDF4',
+                      border: '1px solid #16A34A',
+                      color: '#16A34A',
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Utensils size={13} /> {switchingRole ? 'Switching...' : 'Switch to Donor Mode'}
+                  </button>
+                )}
+              </div>
             </div>
             {isRider && (
               <>

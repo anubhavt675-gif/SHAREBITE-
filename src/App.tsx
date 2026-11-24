@@ -104,6 +104,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const { user, authStatus, authError, retryAuth, logout } = useAuth();
+  const location = useLocation();
 
   if (authStatus === 'initializing' || authStatus === 'loading_profile') {
     return (
@@ -126,18 +127,26 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
-    const destination = getRoleDashboardPath(user.role);
-    if (!destination) {
-      return (
-        <AuthStateScreen
-          mode="invalid_role"
-          message={`Your account has an unrecognized role ("${user.role}").`}
-          onRetry={retryAuth}
-          onSignOut={logout}
-        />
-      );
+    // If a logged-in user visits a different role portal (e.g., donor visiting rider portal or vice versa),
+    // allow them to view the page to activate or switch their role cleanly without redirect loops.
+    const isTargetingDifferentRole =
+      (user.role === 'donor' && location.pathname.includes('/rider')) ||
+      (user.role === 'rider' && (location.pathname.includes('/donor') || location.pathname.includes('/acceptor')));
+
+    if (!isTargetingDifferentRole) {
+      const destination = getRoleDashboardPath(user.role);
+      if (!destination) {
+        return (
+          <AuthStateScreen
+            mode="invalid_role"
+            message={`Your account has an unrecognized role ("${user.role}").`}
+            onRetry={retryAuth}
+            onSignOut={logout}
+          />
+        );
+      }
+      return <Navigate to={destination} replace />;
     }
-    return <Navigate to={destination} replace />;
   }
 
   return <>{children}</>;

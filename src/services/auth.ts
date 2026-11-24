@@ -316,6 +316,19 @@ export const AuthService = {
 
       // Admins have dedicated platform oversight access and can sign in through any portal.
       if (expectedCanonical && actualCanonical !== 'admin' && actualCanonical !== expectedCanonical) {
+        // If a donor attempts to log in as rider, or vice-versa, seamlessly activate the expected role
+        if (
+          (expectedCanonical === 'rider' && actualCanonical === 'donor') ||
+          (expectedCanonical === 'donor' && actualCanonical === 'rider')
+        ) {
+          try {
+            const switchedUser = await this.switchRole(expectedCanonical);
+            return switchedUser;
+          } catch (switchErr) {
+            console.warn('Auto role switch failed during login:', switchErr);
+          }
+        }
+
         await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
         const { label, portal } = getReadableRoleAndPortal(actualCanonical);
         throw new Error(
@@ -525,9 +538,26 @@ export const AuthService = {
       rawIntendedRole = null;
     }
 
-    // 1. Always check existing authoritative DB profile FIRST — never overwrite an existing user's role.
+    // 1. Check existing authoritative DB profile
     const existingResult = await this.fetchAuthoritativeProfile(activeUser.id);
+    const parsedIntended = normalizeRole(rawIntendedRole);
+
     if (existingResult.status === 'ok') {
+      // If user signed in via Google on Rider page (or Donor page) with explicit intended role,
+      // seamlessly switch/activate that role so they enter the correct dashboard.
+      if (
+        parsedIntended &&
+        parsedIntended !== 'admin' &&
+        parsedIntended !== existingResult.user.role &&
+        (parsedIntended === 'rider' || parsedIntended === 'donor')
+      ) {
+        try {
+          const switchedUser = await this.switchRole(parsedIntended);
+          return switchedUser;
+        } catch (switchErr) {
+          console.warn('OAuth role switch warning:', switchErr);
+        }
+      }
       return existingResult.user;
     }
     if (existingResult.status === 'error') {
@@ -538,7 +568,6 @@ export const AuthService = {
     }
 
     // 2. Profile does not exist yet: create initial profile with validated intended role (never admin).
-    const parsedIntended = normalizeRole(rawIntendedRole);
     const initialRole: CanonicalRole =
       parsedIntended && parsedIntended !== 'admin' ? parsedIntended : 'donor';
 
@@ -628,5 +657,72 @@ export const AuthService = {
     }
 
     return mapProfileToUser(profile);
+  },
+
+  async switchRole(targetRole: 'donor' | 'rider' | 'ngo' | 'community'): Promise<User> {
+    const canonical = normalizeRole(targetRole);
+    if (!canonical || canonical === 'admin') {
+      throw new Error(`Cannot switch to invalid role "${targetRole}".`);
+    }
+
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session?.user) {
+      throw new Error('You must be logged in to switch account roles.');
+    }
+
+    const userId = session.user.id;
+
+    // 1. Try secure RPC function first
+    const { data: rpcData, error: rpcError } = await supabase.rpc('switch_user_role', {
+      p_target_role: canonical,
+    });
+
+    if (rpcError) {
+      console.warn('switch_user_role RPC failed, attempting direct update:', rpcError.message);
+      // 2. Direct fallback
+      try {
+        await supabase
+          .from('profiles')
+          .update({ role: canonical, updated_at: new Date().toISOString() })
+          .eq('id', userId);
+      } catch (directErr) {
+        console.warn('Direct profile role update warning:', directErr);
+      }
+    }
+
+    // If switching to rider, ensure riders row exists
+    if (canonical === 'rider') {
+      const currentMeta = session.user.user_metadata || {};
+      const fallbackName =
+        currentMeta.full_name || currentMeta.name || session.user.email?.split('@')[0] || 'Rider';
+      await supabase
+        .from('riders')
+        .upsert(
+          {
+            user_id: userId,
+            name: fallbackName,
+            phone: currentMeta.phone || '',
+            is_online: false,
+            is_available: true,
+            id_verified: false,
+          },
+          { onConflict: 'user_id' }
+        )
+        .then(({ error: riderErr }) => {
+          if (riderErr) console.warn('Rider upsert warning during role switch:', riderErr.message);
+        });
+    }
+
+    // Re-fetch authoritative profile
+    const refetched = await this.fetchAuthoritativeProfile(userId);
+    if (refetched.status === 'ok') {
+      return refetched.user;
+    }
+
+    if (rpcData && typeof rpcData === 'object') {
+      return mapProfileToUser(rpcData);
+    }
+
+    throw new Error('Failed to verify profile after role switch.');
   },
 };

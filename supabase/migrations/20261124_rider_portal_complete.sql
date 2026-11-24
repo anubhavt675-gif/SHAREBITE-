@@ -1028,6 +1028,115 @@ grant execute on function public.accept_donation(uuid, integer, timestamptz, tex
 grant execute on function public.accept_delivery_job(uuid) to authenticated;
 grant execute on function public.update_donation_status(uuid, text, text) to authenticated;
 
+-- ─── 7. Role Switching RPC & Anti-Privilege Escalation Override ─────────────
+create or replace function public.prevent_profile_privilege_escalation()
+returns trigger
+security definer
+set search_path = public
+language plpgsql as $$
+begin
+  -- If authorized by switch_user_role RPC, permit the update
+  if coalesce(current_setting('sharebite.allow_role_switch', true), 'false') = 'true' then
+    return new;
+  end if;
+
+  -- Allow SQL Editor / postgres migrations (auth.uid() is null) and service_role / admins
+  if auth.uid() is not null
+     and coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role'
+     and coalesce(public.get_auth_user_role(), '') <> 'admin'
+  then
+    if new.role is distinct from old.role then
+      raise exception 'Permission denied: users cannot modify their own role directly'
+        using errcode = '42501';
+    end if;
+
+    if new.is_verified is distinct from old.is_verified
+       or new.verification_status is distinct from old.verification_status then
+      raise exception 'Permission denied: only administrators can modify verification status'
+        using errcode = '42501';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.switch_user_role(p_target_role text)
+returns jsonb
+security definer
+set search_path = public
+language plpgsql as $$
+declare
+  v_uid         uuid := auth.uid();
+  v_target_role text := lower(trim(coalesce(p_target_role, '')));
+  v_safe_role   public.user_role;
+  v_prof        public.profiles%rowtype;
+begin
+  if v_uid is null then
+    raise exception 'Authentication required to switch role';
+  end if;
+
+  if v_target_role not in ('donor', 'rider', 'ngo', 'volunteer', 'community', 'acceptor') then
+    raise exception 'Invalid role "%" requested', p_target_role;
+  end if;
+
+  if v_target_role = 'acceptor' then
+    v_target_role := 'ngo';
+  end if;
+
+  v_safe_role := v_target_role::public.user_role;
+
+  -- Temporarily authorize role change inside this transaction
+  perform set_config('sharebite.allow_role_switch', 'true', true);
+
+  -- Update profiles table
+  update public.profiles
+  set role = v_safe_role,
+      updated_at = now()
+  where id = v_uid
+  returning * into v_prof;
+
+  if not found then
+    raise exception 'User profile not found';
+  end if;
+
+  -- If switching to rider or volunteer, guarantee riders table row exists
+  if v_safe_role in ('rider', 'volunteer') then
+    insert into public.riders (user_id, name, phone, is_online, is_available, id_verified)
+    values (
+      v_uid,
+      coalesce(v_prof.full_name, 'Rider'),
+      coalesce(v_prof.phone, ''),
+      false,
+      true,
+      false
+    )
+    on conflict (user_id) do update
+      set name = coalesce(excluded.name, riders.name),
+          phone = coalesce(excluded.phone, riders.phone),
+          updated_at = now();
+  end if;
+
+  -- If switching to ngo, ensure partners row exists
+  if v_safe_role = 'ngo' and v_prof.organization_name is not null then
+    insert into public.partners (profile_id, organization_name, organization_type, is_verified)
+    values (
+      v_uid,
+      v_prof.organization_name,
+      'ngo',
+      false
+    )
+    on conflict (profile_id) do update
+      set organization_name = coalesce(excluded.organization_name, partners.organization_name),
+          updated_at = now();
+  end if;
+
+  return to_jsonb(v_prof);
+end;
+$$;
+
+grant execute on function public.switch_user_role(text) to authenticated, anon;
+
 -- ============================================================================
 -- DONE ✓ ShareBite Rider Portal & Donor Integration SQL Ready
 -- ============================================================================

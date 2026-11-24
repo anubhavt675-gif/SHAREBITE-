@@ -28,6 +28,7 @@ interface AuthContextType {
   }) => Promise<{ user: User; sessionExists: boolean }>;
   signInWithGoogle: (intendedRole: 'donor' | 'acceptor' | 'rider') => Promise<void>;
   handleOAuthCallback: () => Promise<User>;
+  switchRole: (targetRole: 'donor' | 'rider' | 'ngo' | 'community') => Promise<User>;
   logout: () => Promise<void>;
   updateProfile: (updates: Partial<User>) => Promise<void>;
   resetPasswordForEmail: (email: string) => Promise<void>;
@@ -358,6 +359,16 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
     return u;
   }, [setUserIfChanged]);
 
+  const switchRole = useCallback(
+    async (targetRole: 'donor' | 'rider' | 'ngo' | 'community'): Promise<User> => {
+      const switchedUser = await AuthService.switchRole(targetRole);
+      setUserIfChanged(switchedUser);
+      lastProfileSyncAtRef.current = Date.now();
+      return switchedUser;
+    },
+    [setUserIfChanged]
+  );
+
   const logout = useCallback(async () => {
     ++requestSeqRef.current;
     activeUserIdRef.current = null;
@@ -401,6 +412,7 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
       signup,
       signInWithGoogle,
       handleOAuthCallback,
+      switchRole,
       logout,
       updateProfile,
       resetPasswordForEmail,
@@ -418,6 +430,7 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
       signup,
       signInWithGoogle,
       handleOAuthCallback,
+      switchRole,
       logout,
       updateProfile,
       resetPasswordForEmail,

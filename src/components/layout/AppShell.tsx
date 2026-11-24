@@ -7,19 +7,20 @@ import LiveOpportunityPopup from '../notifications/LiveOpportunityPopup';
 import ErrorBoundary from '../states/ErrorBoundary';
 import UserAvatar from '../ui/UserAvatar';
 import { useAuth } from '../../context/AuthContext';
-import { normalizeRole } from '../../services/auth';
+import { normalizeRole, getSafeDashboardPath } from '../../services/auth';
 import { NotificationsService } from '../../services/notifications';
 import { ClaimsService } from '../../services/claims';
 import { LocationService } from '../../services/location';
 import styles from './AppShell.module.css';
 
 function RiderTopHeader({ onToggleSidebar }: { onToggleSidebar: () => void }) {
-  const { user, logout } = useAuth();
+  const { user, logout, switchRole } = useAuth();
   const navigate = useNavigate();
   const userId = user?.id;
 
   const [isOnline, setIsOnline] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -146,6 +147,25 @@ function RiderTopHeader({ onToggleSidebar }: { onToggleSidebar: () => void }) {
               <Link to="/settings" className={styles.riderDropItem} onClick={() => setMenuOpen(false)}>
                 <Settings size={14} /> Settings
               </Link>
+              <button
+                type="button"
+                className={styles.riderDropItem}
+                style={{ color: '#16A34A', fontWeight: 600 }}
+                disabled={switchingRole}
+                onClick={async () => {
+                  setMenuOpen(false);
+                  setSwitchingRole(true);
+                  try {
+                    const switched = await switchRole('donor');
+                    const dest = getSafeDashboardPath(switched.role);
+                    navigate(dest);
+                  } finally {
+                    setSwitchingRole(false);
+                  }
+                }}
+              >
+                🍲 Switch to Donor Portal
+              </button>
               <button
                 type="button"
                 className={`${styles.riderDropItem} ${styles.riderDropDanger}`}

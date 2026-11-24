@@ -41,12 +41,28 @@ export function ShareBiteLogo() {
 }
 
 export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
-  const { user, logout } = useAuth();
+  const { user, logout, switchRole } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [unreadCount, setUnreadCount] = useState(0);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [switchingRole, setSwitchingRole] = useState(false);
+
+  const handleSwitchRole = async (target: 'donor' | 'rider') => {
+    if (switchingRole) return;
+    setSwitchingRole(true);
+    try {
+      setShowUserMenu(false);
+      const switched = await switchRole(target);
+      const dest = getSafeDashboardPath(switched.role);
+      navigate(dest);
+    } catch (err) {
+      console.error('Failed to switch role:', err);
+    } finally {
+      setSwitchingRole(false);
+    }
+  };
 
   const isApp = location.pathname.startsWith('/dashboard') ||
     location.pathname.startsWith('/donor-') ||
@@ -178,6 +194,27 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
               <Link to="/donor-donations" className={`${styles.navLink} ${location.pathname === '/donor-donations' ? styles.navLinkActive : ''}`}>Track Deliveries</Link>
               <Link to="/discover" className={`${styles.navLink} ${location.pathname === '/discover' ? styles.navLinkActive : ''}`}>Network</Link>
               <Link to="/chat" className={`${styles.navLink} ${location.pathname === '/chat' ? styles.navLinkActive : ''}`}>Chat</Link>
+              <button
+                type="button"
+                onClick={() => handleSwitchRole('rider')}
+                disabled={switchingRole}
+                style={{
+                  background: '#FFF7ED',
+                  border: '1px solid #FDBA74',
+                  color: '#EA580C',
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+                title="Switch role to Rider and view Rider Dashboard"
+              >
+                🛵 Rider Portal
+              </button>
             </>
           ) : null}
         </div>
@@ -240,6 +277,26 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
                     <Link to="/donor-donations" className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
                       My Food Donations
                     </Link>
+                  )}
+                  {canonicalRole === 'donor' && (
+                    <button
+                      type="button"
+                      className={styles.menuItem}
+                      onClick={() => handleSwitchRole('rider')}
+                      style={{ color: '#EA580C', fontWeight: 700 }}
+                    >
+                      🛵 Switch to Rider Portal
+                    </button>
+                  )}
+                  {canonicalRole === 'rider' && (
+                    <button
+                      type="button"
+                      className={styles.menuItem}
+                      onClick={() => handleSwitchRole('donor')}
+                      style={{ color: '#16A34A', fontWeight: 700 }}
+                    >
+                      🍲 Switch to Donor Portal
+                    </button>
                   )}
                   <Link to="/profile" className={styles.menuItem} onClick={() => setShowUserMenu(false)}>
                     <User size={14} /> Profile

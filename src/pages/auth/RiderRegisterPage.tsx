@@ -63,7 +63,7 @@ function ShareBiteLogo({ compact = false }: { compact?: boolean }) {
 export default function RiderRegisterPage({ initialMode }: { initialMode?: 'register' | 'login' } = {}) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, signup, signInWithGoogle } = useAuth();
+  const { user, login, signup, signInWithGoogle, switchRole } = useAuth();
 
   const isLoginRoute = initialMode === 'login' || location.pathname.startsWith('/login');
   const [mode, setMode] = useState<'register' | 'login'>(isLoginRoute ? 'login' : 'register');
@@ -78,8 +78,23 @@ export default function RiderRegisterPage({ initialMode }: { initialMode?: 'regi
   const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  const handleActivateRider = async () => {
+    setSwitchingRole(true);
+    setError(null);
+    try {
+      const updated = await switchRole('rider');
+      const targetPath = getRoleDashboardPath(updated.role);
+      if (targetPath) navigate(targetPath, { replace: true });
+    } catch (err: any) {
+      setError(err?.message || 'Failed to switch role to Rider.');
+    } finally {
+      setSwitchingRole(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -433,6 +448,55 @@ export default function RiderRegisterPage({ initialMode }: { initialMode?: 'regi
                     Log In Here →
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* Active Session Role Switcher */}
+            {user && user.role !== 'rider' && (
+              <div
+                style={{
+                  background: '#FFF7ED',
+                  border: '1.5px solid #FDBA74',
+                  borderRadius: 12,
+                  padding: '16px 18px',
+                  marginBottom: 20,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Bike size={22} color="#EA580C" />
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '13px', color: '#9A3412' }}>
+                      Signed in as {user.name || user.email} ({user.role})
+                    </strong>
+                    <span style={{ fontSize: '12px', color: '#C2410C' }}>
+                      Want to deliver food? Switch this account to Rider mode right now.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleActivateRider}
+                  disabled={switchingRole}
+                  style={{
+                    background: '#EA580C',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '9px 16px',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  {switchingRole ? <Loader2 size={16} className={styles.spin} /> : 'Activate Rider Role & Open Dashboard →'}
+                </button>
               </div>
             )}
 
