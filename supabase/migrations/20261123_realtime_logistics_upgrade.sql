@@ -534,8 +534,8 @@ stable as $$
     fl.donor_id,
     fl.title,
     fl.description,
-    fl.category,
-    fl.food_type,
+    fl.category::text as category,
+    fl.food_type::text as food_type,
     fl.servings,
     fl.available_servings,
     fl.image_url,
@@ -552,8 +552,8 @@ stable as $$
     fl.status::text as status,
     fl.is_urgent,
     fl.allergens,
-    fl.storage_type,
-    fl.quantity_unit,
+    fl.storage_type::text as storage_type,
+    fl.quantity_unit::text as quantity_unit,
     case
       when fl.latitude is not null and fl.longitude is not null then
         round(
@@ -624,6 +624,7 @@ language plpgsql as $$
 declare
   v_uid           uuid := auth.uid();
   v_listing       public.food_listings%rowtype;
+  v_typed         public.food_listings%rowtype;
   v_ngo_count     integer := 0;
   v_rider_count   integer := 0;
   v_approx_area   text;
@@ -648,6 +649,18 @@ begin
 
   v_approx_area := coalesce(nullif(trim(p_city), ''), split_part(coalesce(p_pickup_address, 'Nearby Area'), ',', 1));
 
+  -- Resolve enum-or-text column types dynamically from public.food_listings catalog
+  v_typed := jsonb_populate_record(
+    null::public.food_listings,
+    jsonb_build_object(
+      'category',      coalesce(nullif(trim(p_category), ''), 'Other'),
+      'food_type',     lower(replace(coalesce(nullif(trim(p_food_type), ''), 'veg'), '-', '_')),
+      'storage_type',  coalesce(nullif(trim(p_storage_type), ''), 'room_temp'),
+      'quantity_unit', coalesce(nullif(trim(p_quantity_unit), ''), 'servings'),
+      'status',        'available'
+    )
+  );
+
   insert into public.food_listings (
     donor_id, title, description, category, food_type,
     servings, available_servings, image_url,
@@ -658,13 +671,13 @@ begin
     preparation_date, packaging_notes
   )
   values (
-    v_uid, p_title, p_description, coalesce(p_category, 'Other'), coalesce(p_food_type, 'veg'),
+    v_uid, p_title, p_description, v_typed.category, v_typed.food_type,
     p_servings, p_servings, p_image_url,
     p_pickup_address, p_city, p_latitude, p_longitude,
     p_location_accuracy_m, coalesce(p_location_captured_at, now()), coalesce(p_notification_radius_km, 15.0),
-    coalesce(p_available_from, now()), p_available_until, 'available', coalesce(p_is_urgent, false),
-    coalesce(p_allergens, '{}'), coalesce(p_storage_type, 'room_temp'),
-    coalesce(p_quantity_unit, 'servings'), coalesce(p_quantity_value, p_servings),
+    coalesce(p_available_from, now()), p_available_until, v_typed.status, coalesce(p_is_urgent, false),
+    coalesce(p_allergens, '{}'), v_typed.storage_type,
+    v_typed.quantity_unit, coalesce(p_quantity_value, p_servings),
     p_preparation_date, p_packaging_notes
   )
   returning * into v_listing;

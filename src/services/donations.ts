@@ -293,12 +293,23 @@ export const DonationService = {
         if (fetched) return mapListingToFood(fetched);
       }
 
-      if (rpcErr && rpcErr.code !== 'PGRST202') {
+      const isRpcSchemaMismatch =
+        rpcErr &&
+        (rpcErr.code === 'PGRST202' ||
+          rpcErr.code === '42804' ||
+          rpcErr.code === '42883' ||
+          rpcErr.code === '42703' ||
+          /is of type|does not match|Could not find the function/i.test(rpcErr.message || ''));
+
+      if (rpcErr && !isRpcSchemaMismatch) {
         throw new Error(rpcErr.message || 'Failed to publish food donation');
+      }
+      if (rpcErr && isRpcSchemaMismatch) {
+        console.warn('publish_food_donation RPC fallback triggered:', rpcErr.message);
       }
     }
 
-    // 2. Fallback ONLY when publish_food_donation RPC is not yet deployed (PGRST202)
+    // 2. Fallback when publish_food_donation RPC is unavailable or encounters enum/schema cast mismatch
     const payload: any = {
       donor_id: safeDonorId,
       title: form.title,
@@ -318,6 +329,11 @@ export const DonationService = {
       is_urgent: form.isUrgent,
       allergens: form.allergens || [],
       storage_type: form.storageType || 'room_temp',
+      quantity_unit: form.quantityUnit || 'servings',
+      quantity_value: form.quantityValue ?? form.servings,
+      preparation_date: prepDateIso,
+      packaging_notes: form.packagingNotes || null,
+      notification_radius_km: radiusKm,
     };
 
     let { data: listing, error } = await supabase
@@ -329,6 +345,11 @@ export const DonationService = {
     if (error && (error.message?.includes('column') || error.code === '42703')) {
       delete payload.allergens;
       delete payload.storage_type;
+      delete payload.quantity_unit;
+      delete payload.quantity_value;
+      delete payload.preparation_date;
+      delete payload.packaging_notes;
+      delete payload.notification_radius_km;
       const retry = await supabase
         .from('food_listings')
         .insert(payload)

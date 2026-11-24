@@ -1214,7 +1214,277 @@ left join public.delivery_tasks dt on dt.claim_id = nc.id and dt.status not in (
 left join public.riders r on r.id = dt.rider_id
 left join public.distribution_records dr on dr.claim_id = nc.id;
 
--- ─── 9. Explicit Function Grants & RLS Integrity Verification ───────────────
+-- ─── 9. Fix publish_food_donation & get_nearby_food for Enum Columns ────────
+-- Ensures databases where food_listings.food_type / storage_type / category
+-- are PostgreSQL enums never fail with "expression is of type text".
+create or replace function public.get_nearby_food(
+  p_lat       double precision,
+  p_lng       double precision,
+  p_radius_km double precision default 25.0
+)
+returns table (
+  id                 uuid,
+  donor_id           uuid,
+  title              text,
+  description        text,
+  category           text,
+  food_type          text,
+  servings           integer,
+  available_servings integer,
+  image_url          text,
+  pickup_address     text,
+  city               text,
+  latitude           double precision,
+  longitude          double precision,
+  available_from     timestamptz,
+  available_until    timestamptz,
+  status             text,
+  is_urgent          boolean,
+  allergens          text[],
+  storage_type       text,
+  quantity_unit      text,
+  distance_km        double precision
+)
+security definer
+set search_path = public
+language sql
+stable as $$
+  select
+    fl.id,
+    fl.donor_id,
+    fl.title,
+    fl.description,
+    fl.category::text as category,
+    fl.food_type::text as food_type,
+    fl.servings,
+    fl.available_servings,
+    fl.image_url,
+    case
+      when fl.donor_id = auth.uid() or public.get_auth_user_role() = 'admin' then fl.pickup_address
+      else coalesce(fl.city, 'Local Area')
+    end as pickup_address,
+    fl.city,
+    fl.latitude,
+    fl.longitude,
+    fl.available_from,
+    fl.available_until,
+    fl.status::text as status,
+    fl.is_urgent,
+    fl.allergens,
+    fl.storage_type::text as storage_type,
+    fl.quantity_unit::text as quantity_unit,
+    case
+      when fl.latitude is not null and fl.longitude is not null then
+        round(
+          (
+            ST_Distance(
+              coalesce(fl.location, ST_SetSRID(ST_MakePoint(fl.longitude, fl.latitude), 4326)::geography),
+              ST_SetSRID(ST_MakePoint(p_lng, p_lat), 4326)::geography
+            ) / 1000.0
+          )::numeric,
+          2
+        )::double precision
+      else null
+    end as distance_km
+  from public.food_listings fl
+  where fl.status::text in ('available', 'partially_reserved')
+    and fl.available_servings > 0
+    and fl.available_until > now()
+    and (
+      p_lat is null or p_lng is null
+      or (fl.latitude is not null and fl.longitude is not null and ST_DWithin(
+        coalesce(fl.location, ST_SetSRID(ST_MakePoint(fl.longitude, fl.latitude), 4326)::geography),
+        ST_SetSRID(ST_MakePoint(p_lng, p_lat), 4326)::geography,
+        least(greatest(p_radius_km, 1.0), 100.0) * 1000.0
+      ))
+    )
+  order by distance_km asc nulls last, fl.created_at desc;
+$$;
+
+create or replace function public.publish_food_donation(
+  p_title                  text,
+  p_description            text default null,
+  p_category               text default 'Other',
+  p_food_type              text default 'veg',
+  p_servings               integer default 1,
+  p_image_url              text default null,
+  p_pickup_address         text default null,
+  p_city                   text default null,
+  p_latitude               double precision default null,
+  p_longitude              double precision default null,
+  p_location_accuracy_m    double precision default null,
+  p_location_captured_at   timestamptz default null,
+  p_available_from         timestamptz default now(),
+  p_available_until        timestamptz default (now() + interval '4 hours'),
+  p_is_urgent              boolean default false,
+  p_allergens              text[] default '{}',
+  p_storage_type           text default 'room_temp',
+  p_quantity_unit          text default 'servings',
+  p_quantity_value         numeric default null,
+  p_preparation_date       timestamptz default null,
+  p_packaging_notes        text default null,
+  p_notification_radius_km double precision default 15.0
+)
+returns jsonb
+security definer
+set search_path = public
+language plpgsql as $$
+declare
+  v_uid           uuid := auth.uid();
+  v_listing       public.food_listings%rowtype;
+  v_typed         public.food_listings%rowtype;
+  v_ngo_count     integer := 0;
+  v_rider_count   integer := 0;
+  v_approx_area   text;
+  v_ngo           record;
+  v_rider         record;
+begin
+  if v_uid is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if p_latitude is null or p_longitude is null then
+    raise exception 'Exact GPS pickup coordinates are required';
+  end if;
+
+  if p_servings is null or p_servings <= 0 then
+    raise exception 'Servings must be at least 1';
+  end if;
+
+  if p_available_until <= coalesce(p_available_from, now()) then
+    raise exception 'Pickup deadline must be in the future';
+  end if;
+
+  v_approx_area := coalesce(nullif(trim(p_city), ''), split_part(coalesce(p_pickup_address, 'Nearby Area'), ',', 1));
+
+  v_typed := jsonb_populate_record(
+    null::public.food_listings,
+    jsonb_build_object(
+      'category',      coalesce(nullif(trim(p_category), ''), 'Other'),
+      'food_type',     lower(replace(coalesce(nullif(trim(p_food_type), ''), 'veg'), '-', '_')),
+      'storage_type',  coalesce(nullif(trim(p_storage_type), ''), 'room_temp'),
+      'quantity_unit', coalesce(nullif(trim(p_quantity_unit), ''), 'servings'),
+      'status',        'available'
+    )
+  );
+
+  insert into public.food_listings (
+    donor_id, title, description, category, food_type,
+    servings, available_servings, image_url,
+    pickup_address, city, latitude, longitude,
+    location_accuracy_m, location_captured_at, notification_radius_km,
+    available_from, available_until, status, is_urgent,
+    allergens, storage_type, quantity_unit, quantity_value,
+    preparation_date, packaging_notes
+  )
+  values (
+    v_uid, p_title, p_description, v_typed.category, v_typed.food_type,
+    p_servings, p_servings, p_image_url,
+    p_pickup_address, p_city, p_latitude, p_longitude,
+    p_location_accuracy_m, coalesce(p_location_captured_at, now()), coalesce(p_notification_radius_km, 15.0),
+    coalesce(p_available_from, now()), p_available_until, v_typed.status, coalesce(p_is_urgent, false),
+    coalesce(p_allergens, '{}'), v_typed.storage_type,
+    v_typed.quantity_unit, coalesce(p_quantity_value, p_servings),
+    p_preparation_date, p_packaging_notes
+  )
+  returning * into v_listing;
+
+  insert into public.donations (food_listing_id, donor_id, servings, status)
+  values (v_listing.id, v_uid, p_servings, 'active');
+
+  insert into public.impact_events (user_id, event_type, servings)
+  values (v_uid, 'food_donated', p_servings);
+
+  insert into public.donation_status_history (
+    food_listing_id, previous_status, new_status, changed_by, actor_role, notes
+  ) values (
+    v_listing.id, null, 'AVAILABLE', v_uid, 'donor',
+    'Published with ' || coalesce(p_notification_radius_km, 15.0) || ' km discovery radius'
+  );
+
+  for v_ngo in
+    select * from public.find_nearby_ngos(p_latitude, p_longitude, coalesce(p_notification_radius_km, 15.0), true)
+    where id <> v_uid
+  loop
+    insert into public.notifications (
+      user_id, type, title, message, data, related_food_id, action_url
+    ) values (
+      v_ngo.id,
+      'food_nearby',
+      case when coalesce(p_is_urgent, false) then 'URGENT FOOD NEAR YOU!' else 'NEW FOOD AVAILABLE NEARBY!' end,
+      p_servings || ' ' || coalesce(p_quantity_unit, 'servings') || ' of "' || p_title || '" in ' || v_approx_area || ' • ' || v_ngo.distance_km || ' km away',
+      jsonb_build_object(
+        'opportunity_type', 'ngo_food',
+        'food_listing_id', v_listing.id,
+        'title', p_title,
+        'image_url', p_image_url,
+        'servings', p_servings,
+        'quantity_unit', coalesce(p_quantity_unit, 'servings'),
+        'category', coalesce(p_category, 'Other'),
+        'distance_km', v_ngo.distance_km,
+        'approximate_area', v_approx_area,
+        'available_until', p_available_until,
+        'is_urgent', coalesce(p_is_urgent, false)
+      ),
+      v_listing.id,
+      '/donations/' || v_listing.id
+    );
+    v_ngo_count := v_ngo_count + 1;
+  end loop;
+
+  for v_rider in
+    select * from public.find_nearby_riders(p_latitude, p_longitude, coalesce(p_notification_radius_km, 15.0))
+    where user_id <> v_uid
+  loop
+    insert into public.notifications (
+      user_id, type, title, message, data, related_food_id, action_url
+    ) values (
+      v_rider.user_id,
+      'pickup_nearby',
+      case when coalesce(p_is_urgent, false) then 'URGENT PICKUP OPPORTUNITY!' else 'PICKUP OPPORTUNITY NEARBY!' end,
+      '"' || p_title || '" (' || p_servings || ' ' || coalesce(p_quantity_unit, 'servings') || ') in ' || v_approx_area || ' • ' || v_rider.distance_km || ' km away',
+      jsonb_build_object(
+        'opportunity_type', 'rider_pickup',
+        'food_listing_id', v_listing.id,
+        'title', p_title,
+        'image_url', p_image_url,
+        'servings', p_servings,
+        'quantity_unit', coalesce(p_quantity_unit, 'servings'),
+        'category', coalesce(p_category, 'Other'),
+        'distance_km', v_rider.distance_km,
+        'approximate_area', v_approx_area,
+        'available_until', p_available_until,
+        'is_urgent', coalesce(p_is_urgent, false)
+      ),
+      v_listing.id,
+      '/rider-dashboard'
+    );
+    v_rider_count := v_rider_count + 1;
+  end loop;
+
+  insert into public.notifications (
+    user_id, type, title, message, data, related_food_id, action_url
+  ) values (
+    v_uid,
+    'donation_created',
+    'Donation Published Live',
+    '"' || p_title || '" is now live. Notified ' || v_ngo_count || ' nearby verified NGO(s) and ' || v_rider_count || ' online rider(s).',
+    jsonb_build_object('food_listing_id', v_listing.id, 'notified_ngos', v_ngo_count, 'notified_riders', v_rider_count),
+    v_listing.id,
+    '/donor-donations'
+  );
+
+  return jsonb_build_object(
+    'listing', to_jsonb(v_listing),
+    'notified_ngos', v_ngo_count,
+    'notified_riders', v_rider_count
+  );
+end;
+$$;
+
+-- ─── 10. Explicit Function Grants & RLS Integrity Verification ───────────────
+grant execute on function public.publish_food_donation(text, text, text, text, integer, text, text, text, double precision, double precision, double precision, timestamptz, timestamptz, timestamptz, boolean, text[], text, text, numeric, timestamptz, text, double precision) to authenticated;
+grant execute on function public.get_nearby_food(double precision, double precision, double precision) to anon, authenticated;
 grant execute on function public.accept_donation(uuid, integer, timestamptz, text, text) to authenticated;
 grant execute on function public.claim_food(uuid, integer, timestamptz, text) to authenticated;
 grant execute on function public.create_delivery_task(uuid) to authenticated;

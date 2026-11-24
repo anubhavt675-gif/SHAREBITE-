@@ -494,6 +494,13 @@ async function attachInterceptor(page, mock) {
       }
 
       if (fn === 'publish_food_donation') {
+        if (mock.state.simulateFoodTypeMismatchOnce) {
+          mock.state.simulateFoodTypeMismatchOnce = false;
+          return sendJson(req, 400, {
+            code: '42804',
+            message: 'column "food_type" is of type food_type but expression is of type text',
+          });
+        }
         const id = mock.nextUuid();
         const listing = {
           id,
@@ -886,7 +893,8 @@ async function runSuite() {
       fail(`RoleGuard: Donor reached ${redirectedFromRider} instead of /donor-dashboard`);
     }
 
-    // Create Donation 3-step flow
+    // Create Donation 3-step flow (also simulates PostgreSQL 42804 enum mismatch on publish_food_donation)
+    mock.state.simulateFoodTypeMismatchOnce = true;
     await page.goto(`${baseUrl}/donations/new`, { waitUntil: 'networkidle2', timeout: 30000 });
     await page.waitForSelector('#foodTitle', { timeout: 10000 });
     await page.type('#foodTitle', 'Hot Sambar Rice Packs');
