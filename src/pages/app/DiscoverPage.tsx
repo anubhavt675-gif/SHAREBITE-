@@ -44,7 +44,7 @@ export default function DiscoverPage() {
   const [foodType, setFoodType] = useState<string>('all');
   const [category, setCategory] = useState<string>('all');
   const [timeFilter, setTimeFilter] = useState<string>('all');
-  const [radiusKm, setRadiusKm] = useState<number>(10);
+  const [radiusKm, setRadiusKm] = useState<number>(50);
   const [dietary, setDietary] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'nearest' | 'expiring' | 'servings'>('nearest');
 
@@ -230,7 +230,7 @@ export default function DiscoverPage() {
     setFoodType('all');
     setCategory('all');
     setTimeFilter('all');
-    setRadiusKm(10);
+    setRadiusKm(50);
     setDietary('all');
     setSortBy('nearest');
   };
@@ -239,7 +239,7 @@ export default function DiscoverPage() {
     foodType !== 'all' ||
     category !== 'all' ||
     timeFilter !== 'all' ||
-    radiusKm !== 10 ||
+    radiusKm !== 50 ||
     dietary !== 'all';
 
   return (

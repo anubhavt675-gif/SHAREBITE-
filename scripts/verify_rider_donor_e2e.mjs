@@ -33,6 +33,7 @@ const fail = (m) => {
 
 const IDS = {
   donor: 'aaaaaaaa-1111-4111-8111-111111111111',
+  donorB: 'ffffffff-6666-4666-8666-666666666666',
   riderA: 'bbbbbbbb-2222-4222-8222-222222222222',
   riderB: 'cccccccc-3333-4333-8333-333333333333',
   riderRowA: 'dddddddd-4444-4444-8444-444444444444',
@@ -98,6 +99,26 @@ function createSharedBackend() {
       total_donations: 6,
       average_rating: 4.9,
       rating_count: 10,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-11-24T00:00:00Z',
+    },
+    [IDS.donorB]: {
+      id: IDS.donorB,
+      full_name: 'Vikram Mehta',
+      email: 'donor.b@sharebite.test',
+      phone: '+91 9822233344',
+      avatar_url: null,
+      role: 'donor',
+      organization_name: 'Mehta Catering House',
+      is_verified: true,
+      verification_status: 'verified',
+      address: 'Sector 62, Noida',
+      city: 'Noida',
+      latitude: 28.6279,
+      longitude: 77.3649,
+      total_donations: 3,
+      average_rating: 4.8,
+      rating_count: 5,
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-11-24T00:00:00Z',
     },
@@ -227,9 +248,16 @@ function applyFilters(rows, searchParams) {
     if (['select', 'order', 'limit', 'offset', 'on_conflict'].includes(k)) continue;
     if (raw.startsWith('eq.')) out = out.filter((r) => String(r[k]) === raw.slice(3));
     else if (raw.startsWith('neq.')) out = out.filter((r) => String(r[k]) !== raw.slice(4));
-    else if (raw.startsWith('in.(') && raw.endsWith(')')) {
+    else if (raw === 'is.null') out = out.filter((r) => r[k] === null || r[k] === undefined);
+    else if (raw.startsWith('gt.')) {
+      const rhs = raw.slice(3);
+      out = out.filter((r) => (!isNaN(Number(rhs)) ? Number(r[k]) > Number(rhs) : String(r[k]) > rhs));
+    } else if (raw.startsWith('in.(') && raw.endsWith(')')) {
       const vals = raw.slice(4, -1).split(',').map((s) => s.replace(/^"|"$/g, '').trim());
       out = out.filter((r) => vals.includes(String(r[k])));
+    } else if (raw.startsWith('not.in.(') && raw.endsWith(')')) {
+      const vals = raw.slice(8, -1).split(',').map((s) => s.replace(/^"|"$/g, '').trim());
+      out = out.filter((r) => !vals.includes(String(r[k])));
     }
   }
   return out;
@@ -384,6 +412,18 @@ async function attachAccountPage(page, db, actorProfile) {
           action_url: '/donor-donations',
           created_at: new Date().toISOString(),
         });
+        db.notifications.unshift({
+          id: db.nextUuid(),
+          user_id: uid,
+          type: 'rider_assigned',
+          title: 'Donation Acceptance Confirmed!',
+          message: `You accepted "${listing.title}" at ${listing.pickup_address}`,
+          is_read: false,
+          related_food_id: listing.id,
+          related_delivery_id: taskId,
+          action_url: '/rider/deliveries?tab=active',
+          created_at: new Date().toISOString(),
+        });
 
         return sendJson(req, 200, {
           accepted_by: 'rider',
@@ -393,6 +433,7 @@ async function attachAccountPage(page, db, actorProfile) {
           pickup_lng: listing.longitude,
           pickup_address: listing.pickup_address,
           status: 'rider_assigned',
+          rider_notified: true,
         });
       }
 
@@ -486,6 +527,15 @@ async function attachAccountPage(page, db, actorProfile) {
     }
 
     if (table === 'food_listings') {
+      if (method === 'PATCH' || method === 'DELETE') {
+        const idEq = u.searchParams.get('id')?.replace('eq.', '');
+        const listing = db.listings.find((l) => l.id === idEq);
+        if (listing && listing.donor_id !== uid) {
+          return sendJson(req, 403, { message: 'RLS violation: only the owning donor can modify this listing' });
+        }
+        if (listing && method === 'PATCH') Object.assign(listing, body);
+        return handleSingleOrList(req, listing ? [listing] : []);
+      }
       const enriched = db.listings.map((l) => ({
         ...l,
         donor: db.profiles[l.donor_id],
@@ -667,27 +717,33 @@ async function run() {
 
   try {
     const donorCtx = await browser.createBrowserContext();
+    const donorBCtx = await browser.createBrowserContext();
     const riderCtx = await browser.createBrowserContext();
     const riderBCtx = await browser.createBrowserContext();
 
     await donorCtx.overridePermissions(baseUrl, ['geolocation']);
+    await donorBCtx.overridePermissions(baseUrl, ['geolocation']);
     await riderCtx.overridePermissions(baseUrl, ['geolocation']);
     await riderBCtx.overridePermissions(baseUrl, ['geolocation']);
 
     const donorPage = await donorCtx.newPage();
+    const donorBPage = await donorBCtx.newPage();
     const riderPage = await riderCtx.newPage();
     const riderBPage = await riderBCtx.newPage();
 
     await donorPage.setGeolocation({ latitude: 28.5708, longitude: 77.326 });
+    await donorBPage.setGeolocation({ latitude: 28.6279, longitude: 77.3649 });
     await riderPage.setGeolocation({ latitude: 28.578, longitude: 77.318 });
     await riderBPage.setGeolocation({ latitude: 28.58, longitude: 77.33 });
 
     const pageErrors = [];
-    donorPage.on('pageerror', (e) => pageErrors.push(`Donor: ${e}`));
-    riderPage.on('pageerror', (e) => pageErrors.push(`Rider: ${e}`));
+    donorPage.on('pageerror', (e) => pageErrors.push(`DonorA: ${e}`));
+    donorBPage.on('pageerror', (e) => pageErrors.push(`DonorB: ${e}`));
+    riderPage.on('pageerror', (e) => pageErrors.push(`RiderA: ${e}`));
     riderBPage.on('pageerror', (e) => pageErrors.push(`RiderB: ${e}`));
 
     await attachAccountPage(donorPage, db, db.profiles[IDS.donor]);
+    await attachAccountPage(donorBPage, db, db.profiles[IDS.donorB]);
     await attachAccountPage(riderPage, db, db.profiles[IDS.riderA]);
     await attachAccountPage(riderBPage, db, db.profiles[IDS.riderB]);
 
@@ -768,40 +824,71 @@ async function run() {
       fail('4. Donor failed to publish food donation');
     }
 
-    // Step 5: Food appears in Rider Available Pickups
+    // Step 4b: Donor B also lists food ("Dal Makhani & Naan Combo") -> Both Riders MUST see BOTH Donor A and Donor B listings
+    await seedSession(donorBPage, db.profiles[IDS.donorB], '/donations/new');
+    await donorBPage.waitForSelector('#foodTitle', { timeout: 25000 });
+    await donorBPage.type('#foodTitle', 'Dal Makhani & Naan Combo');
+    await donorBPage.evaluate(() => {
+      [...document.querySelectorAll('button')].find((b) => /continue/i.test(b.innerText))?.click();
+    });
+    await donorBPage.waitForSelector('#pickupAddress', { timeout: 8000 });
+    await donorBPage.type('#pickupAddress', 'Sector 62, Noida');
+    await donorBPage.type('#city', 'Noida');
+    await donorBPage.click('#safetyDeclaration');
+    await donorBPage.evaluate(() => {
+      [...document.querySelectorAll('button')].find((b) => /\+4\s*hrs/i.test(b.innerText))?.click();
+    });
+    await donorBPage.evaluate(() => {
+      [...document.querySelectorAll('button')].find((b) => /continue/i.test(b.innerText))?.click();
+    });
+    await sleep(500);
+    await donorBPage.evaluate(() => {
+      [...document.querySelectorAll('button')].find((b) => /publish food donation/i.test(b.innerText))?.click();
+    });
+    await sleep(900);
+
+    // Step 5: Both Donor A and Donor B listings appear in BOTH Rider A and Rider B Available Pickups
     await riderPage.goto(`${baseUrl}/rider-dashboard`, { waitUntil: 'networkidle2', timeout: 30000 });
+    await seedSession(riderBPage, db.profiles[IDS.riderB], '/rider-dashboard');
     await sleep(700);
     if (screenshotPath) {
       await riderPage.screenshot({ path: screenshotPath, fullPage: false });
     }
     const riderWithFood = await riderPage.evaluate(() => document.body.innerText);
+    const riderBWithFood = await riderBPage.evaluate(() => document.body.innerText);
     if (
       riderWithFood.includes('Paneer Tikka Meal Boxes') &&
+      riderWithFood.includes('Dal Makhani & Naan Combo') &&
       riderWithFood.includes('Ananya Sharma') &&
-      riderWithFood.includes('Sector 18, Noida')
+      riderWithFood.includes('Vikram Mehta') &&
+      riderBWithFood.includes('Paneer Tikka Meal Boxes') &&
+      riderBWithFood.includes('Dal Makhani & Naan Combo')
     ) {
-      pass('5. Donation appeared in Rider Available Pickups with title, donor name, address & distance');
+      pass('5. Global Feed: BOTH Rider A & Rider B see food donated by BOTH Donor A & Donor B');
     } else {
-      fail('5. Donation missing from Rider Available Pickups');
+      fail('5. Global food visibility check failed for multiple donors/riders');
     }
 
-    // Step 6 & 8: Rider clicks Accept -> atomic lock + auto Google Maps navigation
+    // Step 6 & 8: Rider A clicks Accept on Donor A's Paneer Tikka -> atomic lock + auto Google Maps navigation
+    const donorAListingId = db.listings.find((l) => l.donor_id === IDS.donor)?.id;
     await riderPage.evaluate(() => {
       window.__openedUrls = [];
       window.open = (u) => {
         window.__openedUrls.push(String(u));
         return null;
       };
-      const btn = [...document.querySelectorAll('button')].find((b) => /^\s*accept\s*$/i.test(b.innerText));
+      const btn = [...document.querySelectorAll('button')].find(
+        (b) => (b.getAttribute('aria-label') || '').includes('Paneer Tikka Meal Boxes') || /^\s*accept\s*$/i.test(b.innerText)
+      );
       btn?.click();
     });
     await sleep(1200);
     const openedUrls = await riderPage.evaluate(() => window.__openedUrls || []);
     const gmapsUrl = openedUrls.find((u) => u.includes('google.com/maps/dir') && u.includes('28.5708,77.326'));
-    if (db.tasks.length === 1 && db.tasks[0].status === 'rider_assigned') {
-      pass('6. Rider accepted pickup atomically (status -> rider_assigned)');
+    if (db.tasks.length === 1 && db.tasks[0].status === 'rider_assigned' && db.tasks[0].food_listing_id === donorAListingId) {
+      pass('6. Rider A accepted Donor A pickup atomically (status -> rider_assigned)');
     } else {
-      fail('6. Rider accept failed');
+      fail('6. Rider A accept failed');
     }
 
     if (gmapsUrl) {
@@ -810,8 +897,14 @@ async function run() {
       fail(`8. Google Maps auto-open missing (opened=${JSON.stringify(openedUrls)})`);
     }
 
-    // Step 7: Competing Rider B cannot accept the same donation AND cannot read Donor-Rider chat (RLS)
-    await seedSession(riderBPage, db.profiles[IDS.riderB], '/rider-dashboard');
+    // Step 7: Competing Rider B reloads feed -> Donor A's food is GONE, Donor B's food REMAINS; Rider B & Donor B blocked from Donor A private chat & listing edit
+    await riderBPage.reload({ waitUntil: 'networkidle2', timeout: 30000 });
+    await sleep(600);
+    const riderBFeedAfterAccept = await riderBPage.evaluate(() => document.body.innerText);
+    const riderBSeesCleanFeed =
+      !riderBFeedAfterAccept.includes('Paneer Tikka Meal Boxes') &&
+      riderBFeedAfterAccept.includes('Dal Makhani & Naan Combo');
+
     const riderBAttempt = await riderBPage.evaluate(async (listingId, convId) => {
       const r1 = await fetch('https://lzyuvgbhpkiqxscqxggq.supabase.co/rest/v1/rpc/accept_donation', {
         method: 'POST',
@@ -829,20 +922,40 @@ async function run() {
         body: JSON.stringify({ p_food_listing_id: listingId }),
       });
       return { acceptStatus: r1.status, acceptBody: await r1.text(), leakedMsgs: msgs.length, convStatus: r3.status };
-    }, db.listings[0].id, db.conversations[0].id);
+    }, donorAListingId, db.conversations[0].id);
+
+    const donorBAttempt = await donorBPage.evaluate(async (listingId, convId) => {
+      const r1 = await fetch(
+        `https://lzyuvgbhpkiqxscqxggq.supabase.co/rest/v1/messages?conversation_id=eq.${convId}`,
+        { headers: { Accept: 'application/json' } }
+      );
+      const msgs = await r1.json();
+      const r2 = await fetch(
+        `https://lzyuvgbhpkiqxscqxggq.supabase.co/rest/v1/food_listings?id=eq.${listingId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Tampered' }),
+        }
+      );
+      return { leakedMsgs: msgs.length, patchStatus: r2.status };
+    }, donorAListingId, db.conversations[0].id);
 
     if (
+      riderBSeesCleanFeed &&
       riderBAttempt.acceptStatus === 400 &&
       riderBAttempt.acceptBody.includes('ALREADY_CLAIMED') &&
       riderBAttempt.leakedMsgs === 0 &&
-      riderBAttempt.convStatus === 403
+      riderBAttempt.convStatus === 403 &&
+      donorBAttempt.leakedMsgs === 0 &&
+      donorBAttempt.patchStatus === 403
     ) {
-      pass('7 & RLS. Competing rider blocked from double-accepting AND blocked from Donor-Rider private chat');
+      pass('7 & RLS. Rider B feed dropped Donor A listing (kept Donor B); competing Rider B & Donor B blocked by RLS from chat & edits');
     } else {
-      fail(`7. Competing rider security check failed: ${JSON.stringify(riderBAttempt)}`);
+      fail(`7. Competing actor security/feed check failed: ${JSON.stringify({ riderBSeesCleanFeed, riderBAttempt, donorBAttempt })}`);
     }
 
-    // Step 9: Donor receives rider assignment notification
+    // Step 9: Both Donor A and Rider A receive acceptance notifications (no duplicates)
     await donorPage.goto(`${baseUrl}/notifications`, { waitUntil: 'networkidle2', timeout: 30000 });
     await donorPage.waitForFunction(
       () => document.body.innerText.includes('Notifications'),
@@ -850,10 +963,11 @@ async function run() {
     );
     await sleep(600);
     const notifText = await donorPage.evaluate(() => document.body.innerText);
-    if (notifText.includes('Rider Accepted Your Pickup')) {
-      pass('9. Donor received Rider Assignment notification');
+    const riderAcceptNotifs = db.notifications.filter((n) => n.user_id === IDS.riderA && n.title.includes('Confirmed'));
+    if (notifText.includes('Rider Accepted Your Pickup') && riderAcceptNotifs.length === 1) {
+      pass('9. Donor A received Rider Assignment notification & Rider A received single acceptance confirmation');
     } else {
-      fail('9. Donor notification not visible');
+      fail(`9. Acceptance notification check failed (riderAcceptNotifs=${riderAcceptNotifs.length})`);
     }
 
     // Step 10: Donor and Rider message each other (Quick Message + Custom Message)
@@ -927,10 +1041,26 @@ async function run() {
     await donorPage.reload({ waitUntil: 'networkidle2', timeout: 30000 });
     await sleep(500);
     const donorFinalTrack = await donorPage.evaluate(() => document.body.innerText);
-    if (donorSawCollected && donorFinalTrack.includes('Completed ←') && db.listings[0].status === 'completed') {
+    const acceptedListing = db.listings.find((l) => l.id === donorAListingId);
+    if (donorSawCollected && donorFinalTrack.includes('Completed ←') && acceptedListing?.status === 'completed') {
       pass('12 & 14. Donor tracking & DB records reflect Food Collected -> Completed accurately');
     } else {
       fail('12 & 14. Donor final status mismatch');
+    }
+
+    // Deduplication invariant check (TEST 10)
+    const uniqueMsgIds = new Set(db.messages.map((m) => m.id));
+    const uniqueNotifIds = new Set(db.notifications.map((n) => n.id));
+    if (
+      db.listings.length === 2 &&
+      db.tasks.length === 1 &&
+      db.conversations.length === 1 &&
+      uniqueMsgIds.size === db.messages.length &&
+      uniqueNotifIds.size === db.notifications.length
+    ) {
+      pass('16 (Dedup). Zero duplicate donations, delivery tasks, conversations, messages, or notifications');
+    } else {
+      fail('16 (Dedup). Duplicate entity count detected');
     }
 
     // Verify Earnings & My Deliveries pages show accurate completed metrics (₹0 volunteer, 1 delivery, 1.4 km)

@@ -119,36 +119,41 @@ export default function CreateDonationPage() {
 
   const [step, setStep] = useState(0);
 
-  // Address, Pickup Date, and Pickup Time remain completely blank by default
-  const [form, setForm] = useState<CreateFoodListingForm>({
-    title: '',
-    description: '',
-    category: 'Rice',
-    foodType: 'veg',
-    servings: 10,
-    quantityUnit: 'servings',
-    quantityValue: 10,
-    preparationDate: '',
-    packagingType: 'sealed_boxes',
-    packagingNotes: '',
-    pickupAddress: '',
-    city: '',
-    pickupDate: '',
-    pickupTime: '',
-    contactPhone: user?.phone || '',
-    specialInstructions: '',
-    directHandover: true,
-    availableFrom: '',
-    availableUntil: '',
-    isUrgent: false,
-    storageType: 'room_temp',
-    allergens: [],
-    safetyDeclarationSigned: false,
-    latitude: undefined,
-    longitude: undefined,
-    locationAccuracyM: undefined,
-    locationCapturedAt: undefined,
-    notificationRadiusKm: 15,
+  const [form, setForm] = useState<CreateFoodListingForm>(() => {
+    const now = new Date();
+    const nowLocal = formatLocalDateTime(now);
+    const [defaultDate, defaultTime] = nowLocal.split('T');
+    const defaultUntil = formatLocalDateTime(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+    return {
+      title: '',
+      description: '',
+      category: 'Rice',
+      foodType: 'veg',
+      servings: 10,
+      quantityUnit: 'servings',
+      quantityValue: 10,
+      preparationDate: nowLocal,
+      packagingType: 'sealed_boxes',
+      packagingNotes: '',
+      pickupAddress: '',
+      city: '',
+      pickupDate: defaultDate,
+      pickupTime: defaultTime,
+      contactPhone: user?.phone || '',
+      specialInstructions: '',
+      directHandover: true,
+      availableFrom: nowLocal,
+      availableUntil: defaultUntil,
+      isUrgent: false,
+      storageType: 'room_temp',
+      allergens: [],
+      safetyDeclarationSigned: false,
+      latitude: undefined,
+      longitude: undefined,
+      locationAccuracyM: undefined,
+      locationCapturedAt: undefined,
+      notificationRadiusKm: 15,
+    };
   });
 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -1078,7 +1083,7 @@ export default function CreateDonationPage() {
                   Latest Collection Deadline (Expiry) *
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  {[2, 4, 6, 12].map((hrs) => (
+                  {[2, 4, 8, 24].map((hrs) => (
                     <button
                       key={hrs}
                       type="button"

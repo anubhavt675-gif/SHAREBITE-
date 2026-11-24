@@ -98,16 +98,41 @@ function mapListingToFood(data: any): FoodListing {
   };
 }
 
+function calculateHaversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Number((R * c).toFixed(2));
+}
+
 export const DonationService = {
   async getActiveListings(): Promise<FoodListing[]> {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('food_listings')
       .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
       .in('status', ['available', 'partially_reserved'])
       .gt('available_servings', 0)
-      .gt('available_until', new Date().toISOString())
+      .is('assigned_rider_id', null)
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(100);
+
+    if (error) {
+      const fallback = await supabase
+        .from('food_listings')
+        .select('*')
+        .in('status', ['available', 'partially_reserved'])
+        .gt('available_servings', 0)
+        .is('assigned_rider_id', null)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error || !data) {
       console.warn('Error fetching food listings:', error);
@@ -116,25 +141,27 @@ export const DonationService = {
     return data.map(mapListingToFood);
   },
 
-  async getNearbyListings(lat: number, lng: number, radiusKm: number = 25): Promise<FoodListing[]> {
-    try {
-      const { data, error } = await supabase.rpc('get_nearby_food', {
-        p_lat: lat,
-        p_lng: lng,
-        p_radius_km: radiusKm,
-      });
-
-      if (!error && Array.isArray(data)) {
-        return data.map((row: any) =>
-          mapListingToFood({
-            ...row,
-            created_at: row.created_at || new Date().toISOString(),
-            updated_at: row.updated_at || new Date().toISOString(),
-          })
-        );
+  async getNearbyListings(lat: number, lng: number, _radiusKm: number = 50): Promise<FoodListing[]> {
+    const activeListings = await DonationService.getActiveListings();
+    const withDistance = activeListings.map((item) => {
+      if (
+        typeof item.latitude === 'number' &&
+        typeof item.longitude === 'number' &&
+        !Number.isNaN(item.latitude) &&
+        !Number.isNaN(item.longitude)
+      ) {
+        return {
+          ...item,
+          distanceKm: calculateHaversineKm(lat, lng, item.latitude, item.longitude),
+        };
       }
-    } catch {}
-    return DonationService.getActiveListings();
+      return item;
+    });
+
+    return withDistance.sort((a, b) => {
+      if (a.isUrgent !== b.isUrgent) return a.isUrgent ? -1 : 1;
+      return (a.distanceKm ?? 999) - (b.distanceKm ?? 999);
+    });
   },
 
   async getListingById(id: string): Promise<FoodListing | null> {
@@ -375,7 +402,7 @@ export const DonationService = {
       });
     } catch {}
 
-    // Distance-filtered NGO notifications via NGOService
+    // Distance-filtered NGO notifications via NGOService + online Rider notifications
     if (lat !== null && lng !== null) {
       try {
         const nearbyNgos = await NGOService.getNearbyNGOs(lat, lng, radiusKm, true);
@@ -405,6 +432,48 @@ export const DonationService = {
         }
       } catch {}
     }
+
+    // Notify eligible online riders when fallback path creates a donation
+    try {
+      const { data: onlineRiders } = await supabase
+        .from('riders')
+        .select('user_id, current_lat, current_lng')
+        .eq('is_online', true);
+
+      if (onlineRiders && onlineRiders.length > 0) {
+        const riderNotifs = onlineRiders
+          .filter((r) => r.user_id && r.user_id !== safeDonorId)
+          .map((r) => {
+            const dist =
+              lat !== null &&
+              lng !== null &&
+              typeof r.current_lat === 'number' &&
+              typeof r.current_lng === 'number'
+                ? calculateHaversineKm(lat, lng, r.current_lat, r.current_lng)
+                : null;
+            return {
+              user_id: r.user_id,
+              type: 'pickup_nearby',
+              title: 'NEW FOOD DONATION AVAILABLE!',
+              message: `${form.servings} servings of "${listing.title}"${dist != null ? ` • ${dist} km away` : ''} (${listing.pickup_address || listing.city || 'Pickup ready'}).`,
+              data: {
+                opportunity_type: 'rider_pickup',
+                food_listing_id: listing.id,
+                title: listing.title,
+                image_url: imageUrl,
+                servings: form.servings,
+                distance_km: dist,
+                available_until: availableUntilIso,
+              },
+              related_food_id: listing.id,
+              action_url: '/rider-dashboard',
+            };
+          });
+        if (riderNotifs.length > 0) {
+          await supabase.from('notifications').insert(riderNotifs);
+        }
+      }
+    } catch {}
 
     return mapListingToFood(listing);
   },
@@ -517,6 +586,53 @@ export const DonationService = {
       .single();
 
     if (error || !listing) throw error || new Error('Failed to update food listing');
+
+    // Sync active delivery tasks & notify assigned rider if pickup details changed
+    try {
+      const taskUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
+      if (form.title !== undefined) taskUpdates.food_title = form.title;
+      if (form.pickupAddress !== undefined) taskUpdates.pickup_address = form.pickupAddress;
+      if (payload.latitude !== undefined) taskUpdates.pickup_lat = payload.latitude;
+      if (payload.longitude !== undefined) taskUpdates.pickup_lng = payload.longitude;
+      if (form.servings !== undefined) taskUpdates.servings_required = form.servings;
+      if (form.availableUntil !== undefined) taskUpdates.collection_deadline = form.availableUntil;
+      if (form.description !== undefined) taskUpdates.instructions = form.description;
+
+      const { data: activeTasks } = await supabase
+        .from('delivery_tasks')
+        .select('id, rider_id')
+        .eq('food_listing_id', listingId)
+        .not('status', 'in', '("cancelled","completed")');
+
+      if (activeTasks && activeTasks.length > 0) {
+        await supabase
+          .from('delivery_tasks')
+          .update(taskUpdates)
+          .eq('food_listing_id', listingId)
+          .not('status', 'in', '("cancelled","completed")');
+
+        const riderIds = activeTasks.map((t) => t.rider_id).filter(Boolean);
+        if (riderIds.length > 0) {
+          const { data: riderRows } = await supabase
+            .from('riders')
+            .select('user_id')
+            .in('id', riderIds);
+          if (riderRows && riderRows.length > 0) {
+            await supabase.from('notifications').insert(
+              riderRows.map((r) => ({
+                user_id: r.user_id,
+                type: 'system',
+                title: 'Pickup Details Updated',
+                message: `Donor updated pickup details for "${listing.title}". Please review before pickup.`,
+                related_food_id: listingId,
+                action_url: '/rider/deliveries?tab=active',
+              }))
+            );
+          }
+        }
+      }
+    } catch {}
+
     return mapListingToFood(listing);
   },
 

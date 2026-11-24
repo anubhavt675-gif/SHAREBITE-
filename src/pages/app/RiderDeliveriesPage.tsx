@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import {
   Truck, Package, MapPin, Clock, Navigation, MessageSquare,
   CheckCircle2, AlertTriangle, RefreshCw, Loader2, Phone, X, ShieldCheck
@@ -44,8 +44,12 @@ export default function RiderDeliveriesPage() {
   const { user } = useAuth();
   const userId = user?.id;
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = (searchParams.get('tab') as 'active' | 'available' | 'completed' | 'cancelled') || 'active';
+  const explicitTab = searchParams.get('tab') as 'active' | 'available' | 'completed' | 'cancelled' | null;
+  const isAvailableFoodRoute = location.pathname === '/rider/available-food';
+  const initialTab: 'active' | 'available' | 'completed' | 'cancelled' =
+    isAvailableFoodRoute ? 'available' : explicitTab || 'active';
 
   const [tab, setTab] = useState<'active' | 'available' | 'completed' | 'cancelled'>(initialTab);
   const [available, setAvailable] = useState<DeliveryTask[]>([]);
@@ -56,6 +60,7 @@ export default function RiderDeliveriesPage() {
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [riderCoords, setRiderCoords] = useState<Coordinates | null>(null);
   const riderCoordsRef = useRef<Coordinates | null>(null);
+  const hasAutoSelectedTabRef = useRef(false);
 
   // Optional OTP Modal when NGO task requires verification code
   const [codeModal, setCodeModal] = useState<{
@@ -79,11 +84,23 @@ export default function RiderDeliveriesPage() {
       ]);
       setAvailable(availList);
       setMyTasks(mineList);
+
+      if (!hasAutoSelectedTabRef.current && !explicitTab && !isAvailableFoodRoute) {
+        hasAutoSelectedTabRef.current = true;
+        const hasActive = mineList.some(
+          (t) =>
+            ['rider_assigned', 'going_to_pickup', 'arrived_at_pickup', 'food_collected', 'in_transit'].includes(t.status) ||
+            (t.status === 'delivered' && !t.ngoId)
+        );
+        if (!hasActive && availList.length > 0) {
+          setTab('available');
+        }
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId]);
+  }, [userId, explicitTab, isAvailableFoodRoute]);
 
   useEffect(() => {
     LocationService.detectCurrentGPS().then((gps) => {
@@ -416,7 +433,7 @@ export default function RiderDeliveriesPage() {
                     <div className={styles.titleRow}>
                       <h3 className={styles.foodTitle}>{task.foodTitle || 'Food Rescue Pickup'}</h3>
                       <span className={`${styles.statusBadge} ${styles[`st_${task.status}`] || ''}`}>
-                        {STATUS_LABELS[task.status] || task.status}
+                        {task.status === 'awaiting_rider' ? 'AVAILABLE' : (STATUS_LABELS[task.status] || task.status)}
                       </span>
                     </div>
 
@@ -424,7 +441,10 @@ export default function RiderDeliveriesPage() {
                       Donor: <strong>{task.donorName || 'Verified Food Donor'}</strong>
                       {' · '}
                       <Package size={13} style={{ verticalAlign: 'middle' }} />{' '}
-                      <strong>{task.servingsRequired} {task.quantityUnit}</strong>
+                      <strong>
+                        {task.quantityValue ?? task.servingsRequired} {task.quantityUnit}
+                      </strong>
+                      {` (Serves ${task.servingsRequired} people)`}
                       {task.foodType ? ` · ${task.foodType.replace('_', '-')}` : ''}
                       {distKm != null ? ` · 📍 ${distKm} km` : ''}
                     </p>
@@ -450,15 +470,25 @@ export default function RiderDeliveriesPage() {
                         <Clock size={12} />{' '}
                         {task.riderAssignedAt
                           ? `Assigned ${formatDistanceToNow(new Date(task.riderAssignedAt), { addSuffix: true })}`
+                          : task.preparationTime
+                          ? `Prepared ${new Date(task.preparationTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
                           : `Posted ${formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}`}
                       </span>
                       {task.collectionDeadline && (
                         <span>
-                          Pickup window ends {new Date(task.collectionDeadline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          Pickup deadline{' '}
+                          {new Date(task.collectionDeadline).toLocaleString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </span>
                       )}
-                      {task.instructions && (
-                        <span className={styles.instructionsNote}>Note: {task.instructions}</span>
+                      {(task.foodDescription || task.instructions) && (
+                        <span className={styles.instructionsNote}>
+                          {task.foodDescription || task.instructions}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -505,7 +535,7 @@ export default function RiderDeliveriesPage() {
                       onClick={() => handleAccept(task)}
                     >
                       {isBusy ? <Loader2 size={15} className="animate-spin" /> : <Truck size={15} />}
-                      Accept Pickup & Navigate
+                      Accept Donation
                     </button>
                   )}
 

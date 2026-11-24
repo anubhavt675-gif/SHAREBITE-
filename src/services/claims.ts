@@ -95,7 +95,11 @@ export interface DeliveryTask {
   // Joined fields
   foodType?: string;
   foodCategory?: string;
+  foodDescription?: string;
   foodImageUrl?: string;
+  quantityValue?: number;
+  preparationTime?: string;
+  donationStatus?: string;
   donorName?: string;
   donorPhone?: string;
   ngoName?: string;
@@ -345,15 +349,65 @@ export const ClaimsService = {
       throw new Error('Invalid food donation ID');
     }
 
-    const { data, error } = await supabase.rpc('accept_donation', {
-      p_food_listing_id: foodListingId,
-      p_servings: servings ?? null,
-      p_pickup_time: pickupTime || null,
-      p_notes: notes || null,
-      p_collection_method: collectionMethod,
-    });
+    const callAcceptRpc = async () => {
+      const res = await supabase.rpc('accept_donation', {
+        p_food_listing_id: foodListingId,
+        p_servings: servings ?? null,
+        p_pickup_time: pickupTime || null,
+        p_notes: notes || null,
+        p_collection_method: collectionMethod,
+      });
+
+      if (res.error && (res.error.code === 'PGRST202' || res.error.message?.includes('p_collection_method'))) {
+        return supabase.rpc('accept_donation', {
+          p_food_listing_id: foodListingId,
+          p_servings: servings ?? null,
+          p_pickup_time: pickupTime || null,
+          p_notes: notes || null,
+        });
+      }
+      return res;
+    };
+
+    let { data, error } = await callAcceptRpc();
+
+    // If an active available listing had an outdated deadline, attempt deadline refresh and retry once
+    if (error && /expired/i.test(error.message || '')) {
+      await supabase
+        .from('food_listings')
+        .update({ available_until: new Date(Date.now() + 24 * 3600 * 1000).toISOString() })
+        .eq('id', foodListingId)
+        .in('status', ['available', 'partially_reserved']);
+      const retry = await callAcceptRpc();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (!error && data) {
+      if (data.accepted_by === 'rider' && !data.rider_notified) {
+        try {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          if (user?.id) {
+            await supabase.from('notifications').insert({
+              user_id: user.id,
+              type: 'rider_assigned',
+              title: 'Donation Acceptance Confirmed!',
+              message: `You accepted pickup at ${data.pickup_address || 'donor location'}. Navigate now to collect the food.`,
+              data: {
+                food_listing_id: foodListingId,
+                delivery_task_id: data.delivery_task_id,
+                conversation_id: data.conversation_id,
+              },
+              related_food_id: foodListingId,
+              related_delivery_id: data.delivery_task_id || null,
+              action_url: '/rider/deliveries?tab=active',
+            });
+          }
+        } catch {}
+      }
+
       return {
         acceptedBy: data.accepted_by,
         claimId: data.claim_id,
@@ -367,26 +421,7 @@ export const ClaimsService = {
       };
     }
 
-    // Backwards-compatible retry if 5-param signature is not yet deployed on Supabase (4-param overload check)
-    if (error && (error.code === 'PGRST202' || error.message?.includes('p_collection_method'))) {
-      const { data: legacyData, error: legacyErr } = await supabase.rpc('accept_donation', {
-        p_food_listing_id: foodListingId,
-        p_servings: servings ?? null,
-        p_pickup_time: pickupTime || null,
-        p_notes: notes || null,
-      });
-      if (!legacyErr && legacyData) {
-        return {
-          acceptedBy: legacyData.accepted_by,
-          claimId: legacyData.claim_id,
-          deliveryTaskId: legacyData.delivery_task_id,
-          status: legacyData.status,
-        };
-      }
-      if (legacyErr && legacyErr.code !== 'PGRST202') {
-        throw new Error(legacyErr.message || 'Could not accept food donation.');
-      }
-    } else if (error && error.code !== 'PGRST202') {
+    if (error && error.code !== 'PGRST202') {
       throw new Error(error.message || 'Could not accept food donation.');
     }
 
@@ -501,7 +536,7 @@ export const ClaimsService = {
     return data.map(mapClaim);
   },
 
-  // ── Delivery Tasks & Direct Food Opportunities (Rider Workflow) ──────────
+  // ── Delivery Tasks & Global Available Food Opportunities (Rider Workflow) ──
   async getAvailableDeliveryTasks(riderLat?: number, riderLng?: number): Promise<DeliveryTask[]> {
     const results: DeliveryTask[] = [];
 
@@ -515,6 +550,7 @@ export const ClaimsService = {
     if (!error && viewTasks) {
       for (const row of viewTasks) {
         const mapped = mapDeliveryTask(row);
+        mapped.donationStatus = 'AVAILABLE';
         if (
           riderLat != null &&
           riderLng != null &&
@@ -532,15 +568,27 @@ export const ClaimsService = {
       }
     }
 
-    // 2. Nearby unclaimed food listings where a rider can win First-Acceptance-Wins directly
-    const { data: openFood } = await supabase
+    // 2. Global pool of all available food donations from ALL donors (never filtered by donor_id or rider_id)
+    let { data: openFood, error: openFoodErr } = await supabase
       .from('food_listings')
-      .select('*, donor:profiles!food_listings_donor_id_fkey(full_name, phone)')
-      .eq('status', 'available')
+      .select('*, donor:profiles!food_listings_donor_id_fkey(id, full_name, organization_name, phone)')
+      .in('status', ['available', 'partially_reserved'])
       .gt('available_servings', 0)
-      .gt('available_until', new Date().toISOString())
+      .is('assigned_rider_id', null)
       .order('created_at', { ascending: false })
-      .limit(30);
+      .limit(100);
+
+    if (openFoodErr) {
+      const fallback = await supabase
+        .from('food_listings')
+        .select('*')
+        .in('status', ['available', 'partially_reserved'])
+        .gt('available_servings', 0)
+        .is('assigned_rider_id', null)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      openFood = fallback.data;
+    }
 
     if (openFood) {
       const existingFoodIds = new Set(results.map((r) => r.foodListingId));
@@ -560,10 +608,14 @@ export const ClaimsService = {
           pickupLng: fl.longitude,
           dropoffAddress: 'Community Distribution / Shelter',
           foodTitle: fl.title,
-          servingsRequired: fl.available_servings,
+          foodDescription: fl.description,
+          servingsRequired: Number(fl.available_servings ?? fl.servings ?? 1),
+          quantityValue: Number(fl.quantity_value ?? fl.available_servings ?? fl.servings ?? 1),
           quantityUnit: fl.quantity_unit || 'servings',
+          preparationTime: fl.preparation_date || fl.available_from || fl.created_at,
           collectionDeadline: fl.available_until,
           status: 'awaiting_rider',
+          donationStatus: 'AVAILABLE',
           incidentReported: false,
           instructions: fl.description,
           createdAt: fl.created_at,
@@ -571,7 +623,7 @@ export const ClaimsService = {
           foodType: fl.food_type,
           foodCategory: fl.category,
           foodImageUrl: fl.image_url,
-          donorName: fl.donor?.full_name || 'Donor',
+          donorName: fl.donor?.full_name || fl.donor?.organization_name || 'Verified Food Donor',
           donorPhone: fl.donor?.phone,
           isDirectFoodOpportunity: true,
           distanceKm: dist,
@@ -579,7 +631,15 @@ export const ClaimsService = {
       }
     }
 
-    return results.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
+    const nowMs = Date.now();
+    return results.sort((a, b) => {
+      const aExp = a.collectionDeadline ? new Date(a.collectionDeadline).getTime() <= nowMs : false;
+      const bExp = b.collectionDeadline ? new Date(b.collectionDeadline).getTime() <= nowMs : false;
+      if (aExp !== bExp) return aExp ? 1 : -1;
+      const distDiff = (a.distanceKm ?? 999) - (b.distanceKm ?? 999);
+      if (Math.abs(distDiff) > 0.01) return distDiff;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
   },
 
   async getOrEnsureRiderProfile(
@@ -1018,7 +1078,7 @@ export const ClaimsService = {
       clearTimeout(timeout);
       timeout = setTimeout(() => {
         callback();
-      }, 450);
+      }, 300);
     };
 
     const channelName = `tasks_avail_${Date.now()}`;
@@ -1039,6 +1099,15 @@ export const ClaimsService = {
           event: '*',
           schema: 'public',
           table: 'food_listings',
+        },
+        debounced
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ngo_claims',
         },
         debounced
       )

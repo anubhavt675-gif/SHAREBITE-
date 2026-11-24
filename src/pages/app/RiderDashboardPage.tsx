@@ -450,7 +450,7 @@ export default function RiderDashboardPage() {
             </div>
           ) : (
             <div className={styles.pickupList}>
-              {availableTasks.slice(0, 5).map((item) => {
+              {availableTasks.slice(0, 20).map((item) => {
                 const distKm =
                   riderCoords && item.pickupLat != null && item.pickupLng != null
                     ? LocationService.calculateDistance(
@@ -476,9 +476,24 @@ export default function RiderDashboardPage() {
                     </div>
 
                     <div className={styles.pickupDetails}>
-                      <h3 className={styles.pickupName} title={donorTitle}>
-                        {donorTitle}
-                      </h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <h3 className={styles.pickupName} title={donorTitle} style={{ margin: 0 }}>
+                          {donorTitle}
+                        </h3>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: '#15803D',
+                            background: '#DCFCE7',
+                            padding: '2px 7px',
+                            borderRadius: 999,
+                            letterSpacing: 0.4,
+                          }}
+                        >
+                          {item.donationStatus || 'AVAILABLE'}
+                        </span>
+                      </div>
                       <p className={styles.pickupMetaLine}>
                         <MapPin size={12} color="#64748b" />
                         <span>
@@ -489,15 +504,19 @@ export default function RiderDashboardPage() {
                       <p className={styles.pickupMetaLine}>
                         <Clock size={12} color="#64748b" />
                         <span>
-                          {formatPickupWindow(item.collectionDeadline, item.createdAt)} ·{' '}
+                          {formatPickupWindow(item.collectionDeadline, item.createdAt)}
+                          {item.preparationTime
+                            ? ` · Prep ${new Date(item.preparationTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                            : ''}{' '}
+                          ·{' '}
                           <strong>
-                            {item.servingsRequired} {item.quantityUnit}
+                            Serves {item.servingsRequired} {item.quantityUnit}
                           </strong>
                         </span>
                       </p>
-                      {item.instructions && (
-                        <p className={styles.pickupInstruction} title={item.instructions}>
-                          {item.instructions}
+                      {(item.foodDescription || item.instructions) && (
+                        <p className={styles.pickupInstruction} title={item.foodDescription || item.instructions}>
+                          {item.foodDescription || item.instructions}
                         </p>
                       )}
                     </div>
@@ -505,11 +524,12 @@ export default function RiderDashboardPage() {
                     <button
                       type="button"
                       className={styles.acceptBtn}
+                      aria-label={`Accept Donation ${item.foodTitle || ''}`}
                       disabled={isAccepting || Boolean(activeTask)}
                       title={
                         activeTask
                           ? 'Complete your active delivery before accepting another'
-                          : 'Accept pickup & launch Google Maps navigation'
+                          : 'Accept donation & launch Google Maps navigation'
                       }
                       onClick={() => handleAcceptPickup(item)}
                     >

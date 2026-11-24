@@ -62,7 +62,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
       for (const row of donorDashboardRows) {
         if (
           row.delivery_task_id &&
-          ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(row.delivery_status)
+          ['rider_assigned', 'going_to_pickup', 'arrived_at_pickup', 'food_collected', 'in_transit', 'delivered'].includes(row.delivery_status)
         ) {
           liveTasks.push({
             id: row.delivery_task_id,
@@ -134,8 +134,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
       return;
     }
     try {
-      const conv = await ChatService.getOrCreateDirectConversation(userId, recipientId, {
-        type: 'delivery',
+      const conv = await ChatService.openDeliveryConversation(userId, recipientId, {
         relatedListingId: task.foodListingId,
         relatedTaskId: task.id,
         title: task.foodTitle || 'Pickup Coordination',
@@ -254,11 +253,13 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
             const isCollected = ['food_collected', 'in_transit', 'delivered'].includes(task.status);
             const statusLabel =
               task.status === 'delivered'
-                ? 'Delivered to NGO'
+                ? 'Delivered to Destination'
                 : task.status === 'in_transit' || task.status === 'food_collected'
-                ? 'In Transit to NGO'
+                ? 'Food Collected — In Transit'
+                : task.status === 'arrived_at_pickup'
+                ? 'Rider Arrived at Pickup Location'
                 : task.status === 'going_to_pickup'
-                ? 'Rider Arriving for Pickup'
+                ? 'Rider On the Way for Pickup'
                 : 'Rider Assigned — Heading to Pickup';
 
             return (

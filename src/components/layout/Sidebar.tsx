@@ -46,15 +46,31 @@ export default function Sidebar({ open, onClose }: Props) {
             matchPaths: ['/rider-dashboard', '/rider/dashboard'],
           },
           {
+            to: '/rider/available-food',
+            icon: <Utensils size={18} />,
+            label: 'Available Food',
+            matchPaths: ['/rider/available-food'],
+          },
+          {
             to: '/rider/deliveries',
             icon: <Truck size={18} />,
             label: 'My Deliveries',
-            matchPaths: ['/rider/deliveries', '/rider/available-food'],
+            matchPaths: ['/rider/deliveries'],
           },
           {
             to: '/rider/earnings',
             icon: <Wallet size={18} />,
             label: 'Earnings',
+          },
+          {
+            to: '/chat',
+            icon: <MessageSquare size={18} />,
+            label: 'Messages',
+          },
+          {
+            to: '/notifications',
+            icon: <ClipboardList size={18} />,
+            label: 'Notifications',
           },
           {
             to: '/profile',
