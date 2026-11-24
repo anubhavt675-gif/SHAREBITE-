@@ -20,28 +20,28 @@ export default function DiscoverFoodItem({
 }: Props) {
   const [isFavorited, setIsFavorited] = useState(false);
 
-  // Fallback defaults for missing fields to match the screenshot
+  // Real derived values from Supabase listing (never hardcoded dummy distances or times)
   const isExpiring = listing.isUrgent;
-  const distance = listing.distanceKm != null ? `${listing.distanceKm} km` : '1.8 km';
-  const estMins = listing.distanceKm != null ? Math.max(3, Math.round(listing.distanceKm * 2.8)) : 5;
-  const mealsCount = listing.availableServings || listing.servings || 20;
-  const approxKg = Math.round(mealsCount * 0.4) || 10;
+  const distance = listing.distanceKm != null ? `${listing.distanceKm} km` : null;
+  const estMins = listing.distanceKm != null ? Math.max(3, Math.round(listing.distanceKm * 2.8)) : null;
+  const mealsCount = listing.availableServings ?? listing.servings ?? 0;
+  const approxKg = mealsCount > 0 ? Math.max(1, Math.round(mealsCount * 0.25)) : 0;
 
-  // Donor type / Source (Restaurant, Hostel, Café, Caterer, etc.)
   const donorType =
-    (listing as any).donorType ||
-    (listing.category === 'cooked_meals' ? 'Restaurant' :
-     listing.category === 'bakery' ? 'Café' :
-     listing.category === 'fruits_veg' ? 'Hostel' : 'Caterer');
+    listing.donor?.organizationName ||
+    listing.donor?.name ||
+    'Food Donor';
 
-  // Format availability window
-  const timeWindow = (listing as any).pickupWindow || 'Today, 6:00 PM - 8:00 PM';
+  const timeWindow = listing.availableUntil
+    ? `Until ${new Date(listing.availableUntil).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`
+    : 'Available now';
 
-  // Category tag
-  const categoryTag =
-    listing.category === 'cooked_meals' ? 'Cooked' :
-    listing.category === 'fruits_veg' ? 'Raw' :
-    listing.category === 'bakery' ? 'Bakery' : 'Packaged';
+  const categoryTag = listing.category ? listing.category.replace(/_/g, ' ') : 'Food';
 
   return (
     <div
@@ -92,11 +92,13 @@ export default function DiscoverFoodItem({
           <span>{donorType}</span>
         </div>
 
-        {/* Distance + Drive Time */}
+        {/* Distance / City + Drive Time */}
         <div className={styles.metaRow}>
           <MapPin size={13} />
           <span>
-            {distance} (approx. {estMins} mins)
+            {distance && estMins != null
+              ? `${distance} (approx. ${estMins} mins)`
+              : listing.city || listing.pickupAddress || 'Location set on map'}
           </span>
         </div>
 

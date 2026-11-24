@@ -1,6 +1,6 @@
 // ShareBite — Donations / Food Listings Service (Web)
 import { supabase } from '../lib/supabase';
-import { isValidUUID, toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
+import { isValidUUID } from '../lib/uuid';
 import { NGOService } from './ngo';
 import type {
   FoodListing,
@@ -8,6 +8,52 @@ import type {
   CreateFoodListingForm,
   DonationStatusHistoryItem,
 } from '../types';
+
+async function compressFoodImage(file: File): Promise<File> {
+  if (typeof document === 'undefined' || !file.type.startsWith('image/')) {
+    return file;
+  }
+  // Skip small files (< 300 KB) to preserve original crisp quality
+  if (file.size <= 300 * 1024) return file;
+
+  try {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Failed to read image'));
+      reader.readAsDataURL(file);
+    });
+
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Invalid image file'));
+      el.src = dataUrl;
+    });
+
+    const maxDim = 1200;
+    const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+    const width = Math.max(1, Math.round(img.width * scale));
+    const height = Math.max(1, Math.round(img.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, width, height);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.82)
+    );
+    if (!blob || blob.size >= file.size) return file;
+
+    const cleanName = file.name.replace(/\.[^.]+$/, '') || 'food-photo';
+    return new File([blob], `${cleanName}.jpg`, { type: 'image/jpeg' });
+  } catch {
+    return file;
+  }
+}
 
 function mapListingToFood(data: any): FoodListing {
   const donorData = data.donor;
@@ -164,29 +210,21 @@ export const DonationService = {
 
     let imageUrl: string | null = null;
     if (form.imageFile) {
-      try {
-        const ext = form.imageFile.name.split('.').pop() || 'jpg';
-        const filename = `${safeDonorId}/${Date.now()}.${ext}`;
-        const { error: uploadErr } = await supabase.storage
-          .from('food-images')
-          .upload(filename, form.imageFile, { upsert: true });
+      const uploadFile = await compressFoodImage(form.imageFile);
+      const ext = uploadFile.name.split('.').pop() || 'jpg';
+      const filename = `${safeDonorId}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('food-images')
+        .upload(filename, uploadFile, { upsert: true, contentType: uploadFile.type || 'image/jpeg' });
 
-        if (!uploadErr) {
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from('food-images').getPublicUrl(filename);
-          imageUrl = publicUrl;
-        } else {
-          // Graceful preview encoding only when storage bucket isn't yet provisioned
-          imageUrl = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.readAsDataURL(form.imageFile!);
-          });
-        }
-      } catch (err) {
-        console.warn('Image storage handling error:', err);
+      if (uploadErr) {
+        throw new Error(`Food image upload failed: ${uploadErr.message}. Please retry or publish without a photo.`);
       }
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('food-images').getPublicUrl(filename);
+      imageUrl = publicUrl;
     }
 
     const extraNotes: string[] = [];
@@ -244,6 +282,15 @@ export const DonationService = {
 
       if (!rpcErr && rpcData?.listing) {
         return mapListingToFood(rpcData.listing);
+      }
+
+      if (!rpcErr && rpcData?.food_listing_id) {
+        const { data: fetched } = await supabase
+          .from('food_listings')
+          .select('*, donor:profiles!food_listings_donor_id_fkey(*)')
+          .eq('id', rpcData.food_listing_id)
+          .maybeSingle();
+        if (fetched) return mapListingToFood(fetched);
       }
 
       if (rpcErr && rpcErr.code !== 'PGRST202') {
@@ -424,22 +471,21 @@ export const DonationService = {
     if (form.allergens !== undefined) payload.allergens = form.allergens;
 
     if (form.imageFile) {
-      try {
-        const ext = form.imageFile.name.split('.').pop() || 'jpg';
-        const filename = `updates/${listingId}_${Date.now()}.${ext}`;
-        const { error: uploadErr } = await supabase.storage
-          .from('food-images')
-          .upload(filename, form.imageFile, { upsert: true });
+      const uploadFile = await compressFoodImage(form.imageFile);
+      const ext = uploadFile.name.split('.').pop() || 'jpg';
+      const filename = `updates/${listingId}_${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('food-images')
+        .upload(filename, uploadFile, { upsert: true, contentType: uploadFile.type || 'image/jpeg' });
 
-        if (!uploadErr) {
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from('food-images').getPublicUrl(filename);
-          payload.image_url = publicUrl;
-        }
-      } catch (err) {
-        console.warn('Image storage handling error:', err);
+      if (uploadErr) {
+        throw new Error(`Updated photo upload failed: ${uploadErr.message}`);
       }
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('food-images').getPublicUrl(filename);
+      payload.image_url = publicUrl;
     }
 
     const { data: listing, error } = await supabase
@@ -481,11 +527,11 @@ export const DonationService = {
   },
 
   async getMyReservations(userId: string) {
-    const safeUserId = toSafeUUID(userId, DEMO_RECORD_UUIDS.donor);
+    if (!isValidUUID(userId)) return [];
     const { data, error } = await supabase
       .from('reservations')
       .select('*, food_listing:food_listings(*, donor:profiles!food_listings_donor_id_fkey(*))')
-      .eq('user_id', safeUserId)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
     if (error || !data) return [];

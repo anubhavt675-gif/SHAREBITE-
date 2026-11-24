@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Package, Truck, CheckCircle, X, MapPin, Clock,
   Users, Loader2, RefreshCw, ChevronDown, ChevronUp,
-  ShieldCheck, PieChart, MessageSquare, LocateFixed
+  ShieldCheck, PieChart, MessageSquare, LocateFixed, Navigation
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ClaimsService, type NgoClaim, type DistributionRecord } from '../../services/claims';
@@ -45,13 +45,20 @@ function ReceiptConfirmModal({ claim, onClose, onSuccess }: ReceiptModalProps) {
   const [error, setError] = useState('');
 
   const submit = async () => {
-    if (!claim.deliveryTaskId) { setError('No delivery task found for this claim'); return; }
+    if (!claim.deliveryTaskId && !claim.id) {
+      setError('No claim or delivery reference found');
+      return;
+    }
     setError('');
     setLoading(true);
     try {
       await ClaimsService.confirmNgoReceipt(
-        claim.deliveryTaskId, quantity, conditionNotes || undefined,
-        safetyConcern, safetyNotes || undefined
+        claim.deliveryTaskId,
+        quantity,
+        conditionNotes || undefined,
+        safetyConcern,
+        safetyNotes || undefined,
+        claim.id
       );
       onSuccess();
       onClose();
@@ -335,9 +342,28 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
     }
   };
 
+  const isDirectPickup = !claim.deliveryTaskId && claim.collectionMethod === 'direct_ngo_pickup';
+
+  const handleConfirmDirectPickup = async () => {
+    setError('');
+    setCancelling(true);
+    try {
+      await ClaimsService.ngoConfirmPickup(claim.id, claim.servingsClaimed);
+      onRefresh();
+    } catch (e: any) {
+      setError(e.message || 'Failed to confirm pickup');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const canCancel = ['pending', 'confirmed', 'awaiting_rider'].includes(claim.status);
-  const needsDeliveryTask = claim.status === 'confirmed' && !claim.deliveryTaskId;
-  const canConfirmReceipt = ['delivered', 'food_collected', 'in_transit'].includes(claim.deliveryStatus || '') && !claim.distributionRecordId;
+  const canNgoDirectPickup = isDirectPickup && claim.status === 'confirmed';
+  const needsDeliveryTask = (claim.status === 'confirmed' || claim.status === 'awaiting_rider') && !claim.deliveryTaskId;
+  const canConfirmReceipt =
+    !claim.distributionRecordId &&
+    (['delivered', 'food_collected', 'in_transit'].includes(claim.deliveryStatus || '') ||
+      (isDirectPickup && ['food_collected', 'confirmed'].includes(claim.status)));
   const deadline = claim.availableUntil
     ? formatDistanceToNow(new Date(claim.availableUntil), { addSuffix: true })
     : '';
@@ -398,11 +424,12 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
         )}
       </div>
 
-      {/* Live Rider Tracking Map when rider is assigned */}
-      {claim.deliveryTaskId && ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(claim.deliveryStatus || '') && (
+      {/* Live Map: either Rider Live Tracking OR Direct NGO Pickup Donor Navigation */}
+      {((claim.deliveryTaskId && ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(claim.deliveryStatus || '')) ||
+        (isDirectPickup && ['confirmed', 'food_collected'].includes(claim.status) && claim.pickupLat && claim.pickupLng)) && (
         <LiveTrackingMap
-          deliveryTaskId={claim.deliveryTaskId}
-          taskStatus={claim.deliveryStatus || 'rider_assigned'}
+          deliveryTaskId={claim.deliveryTaskId || ''}
+          taskStatus={claim.deliveryStatus || claim.status}
           pickupLat={claim.pickupLat}
           pickupLng={claim.pickupLng}
           pickupLabel={claim.pickupAddress || claim.donorName || 'Donor Pickup'}
@@ -427,8 +454,26 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
       {error && <div className={styles.errorMsg}>{error}</div>}
 
       <div className={styles.actionsRow}>
+        {isDirectPickup && ['confirmed', 'food_collected'].includes(claim.status) && claim.pickupLat && claim.pickupLng && (
+          <a
+            href={`https://www.google.com/maps/dir/?api=1&destination=${claim.pickupLat},${claim.pickupLng}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${styles.btn} ${styles.btnOutline}`}
+            style={{ textDecoration: 'none', borderColor: '#ea580c', color: '#ea580c' }}
+          >
+            <Navigation size={14} /> Navigate to Donor
+          </a>
+        )}
+
+        {canNgoDirectPickup && (
+          <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={handleConfirmDirectPickup} disabled={cancelling}>
+            <CheckCircle size={14} /> Confirm Direct Pickup
+          </button>
+        )}
+
         {needsDeliveryTask && (
-          <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={handleRequestDelivery}>
+          <button className={`${styles.btn} ${isDirectPickup ? styles.btnOutline : styles.btnPrimary}`} onClick={handleRequestDelivery}>
             <Truck size={14} /> Request Rider
           </button>
         )}
@@ -640,7 +685,7 @@ export default function NGOClaimsDashboard() {
         </div>
       ) : (
         displayClaims.map(claim => (
-          <ClaimCard key={claim.id} claim={claim} userId={userId} onRefresh={fetchClaims} />
+          <ClaimCard key={claim.id} claim={claim} userId={userId} onRefresh={() => fetchClaims(true)} />
         ))
       )}
     </div>

@@ -11,13 +11,24 @@ import rstyles from './RequestsPage.module.css';
 
 export default function RequestsPage() {
   const { user } = useAuth();
+  const userId = user?.id;
   const [reservations, setReservations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
-    DonationService.getMyReservations(user.id).then(setReservations).finally(() => setLoading(false));
-  }, [user]);
+    if (!userId) return;
+    let active = true;
+    DonationService.getMyReservations(userId)
+      .then((list) => {
+        if (active) setReservations(list);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
 
   const handleUpdate = async (id: string, status: string) => {
     await DonationService.updateReservationStatus(id, status);

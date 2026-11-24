@@ -198,18 +198,27 @@ function AppRoutes() {
 
             {/* Role 1: Food Donor Experience */}
             <Route path="/donor-dashboard" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'household', 'admin']}><DonorDashboardPage /></RoleRouteGuard>} />
+            <Route path="/donor/dashboard" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'household', 'admin']}><DonorDashboardPage /></RoleRouteGuard>} />
             <Route path="/donations/new" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'household', 'admin']}><CreateDonationPage /></RoleRouteGuard>} />
+            <Route path="/donor/donate" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'household', 'admin']}><CreateDonationPage /></RoleRouteGuard>} />
             <Route path="/donations/:id/edit" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'household', 'admin']}><CreateDonationPage /></RoleRouteGuard>} />
             <Route path="/donor-donations" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'household', 'admin']}><DonorDonationsStatus /></RoleRouteGuard>} />
+            <Route path="/donor/my-donations" element={<RoleRouteGuard allowedRoles={['donor', 'partner', 'household', 'admin']}><DonorDonationsStatus /></RoleRouteGuard>} />
             <Route path="/donations" element={<DonationsPage />} />
             <Route path="/donations/:id" element={<DonationDetailPage />} />
 
             {/* Role 2: Logistics / Delivery Rider Experience */}
             <Route path="/rider-dashboard" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDashboardPage /></RoleRouteGuard>} />
+            <Route path="/rider/dashboard" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDashboardPage /></RoleRouteGuard>} />
+            <Route path="/rider/available-food" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDashboardPage /></RoleRouteGuard>} />
+            <Route path="/rider/deliveries" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDashboardPage /></RoleRouteGuard>} />
 
             {/* Role 3: NGO / Community Acceptor Experience */}
             <Route path="/my-claims" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
             <Route path="/ngo-dashboard" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
+            <Route path="/ngo/dashboard" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
+            <Route path="/ngo/collections" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
+            <Route path="/ngo/available-food" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><DiscoverPage /></RoleRouteGuard>} />
 
             {/* Role 4: Beneficiary / Community Member Experience */}
             <Route path="/community-dashboard" element={<RoleRouteGuard allowedRoles={['community', 'admin']}><BeneficiaryDashboardPage /></RoleRouteGuard>} />

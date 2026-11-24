@@ -98,27 +98,30 @@ export default function LiveTrackingMap({
   const targetLat = headingToDropoff && hasDropoff ? dropoffLat! : hasPickup ? pickupLat! : null;
   const targetLng = headingToDropoff && hasDropoff ? dropoffLng! : hasPickup ? pickupLng! : null;
 
+  const pickupPosLat = riderLoc?.latitude ?? (hasPickup ? pickupLat! : null);
+  const pickupPosLng = riderLoc?.longitude ?? (hasPickup ? pickupLng! : null);
+  const destLat = riderLoc ? targetLat : hasDropoff ? dropoffLat! : null;
+  const destLng = riderLoc ? targetLng : hasDropoff ? dropoffLng! : null;
+  const canComputeRoute =
+    pickupPosLat != null && pickupPosLng != null && destLat != null && destLng != null;
+
   // 2. Fetch real road route polyline between rider (or pickup) and destination
   useEffect(() => {
-    let active = true;
-    const fromLat = riderLoc?.latitude ?? (hasPickup ? pickupLat! : null);
-    const fromLng = riderLoc?.longitude ?? (hasPickup ? pickupLng! : null);
-    const toLat = riderLoc ? targetLat : hasDropoff ? dropoffLat! : null;
-    const toLng = riderLoc ? targetLng : hasDropoff ? dropoffLng! : null;
-
-    if (fromLat == null || fromLng == null || toLat == null || toLng == null) {
-      setRoute(null);
+    if (!canComputeRoute || pickupPosLat == null || pickupPosLng == null || destLat == null || destLng == null) {
       return;
     }
+    let active = true;
 
-    LocationService.fetchRoadRoute(fromLat, fromLng, toLat, toLng).then((res) => {
+    LocationService.fetchRoadRoute(pickupPosLat, pickupPosLng, destLat, destLng).then((res) => {
       if (active) setRoute(res);
     });
 
     return () => {
       active = false;
     };
-  }, [riderLoc?.latitude, riderLoc?.longitude, targetLat, targetLng, hasPickup, hasDropoff, pickupLat, pickupLng, dropoffLat, dropoffLng]);
+  }, [canComputeRoute, pickupPosLat, pickupPosLng, destLat, destLng]);
+
+  const effectiveRoute = canComputeRoute ? route : null;
 
   const points = useMemo<[number, number][]>(() => {
     const pts: [number, number][] = [];
@@ -148,12 +151,17 @@ export default function LiveTrackingMap({
             <span>
               <strong style={{ color: '#16a34a' }}>Live GPS</strong> · Updated{' '}
               {formatDistanceToNow(new Date(riderLoc.recordedAt), { addSuffix: true })}
-              {route ? ` · ${route.distanceKm} km (~${route.durationMin} mins)` : ''}
+              {effectiveRoute ? ` · ${effectiveRoute.distanceKm} km (~${effectiveRoute.durationMin} mins)` : ''}
             </span>
-          ) : (
+          ) : deliveryTaskId ? (
             <span style={{ color: '#92400e' }}>
               Waiting for rider&apos;s live GPS signal
-              {route ? ` · Route ${route.distanceKm} km (~${route.durationMin} mins)` : ''}
+              {effectiveRoute ? ` · Route ${effectiveRoute.distanceKm} km (~${effectiveRoute.durationMin} mins)` : ''}
+            </span>
+          ) : (
+            <span style={{ color: '#15803d' }}>
+              <strong>Pickup Route Ready</strong>
+              {effectiveRoute ? ` · ${effectiveRoute.distanceKm} km (~${effectiveRoute.durationMin} mins)` : ''}
             </span>
           )}
         </div>
@@ -203,10 +211,10 @@ export default function LiveTrackingMap({
             </Marker>
           )}
 
-          {route && route.coordinates.length >= 2 && (
+          {effectiveRoute && effectiveRoute.coordinates.length >= 2 && (
             <Polyline
-              positions={route.coordinates}
-              pathOptions={{ color: '#ea580c', weight: 4, opacity: 0.85, dashArray: route.isRoadRoute ? undefined : '6, 8' }}
+              positions={effectiveRoute.coordinates}
+              pathOptions={{ color: '#ea580c', weight: 4, opacity: 0.85, dashArray: effectiveRoute.isRoadRoute ? undefined : '6, 8' }}
             />
           )}
         </MapContainer>

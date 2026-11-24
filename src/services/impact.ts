@@ -1,6 +1,6 @@
 // ShareBite — Impact Service (Web)
 import { supabase } from '../lib/supabase';
-import { toSafeUUID, DEMO_RECORD_UUIDS } from '../lib/uuid';
+import { isValidUUID } from '../lib/uuid';
 import type { ImpactStats, CommunityImpact } from '../types';
 
 let communityImpactCache: { data: CommunityImpact; timestamp: number } | null = null;
@@ -8,7 +8,10 @@ const CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes cache
 
 export const ImpactService = {
   async getUserImpact(userId: string, role: string): Promise<ImpactStats> {
-    const safeUserId = toSafeUUID(userId, role === 'ngo' ? DEMO_RECORD_UUIDS.ngo : DEMO_RECORD_UUIDS.donor);
+    if (!isValidUUID(userId)) {
+      return { mealsSaved: 0, foodRedistributedKg: 0, co2SavedKg: 0, peopleReached: 0, wastePreventedKg: 0, donationsCount: 0, claimsCount: 0 };
+    }
+    const safeUserId = userId;
 
     try {
       const { data: viewData } = await supabase
@@ -95,7 +98,7 @@ export const ImpactService = {
           return parsed.data;
         }
       }
-    } catch {}
+    } catch { }
 
     try {
       // Execute all 5 queries concurrently in parallel
@@ -130,7 +133,7 @@ export const ImpactService = {
       communityImpactCache = { data: impactData, timestamp: Date.now() };
       try {
         sessionStorage.setItem('sharebite_community_impact', JSON.stringify({ data: impactData, timestamp: Date.now() }));
-      } catch {}
+      } catch { }
 
       return impactData;
     } catch {

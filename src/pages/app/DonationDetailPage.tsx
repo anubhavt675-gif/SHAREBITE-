@@ -1,10 +1,13 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { MapPin, Clock, Users, CheckCircle, ArrowLeft, Utensils, AlertTriangle, ShieldAlert, ArrowRight, Edit } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { MapPin, Clock, Users, CheckCircle, ArrowLeft, Utensils, AlertTriangle, ShieldAlert, ArrowRight, Edit, Truck, Navigation } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
+import { normalizeRole } from '../../services/auth';
 import { DonationService } from '../../services/donations';
 import { ClaimsService } from '../../services/claims';
+import { supabase } from '../../lib/supabase';
+import LiveTrackingMap from '../../components/map/LiveTrackingMap';
 import { PageLoader } from '../../components/states/LoadingState';
 import { EmptyState } from '../../components/states/EmptyState';
 import type { FoodListing, DonationStatusHistoryItem } from '../../types';
@@ -14,48 +17,96 @@ export default function DonationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const claimPanelRef = useRef<HTMLDivElement>(null);
+
   const [listing, setListing] = useState<FoodListing | null>(null);
   const [history, setHistory] = useState<DonationStatusHistoryItem[]>([]);
+  const [activeTask, setActiveTask] = useState<any>(null);
+  const [isParticipant, setIsParticipant] = useState(false);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [claimed, setClaimed] = useState(false);
   const [claimResultRole, setClaimResultRole] = useState<'ngo' | 'rider'>('ngo');
+  const [claimMethod, setClaimMethod] = useState<'direct_ngo_pickup' | 'ngo_delivery'>('direct_ngo_pickup');
   const [claimServings, setClaimServings] = useState(1);
   const [claimNotes, setClaimNotes] = useState('');
   const [error, setError] = useState('');
 
+  const userId = user?.id;
+  const canonicalRole = normalizeRole(user?.role);
+
   const fetchListing = useCallback(() => {
-    if (!id) return;
-    Promise.all([
+    if (!id) return Promise.resolve();
+    return Promise.all([
       DonationService.getListingById(id),
       DonationService.getStatusHistory(id),
+      supabase
+        .from('delivery_tasks')
+        .select('*')
+        .eq('food_listing_id', id)
+        .neq('status', 'cancelled')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      userId
+        ? supabase
+            .from('ngo_claims')
+            .select('id, ngo_id')
+            .eq('food_listing_id', id)
+            .eq('ngo_id', userId)
+            .neq('status', 'cancelled')
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
     ])
-      .then(([data, hist]) => {
+      .then(([data, hist, taskRes, claimRes]) => {
         setListing(data);
         setHistory(hist);
+        const taskRow = (taskRes as any)?.data || null;
+        setActiveTask(taskRow);
+        const userHasClaim = !!(claimRes as any)?.data;
+        const isAssignedParticipant =
+          userHasClaim ||
+          (taskRow && userId && (taskRow.donor_id === userId || taskRow.ngo_id === userId));
+        setIsParticipant(!!isAssignedParticipant);
         if (data && data.availableServings > 0) {
           setClaimServings(data.availableServings);
         }
       })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, userId]);
 
   useEffect(() => {
-    fetchListing();
+    void fetchListing();
   }, [fetchListing]);
 
-  const handleClaim = async () => {
+  useEffect(() => {
+    if (!loading && searchParams.get('action') === 'claim' && claimPanelRef.current) {
+      claimPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [loading, searchParams]);
+
+  const handleClaim = async (methodOverride?: 'direct_ngo_pickup' | 'ngo_delivery') => {
     if (!listing || !user) return;
+    const chosenMethod = methodOverride || claimMethod;
+    setClaimMethod(chosenMethod);
     setClaiming(true);
     setError('');
     try {
-      const res = await ClaimsService.acceptDonation(listing.id, claimServings, undefined, claimNotes || undefined);
+      const res = await ClaimsService.acceptDonation(
+        listing.id,
+        claimServings,
+        undefined,
+        claimNotes || undefined,
+        chosenMethod
+      );
       setClaimResultRole(res.acceptedBy);
       setClaimed(true);
-      fetchListing();
+      await fetchListing();
     } catch (err: any) {
       setError(err.message || 'Failed to accept donation. Another user may have claimed it first.');
-      fetchListing();
+      await fetchListing();
     } finally {
       setClaiming(false);
     }
@@ -68,10 +119,11 @@ export default function DonationDetailPage() {
   const hoursLeft = (new Date(listing.availableUntil).getTime() - Date.now()) / (1000 * 60 * 60);
   const isExpiringSoon = !isExpired && hoursLeft <= 2;
   const expiryText = isExpired ? 'Expired' : formatDistanceToNow(new Date(listing.availableUntil), { addSuffix: true });
-  const isNGO = ['ngo', 'receiver', 'acceptor'].includes(user?.role || '');
-  const isRider = ['rider', 'volunteer'].includes(user?.role || '');
+  const isNGO = canonicalRole === 'ngo';
+  const isRider = canonicalRole === 'rider';
   const isDonor = listing.donorId === user?.id;
-  const canSeeExactAddress = isDonor || user?.role === 'admin' || claimed || listing.status !== 'available';
+  // Privacy guard: exact address only revealed to Donor, Admin, or assigned Claiming NGO / Rider
+  const canSeeExactAddress = isDonor || canonicalRole === 'admin' || claimed || isParticipant;
 
   return (
     <div className={styles.page}>
@@ -189,6 +241,22 @@ export default function DonationDetailPage() {
               </div>
             )}
 
+            {activeTask && canSeeExactAddress && (
+              <div style={{ marginTop: 20 }}>
+                <LiveTrackingMap
+                  deliveryTaskId={activeTask.id}
+                  taskStatus={activeTask.status}
+                  pickupLat={activeTask.pickup_lat ?? listing.latitude}
+                  pickupLng={activeTask.pickup_lng ?? listing.longitude}
+                  pickupLabel={listing.pickupAddress || 'Donor Pickup'}
+                  dropoffLat={activeTask.dropoff_lat}
+                  dropoffLng={activeTask.dropoff_lng}
+                  dropoffLabel={activeTask.dropoff_address || 'NGO Destination'}
+                  height={220}
+                />
+              </div>
+            )}
+
             {history.length > 0 && (
               <div style={{ marginTop: 20, padding: 16, background: '#f9fafb', borderRadius: 10, border: '1px solid #e5e7eb' }}>
                 <h4 style={{ margin: '0 0 10px 0', fontSize: 13, fontWeight: 700, color: '#374151' }}>Live Status History</h4>
@@ -233,6 +301,8 @@ export default function DonationDetailPage() {
               <p style={{ margin: 0, fontSize: 13, lineHeight: 1.4 }}>
                 {claimResultRole === 'rider'
                   ? 'You won this pickup assignment. Head to your Rider Dashboard for live navigation and verification.'
+                  : claimMethod === 'direct_ngo_pickup'
+                  ? 'Assigned directly to your NGO for self-pickup. Open My Claims to navigate to the donor and confirm receipt.'
                   : 'A delivery task has been created and nearby riders have been notified. Track live progress in My Claims.'}
               </p>
               <Link
@@ -254,8 +324,8 @@ export default function DonationDetailPage() {
                 {claimResultRole === 'rider' ? 'Open Rider Dashboard' : 'Track in My Claims'} <ArrowRight size={14} />
               </Link>
             </div>
-          ) : (isNGO || isRider) && (listing.status === 'available' || listing.status === 'partially_reserved') && !isDonor ? (
-            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          ) : (isNGO || isRider) && (listing.status === 'available' || listing.status === 'partially_reserved') && !isDonor && !isExpired ? (
+            <div ref={claimPanelRef} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
                 {isRider ? 'Accept Food Pickup' : 'Accept Food for Your NGO'}
               </h4>
@@ -289,13 +359,48 @@ export default function DonationDetailPage() {
                 />
               </div>
 
-              <button className={styles.claimBtn} onClick={handleClaim} disabled={claiming || listing.availableServings <= 0}>
-                {claiming
-                  ? 'Confirming...'
-                  : isRider
-                  ? `Accept Pickup (${listing.availableServings} Servings)`
-                  : `Accept ${claimServings} Serving${claimServings > 1 ? 's' : ''}`}
-              </button>
+              {isNGO ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button
+                    type="button"
+                    className={styles.claimBtn}
+                    onClick={() => handleClaim('direct_ngo_pickup')}
+                    disabled={claiming || listing.availableServings <= 0}
+                  >
+                    <Navigation size={15} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                    {claiming && claimMethod === 'direct_ngo_pickup'
+                      ? 'Confirming Direct Pickup...'
+                      : `Collect Directly (${claimServings} Serving${claimServings > 1 ? 's' : ''})`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleClaim('ngo_delivery')}
+                    disabled={claiming || listing.availableServings <= 0}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: 8,
+                      border: '1.5px solid #ea580c',
+                      background: '#fff7ed',
+                      color: '#ea580c',
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: claiming ? 'wait' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <Truck size={15} />
+                    {claiming && claimMethod === 'ngo_delivery' ? 'Requesting Rider...' : 'Accept & Request Rider Delivery'}
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className={styles.claimBtn} onClick={() => handleClaim('ngo_delivery')} disabled={claiming || listing.availableServings <= 0}>
+                  {claiming ? 'Confirming...' : `Accept Pickup (${listing.availableServings} Servings)`}
+                </button>
+              )}
             </div>
           ) : null}
 
@@ -323,17 +428,26 @@ export default function DonationDetailPage() {
             </Link>
           )}
 
-          {isDonor && (
+          {isDonor && ['available', 'partially_reserved'].includes(listing.status) && (
             <button
+              type="button"
               className={styles.cancelBtn}
+              disabled={cancelling}
               onClick={async () => {
-                if (window.confirm('Cancel this donation?')) {
+                if (!window.confirm('Cancel this donation?')) return;
+                setError('');
+                setCancelling(true);
+                try {
                   await DonationService.cancelListing(listing.id);
-                  navigate('/donations');
+                  navigate('/donor-donations');
+                } catch (err: any) {
+                  setError(err?.message || 'Unable to cancel this donation.');
+                } finally {
+                  setCancelling(false);
                 }
               }}
             >
-              Cancel Donation
+              {cancelling ? 'Cancelling...' : 'Cancel Donation'}
             </button>
           )}
         </div>

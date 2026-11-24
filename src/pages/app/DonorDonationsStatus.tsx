@@ -240,8 +240,12 @@ export default function DonorDonationsStatus() {
                       className={`${styles.btn} ${styles.btnCancel}`}
                       onClick={async () => {
                         if (window.confirm('Cancel this donation?')) {
-                          await DonationService.cancelListing(row.id);
-                          fetchData();
+                          try {
+                            await DonationService.cancelListing(row.id);
+                            fetchData(true);
+                          } catch (err: any) {
+                            alert(err?.message || 'Unable to cancel this donation.');
+                          }
                         }
                       }}
                     >

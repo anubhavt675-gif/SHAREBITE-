@@ -12,6 +12,7 @@ export interface NgoClaim {
   reservationId?: string;
   servingsClaimed: number;
   status: string;
+  collectionMethod?: 'ngo_delivery' | 'direct_ngo_pickup' | string;
   pickupTime?: string;
   notes?: string;
   cancellationReason?: string;
@@ -37,6 +38,7 @@ export interface NgoClaim {
   donorPhone?: string;
   deliveryTaskId?: string;
   deliveryStatus?: string;
+  pickupCode?: string;
   dropoffCode?: string;
   dropoffAddress?: string;
   dropoffLat?: number;
@@ -142,6 +144,7 @@ function mapClaim(row: any): NgoClaim {
     reservationId: row.reservation_id,
     servingsClaimed: Number(row.servings_claimed ?? 1),
     status: row.status,
+    collectionMethod: row.collection_method || (row.delivery_task_id ? 'ngo_delivery' : 'direct_ngo_pickup'),
     pickupTime: row.pickup_time,
     notes: row.notes,
     cancellationReason: row.cancellation_reason,
@@ -166,6 +169,7 @@ function mapClaim(row: any): NgoClaim {
     donorPhone: row.donor_phone,
     deliveryTaskId: row.delivery_task_id,
     deliveryStatus: row.delivery_status,
+    pickupCode: row.pickup_code,
     dropoffCode: row.dropoff_code,
     dropoffAddress: row.dropoff_address,
     dropoffLat: row.dropoff_lat,
@@ -271,8 +275,9 @@ export const ClaimsService = {
     foodListingId: string,
     servings?: number,
     pickupTime?: string,
-    notes?: string
-  ): Promise<{ acceptedBy: 'ngo' | 'rider'; claimId?: string; deliveryTaskId?: string; status: string }> {
+    notes?: string,
+    collectionMethod: 'ngo_delivery' | 'direct_ngo_pickup' = 'ngo_delivery'
+  ): Promise<{ acceptedBy: 'ngo' | 'rider'; claimId?: string; deliveryTaskId?: string; status: string; collectionMethod?: string }> {
     if (!isValidUUID(foodListingId)) {
       throw new Error('Invalid food donation ID');
     }
@@ -282,6 +287,7 @@ export const ClaimsService = {
       p_servings: servings ?? null,
       p_pickup_time: pickupTime || null,
       p_notes: notes || null,
+      p_collection_method: collectionMethod,
     });
 
     if (!error && data) {
@@ -290,10 +296,30 @@ export const ClaimsService = {
         claimId: data.claim_id,
         deliveryTaskId: data.delivery_task_id,
         status: data.status,
+        collectionMethod: data.collection_method || collectionMethod,
       };
     }
 
-    if (error && error.code !== 'PGRST202') {
+    // Backwards-compatible retry if 5-param signature is not yet deployed on Supabase (4-param overload check)
+    if (error && (error.code === 'PGRST202' || error.message?.includes('p_collection_method'))) {
+      const { data: legacyData, error: legacyErr } = await supabase.rpc('accept_donation', {
+        p_food_listing_id: foodListingId,
+        p_servings: servings ?? null,
+        p_pickup_time: pickupTime || null,
+        p_notes: notes || null,
+      });
+      if (!legacyErr && legacyData) {
+        return {
+          acceptedBy: legacyData.accepted_by,
+          claimId: legacyData.claim_id,
+          deliveryTaskId: legacyData.delivery_task_id,
+          status: legacyData.status,
+        };
+      }
+      if (legacyErr && legacyErr.code !== 'PGRST202') {
+        throw new Error(legacyErr.message || 'Could not accept food donation.');
+      }
+    } else if (error && error.code !== 'PGRST202') {
       throw new Error(error.message || 'Could not accept food donation.');
     }
 
@@ -629,26 +655,62 @@ export const ClaimsService = {
     return true;
   },
 
+  async ngoConfirmPickup(
+    claimId: string,
+    servingsCollected?: number,
+    notes?: string
+  ): Promise<boolean> {
+    if (!isValidUUID(claimId)) throw new Error('Invalid claim ID');
+    const { data, error } = await supabase.rpc('ngo_confirm_pickup', {
+      p_claim_id: claimId,
+      p_servings_collected: servingsCollected ?? null,
+      p_notes: notes || null,
+    });
+    if (error) {
+      throw new Error(error.message || 'Failed to confirm direct pickup.');
+    }
+    return !!data;
+  },
+
   // ── NGO Receipt & Distribution ───────────────────────────────────────────
   async confirmNgoReceipt(
-    taskId: string,
+    taskId: string | null | undefined,
     quantityReceived: number,
     conditionNotes?: string,
     safetyConcern?: boolean,
-    safetyNotes?: string
+    safetyNotes?: string,
+    claimId?: string
   ): Promise<string> {
-    if (!isValidUUID(taskId)) throw new Error('Invalid task ID');
-    const { data, error } = await supabase.rpc('confirm_ngo_receipt', {
-      p_task_id: taskId,
-      p_quantity_received: quantityReceived,
-      p_condition_notes: conditionNotes || null,
-      p_safety_concern: !!safetyConcern,
-      p_safety_notes: safetyNotes || null,
-    });
-    if (error || !data) {
-      throw new Error(error?.message || 'Failed to confirm receipt');
+    if (taskId && isValidUUID(taskId)) {
+      const { data, error } = await supabase.rpc('confirm_ngo_receipt', {
+        p_task_id: taskId,
+        p_quantity_received: quantityReceived,
+        p_condition_notes: conditionNotes || null,
+        p_safety_concern: !!safetyConcern,
+        p_safety_notes: safetyNotes || null,
+      });
+      if (!error && data) return data as string;
+      if (error && error.code !== 'PGRST202') {
+        throw new Error(error.message || 'Failed to confirm receipt');
+      }
     }
-    return data as string;
+
+    if (claimId && isValidUUID(claimId)) {
+      const { data, error } = await supabase.rpc('confirm_ngo_receipt', {
+        p_task_id: null,
+        p_quantity_received: quantityReceived,
+        p_condition_notes: conditionNotes || null,
+        p_safety_concern: !!safetyConcern,
+        p_safety_notes: safetyNotes || null,
+        p_claim_id: claimId,
+      });
+      if (error || !data) {
+        throw new Error(error?.message || 'Failed to confirm receipt at facility');
+      }
+      return data as string;
+    }
+
+    throw new Error('Invalid delivery task or claim ID');
   },
 
   async getDistributionRecords(ngoId: string): Promise<DistributionRecord[]> {

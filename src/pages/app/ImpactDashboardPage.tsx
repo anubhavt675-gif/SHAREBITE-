@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TrendingUp, Leaf, Users, Utensils, Zap } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ImpactService } from '../../services/impact';
@@ -27,15 +27,25 @@ function ImpactCard({ icon, value, label, desc, color }: ImpactCardProps) {
 
 export default function ImpactDashboardPage() {
   const { user } = useAuth();
+  const userId = user?.id;
+  const userRole = user?.role;
   const [impact, setImpact] = useState<ImpactStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
-    ImpactService.getUserImpact(user.id, user.role)
-      .then(setImpact)
-      .finally(() => setLoading(false));
-  }, [user]);
+    if (!userId || !userRole) return;
+    let active = true;
+    ImpactService.getUserImpact(userId, userRole)
+      .then((data) => {
+        if (active) setImpact(data);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId, userRole]);
 
   if (loading) return <PageLoader />;
 

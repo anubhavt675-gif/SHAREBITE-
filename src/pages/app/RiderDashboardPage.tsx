@@ -706,7 +706,7 @@ export default function RiderDashboardPage() {
         </div>
       ) : (
         displayTasks.map(task => (
-          <TaskCard key={task.id} task={task} userId={userId} riderCoords={riderCoords} onRefresh={fetchData} />
+          <TaskCard key={task.id} task={task} userId={userId} riderCoords={riderCoords} onRefresh={() => fetchData(true)} />
         ))
       )}
     </div>

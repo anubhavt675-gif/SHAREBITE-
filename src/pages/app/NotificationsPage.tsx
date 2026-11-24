@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { normalizeRole } from '../../services/auth';
 import { NotificationsService } from '../../services/notifications';
 import { EmptyState } from '../../components/states/EmptyState';
 import { PageLoader } from '../../components/states/LoadingState';
@@ -12,22 +13,36 @@ import nstyles from './NotificationsPage.module.css';
 
 export default function NotificationsPage() {
   const { user } = useAuth();
+  const userId = user?.id;
+  const canonicalRole = normalizeRole(user?.role);
   const [notifs, setNotifs] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
-    NotificationsService.getNotifications(user.id).then(setNotifs).finally(() => setLoading(false));
+    if (!userId) return;
+    let active = true;
 
-    const sub = NotificationsService.subscribeToNotifications(user.id, n => {
-      setNotifs(prev => [n, ...prev]);
+    NotificationsService.getNotifications(userId)
+      .then((list) => {
+        if (active) setNotifs(list);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    const sub = NotificationsService.subscribeToNotifications(userId, (n) => {
+      if (!active) return;
+      setNotifs((prev) => (prev.some((p) => p.id === n.id) ? prev : [n, ...prev]));
     });
-    return () => { sub.unsubscribe(); };
-  }, [user]);
+    return () => {
+      active = false;
+      sub.unsubscribe();
+    };
+  }, [userId]);
 
   const markAll = async () => {
-    if (!user) return;
-    await NotificationsService.markAllAsRead(user.id);
+    if (!userId) return;
+    await NotificationsService.markAllAsRead(userId);
     setNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
   };
 
@@ -37,16 +52,18 @@ export default function NotificationsPage() {
     await NotificationsService.markAsRead(n.id);
     setNotifs(prev => prev.map(item => item.id === n.id ? { ...item, isRead: true } : item));
 
-    // Smart navigation
-    if (n.data?.url) {
-      navigate(n.data.url);
+    // Smart navigation honoring explicit actionUrl first
+    const targetUrl = n.actionUrl || n.data?.url;
+    if (targetUrl) {
+      navigate(targetUrl);
     } else if (n.data?.claimId || n.type?.includes('claim')) {
-      if (user?.role === 'donor') navigate('/donor-donations');
-      else navigate('/my-claims');
+      navigate(canonicalRole === 'donor' ? '/donor-donations' : '/my-claims');
     } else if (n.data?.taskId || n.type?.includes('rider') || n.type?.includes('transit')) {
-      if (user?.role === 'rider') navigate('/rider-dashboard');
-      else if (user?.role === 'donor') navigate('/donor-donations');
+      if (canonicalRole === 'rider') navigate('/rider-dashboard');
+      else if (canonicalRole === 'donor') navigate('/donor-donations');
       else navigate('/my-claims');
+    } else if (n.relatedFoodId) {
+      navigate(`/donations/${n.relatedFoodId}`);
     } else if (n.type?.includes('donation')) {
       navigate('/discover');
     }
