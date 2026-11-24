@@ -1,37 +1,40 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { MapPin, Clock, Package, Plus, RefreshCw, Loader2 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { MapPin, Clock, Package, Plus, RefreshCw, Loader2, MessageSquare } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ClaimsService } from '../../services/claims';
 import { DonationService } from '../../services/donations';
+import { ChatService } from '../../services/chat';
 import LiveTrackingMap from '../../components/map/LiveTrackingMap';
 import { formatDistanceToNow } from 'date-fns';
 import styles from './DonorDonationsStatus.module.css';
 
 const LIFECYCLE_STEPS = [
   { key: 'available', label: 'Listed & Available' },
-  { key: 'claimed', label: 'Claimed by NGO' },
+  { key: 'claimed', label: 'Claimed / Accepted' },
   { key: 'rider', label: 'Rider Assigned' },
   { key: 'collected', label: 'Food Collected' },
-  { key: 'delivered', label: 'Delivered to NGO' },
-  { key: 'distributed', label: 'Distributed to Community' },
+  { key: 'delivered', label: 'Delivered' },
+  { key: 'distributed', label: 'Completed' },
 ];
 
 function getActiveStep(row: any): number {
   const cs = row.claim_status;
   const ds = row.delivery_status;
-  if (!cs || cs === 'cancelled' || cs === 'expired') return 0;
-  if (cs === 'pending' || cs === 'confirmed') return 1;
-  if (cs === 'rider_assigned' || ds === 'rider_assigned') return 2;
-  if (cs === 'food_collected' || ds === 'food_collected') return 3;
-  if (cs === 'delivered' || ds === 'delivered' || ds === 'completed') return 4;
+  const st = row.status;
+  if (st === 'completed' || ds === 'completed') return 5;
   if (cs === 'distributed') return 5;
-  return 1;
+  if (cs === 'delivered' || ds === 'delivered') return 4;
+  if (cs === 'food_collected' || ds === 'food_collected' || ds === 'in_transit' || st === 'picked_up') return 3;
+  if (cs === 'rider_assigned' || ds === 'rider_assigned' || ds === 'going_to_pickup' || ds === 'arrived_at_pickup') return 2;
+  if (cs === 'pending' || cs === 'confirmed' || cs === 'awaiting_rider') return 1;
+  return 0;
 }
 
 export default function DonorDonationsStatus() {
   const { user } = useAuth();
   const userId = user?.id;
+  const navigate = useNavigate();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -195,7 +198,7 @@ export default function DonorDonationsStatus() {
                 )}
 
                 {/* Live Tracking Map for active delivery tasks */}
-                {row.delivery_task_id && ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(row.delivery_status) && (
+                {row.delivery_task_id && ['rider_assigned', 'going_to_pickup', 'arrived_at_pickup', 'food_collected', 'in_transit'].includes(row.delivery_status) && (
                   <LiveTrackingMap
                     deliveryTaskId={row.delivery_task_id}
                     taskStatus={row.delivery_status}
@@ -230,6 +233,27 @@ export default function DonorDonationsStatus() {
                   <Link to={`/donations/${row.id}`} className={`${styles.btn} ${styles.btnView}`}>
                     View Details
                   </Link>
+                  {row.rider_user_id && userId && (
+                    <button
+                      type="button"
+                      className={`${styles.btn} ${styles.btnView}`}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                      onClick={async () => {
+                        try {
+                          const conv = await ChatService.openDeliveryConversation(userId, row.rider_user_id, {
+                            relatedListingId: row.id,
+                            relatedTaskId: row.delivery_task_id,
+                            title: row.title || 'Pickup Coordination',
+                          });
+                          navigate(`/chat/${conv.id}`);
+                        } catch {
+                          navigate('/chat');
+                        }
+                      }}
+                    >
+                      <MessageSquare size={13} /> Chat with Rider
+                    </button>
+                  )}
                   {['available', 'partially_reserved'].includes(status) && (
                     <Link to={`/donations/${row.id}/edit`} className={`${styles.btn} ${styles.btnView}`}>
                       Edit

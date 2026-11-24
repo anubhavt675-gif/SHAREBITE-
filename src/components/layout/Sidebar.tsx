@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
-import { NavLink, Link } from 'react-router-dom';
+import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutGrid, Search, Utensils, MapPin, ClipboardList,
   BarChart2, User, Settings, ShieldCheck, ShieldAlert, X, Leaf,
-  Truck, Package, Plus, MessageSquare, Heart, Building2
+  Truck, Plus, MessageSquare, Heart, Building2, Home, Wallet, LogOut
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { normalizeRole } from '../../services/auth';
@@ -17,6 +17,7 @@ interface NavItem {
   label: string;
   badge?: string;
   highlight?: boolean;
+  matchPaths?: string[];
 }
 
 interface Props {
@@ -25,23 +26,46 @@ interface Props {
 }
 
 export default function Sidebar({ open, onClose }: Props) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const role = normalizeRole(user?.role);
+  const isRider = role === 'rider';
 
   // Purpose-built navigation strictly segregated by trusted role
+  // Donor, NGO, Community, and Admin menus remain 100% preserved.
   const roleNavItems = useMemo<NavItem[]>(() => {
     if (!role) return [];
     switch (role) {
       case 'rider':
         return [
-          { to: '/rider-dashboard', icon: <Truck size={18} />, label: 'Rider Dashboard' },
-          { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs' },
-          { to: '/map', icon: <MapPin size={18} />, label: 'Live Rescue Map' },
-          { to: '/chat', icon: <MessageSquare size={18} />, label: 'Messages & Dispatch' },
-          { to: '/impact-dashboard', icon: <BarChart2 size={18} />, label: 'Fleet Impact' },
-          { to: '/profile', icon: <User size={18} />, label: 'Rider Profile' },
-          { to: '/verification', icon: <ShieldCheck size={18} />, label: 'ID Verification' },
-          { to: '/settings', icon: <Settings size={18} />, label: 'Settings' },
+          {
+            to: '/rider-dashboard',
+            icon: <Home size={18} />,
+            label: 'Dashboard',
+            matchPaths: ['/rider-dashboard', '/rider/dashboard'],
+          },
+          {
+            to: '/rider/deliveries',
+            icon: <Truck size={18} />,
+            label: 'My Deliveries',
+            matchPaths: ['/rider/deliveries', '/rider/available-food'],
+          },
+          {
+            to: '/rider/earnings',
+            icon: <Wallet size={18} />,
+            label: 'Earnings',
+          },
+          {
+            to: '/profile',
+            icon: <User size={18} />,
+            label: 'Profile',
+          },
+          {
+            to: '/settings',
+            icon: <Settings size={18} />,
+            label: 'Settings',
+          },
         ];
 
       case 'ngo':
@@ -112,20 +136,37 @@ export default function Sidebar({ open, onClose }: Props) {
     }
   }, [role]);
 
+  const handleSidebarLogout = async () => {
+    if (window.innerWidth < 1024) onClose();
+    await logout();
+    navigate('/');
+  };
+
   return (
     <>
       {open && <div className={styles.overlay} onClick={onClose} />}
-      <aside className={`${styles.sidebar} ${open ? styles.open : ''}`}>
-        <div className={styles.sidebarHeader}>
-          <div className={styles.sidebarBrand}>
-            <ShareBiteLogo />
+      <aside className={`${styles.sidebar} ${isRider ? styles.riderSidebar : ''} ${open ? styles.open : ''}`}>
+        {isRider ? (
+          <div className={styles.riderBrandTop}>
+            <Link to="/rider-dashboard" className={styles.riderLogoLink} onClick={() => { if (window.innerWidth < 1024) onClose(); }}>
+              <ShareBiteLogo />
+            </Link>
+            <button className={styles.closeBtnMobileOnly} onClick={onClose} aria-label="Close sidebar">
+              <X size={18} />
+            </button>
           </div>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Close sidebar">
-            <X size={18} />
-          </button>
-        </div>
+        ) : (
+          <div className={styles.sidebarHeader}>
+            <div className={styles.sidebarBrand}>
+              <ShareBiteLogo />
+            </div>
+            <button className={styles.closeBtn} onClick={onClose} aria-label="Close sidebar">
+              <X size={18} />
+            </button>
+          </div>
+        )}
 
-        {user && (
+        {user && !isRider && (
           <div className={styles.userCard}>
             <UserAvatar size={48} src={user.avatar} name={user.name} />
             <div className={styles.userInfo}>
@@ -136,44 +177,62 @@ export default function Sidebar({ open, onClose }: Props) {
                 </span>
               </div>
               <p className={styles.userTagline}>
-                {role === 'rider' ? 'Ready for deliveries ⚡' : role === 'ngo' ? 'Feeding communities 🍲' : 'Sharing food, saving lives 🌱'}
+                {role === 'ngo' ? 'Feeding communities 🍲' : 'Sharing food, saving lives 🌱'}
               </p>
             </div>
           </div>
         )}
 
         <nav className={styles.nav}>
-          {roleNavItems.map(item => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `${styles.navItem} ${isActive ? styles.navItemActive : ''} ${item.highlight ? styles.navItemHighlight : ''}`
-              }
-              onClick={() => {
-                if (window.innerWidth < 1024) onClose();
-              }}
+          {roleNavItems.map(item => {
+            const customActive = item.matchPaths
+              ? item.matchPaths.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))
+              : undefined;
+
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => {
+                  const active = customActive ?? isActive;
+                  return `${styles.navItem} ${active ? styles.navItemActive : ''} ${item.highlight ? styles.navItemHighlight : ''}`;
+                }}
+                onClick={() => {
+                  if (window.innerWidth < 1024) onClose();
+                }}
+              >
+                <span className={styles.navIcon}>{item.icon}</span>
+                <span className={styles.navLabel}>{item.label}</span>
+                {item.badge && (
+                  <span style={{
+                    marginLeft: 'auto',
+                    background: '#ea580c',
+                    color: '#fff',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '2px 7px',
+                    borderRadius: 10
+                  }}>
+                    {item.badge}
+                  </span>
+                )}
+              </NavLink>
+            );
+          })}
+
+          {isRider && (
+            <button
+              type="button"
+              className={`${styles.navItem} ${styles.logoutNavBtn}`}
+              onClick={handleSidebarLogout}
             >
-              <span className={styles.navIcon}>{item.icon}</span>
-              <span className={styles.navLabel}>{item.label}</span>
-              {item.badge && (
-                <span style={{
-                  marginLeft: 'auto',
-                  background: '#ea580c',
-                  color: '#fff',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  padding: '2px 7px',
-                  borderRadius: 10
-                }}>
-                  {item.badge}
-                </span>
-              )}
-            </NavLink>
-          ))}
+              <span className={styles.navIcon}><LogOut size={18} /></span>
+              <span className={styles.navLabel}>Logout</span>
+            </button>
+          )}
         </nav>
 
-        {/* Role-Specific Action Card */}
+        {/* Donor Action Card (100% preserved) */}
         {role === 'donor' && (
           <div style={{ margin: '16px 14px', padding: 14, background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 12 }}>
             <p style={{ margin: '0 0 6px 0', fontSize: 13, fontWeight: 700, color: '#9a3412' }}>Have excess food today?</p>
@@ -192,39 +251,46 @@ export default function Sidebar({ open, onClose }: Props) {
           </div>
         )}
 
-        {role === 'rider' && (
-          <div style={{ margin: '16px 14px', padding: 14, background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 12 }}>
-            <p style={{ margin: '0 0 6px 0', fontSize: 13, fontWeight: 700, color: '#166534' }}>Delivery Fleet Active</p>
-            <p style={{ margin: '0 0 10px 0', fontSize: 12, color: '#14532d' }}>Check available pickup jobs near your current GPS location.</p>
-            <Link
-              to="/rider-dashboard"
-              onClick={() => { if (window.innerWidth < 1024) onClose(); }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                background: '#16a34a', color: '#fff', padding: '6px 12px',
-                borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: 'none'
-              }}
-            >
-              <Package size={14} /> View Available Jobs
-            </Link>
+        {isRider ? (
+          <div className={styles.riderHungerCard}>
+            <div className={styles.scooterGraphic} aria-hidden="true">
+              <svg width="88" height="58" viewBox="0 0 100 66" fill="none">
+                <rect x="14" y="14" width="24" height="20" rx="5" fill="#EA580C" />
+                <path d="M26 20C24 18 21 18 20 20C19 22 20 24 26 28C32 24 33 22 32 20C31 18 28 18 26 20Z" fill="#FFFFFF" />
+                <path d="M22 36H64L72 22H60" stroke="#F97316" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M30 36C30 28 44 28 48 38H68C74 38 78 43 78 48H24C24 41 27 36 30 36Z" fill="#FB923C" />
+                <circle cx="28" cy="50" r="10" fill="#1E293B" />
+                <circle cx="28" cy="50" r="4.5" fill="#E2E8F0" />
+                <circle cx="72" cy="50" r="10" fill="#1E293B" />
+                <circle cx="72" cy="50" r="4.5" fill="#E2E8F0" />
+              </svg>
+            </div>
+            <p className={styles.riderHungerText}>
+              Together
+              <br />
+              for a Hunger-Free
+              <br />
+              India ❤️
+            </p>
           </div>
+        ) : (
+          <>
+            <div className={styles.promoCard}>
+              <div className={styles.promoIcon}>
+                <Leaf size={18} color="#16A34A" />
+              </div>
+              <div className={styles.promoContent}>
+                <p className={styles.promoTitle}>Zero Food Waste<br />Zero Hunger</p>
+                <p className={styles.promoSub}>Real-time food rescue network.</p>
+              </div>
+            </div>
+
+            <div className={styles.sidebarFooter}>
+              <p className={styles.footerText}>ShareBite v2.0</p>
+              <p className={styles.footerSub}>Share Food. Share Hope.</p>
+            </div>
+          </>
         )}
-
-        {/* Promo card */}
-        <div className={styles.promoCard}>
-          <div className={styles.promoIcon}>
-            <Leaf size={18} color="#16A34A" />
-          </div>
-          <div className={styles.promoContent}>
-            <p className={styles.promoTitle}>Zero Food Waste<br />Zero Hunger</p>
-            <p className={styles.promoSub}>Real-time food rescue network.</p>
-          </div>
-        </div>
-
-        <div className={styles.sidebarFooter}>
-          <p className={styles.footerText}>ShareBite v2.0</p>
-          <p className={styles.footerSub}>Share Food. Share Hope.</p>
-        </div>
       </aside>
     </>
   );

@@ -38,10 +38,38 @@
 
 .sidebarTitle {
   font-family: var(--font-heading);
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   font-weight: 700;
   color: #1e293b;
   margin: 0;
+}
+
+.sidebarSub {
+  font-size: 11.5px;
+  color: #64748b;
+  margin: 3px 0 0 0;
+}
+
+.emptyConvList {
+  padding: 36px 20px;
+  text-align: center;
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.emptyConvList p {
+  margin: 0;
+  font-weight: 700;
+  color: #334155;
+}
+
+.emptyConvList span {
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .convList {
@@ -235,10 +263,70 @@
 }
 
 .msgTime {
-  font-size: 10px;
+  font-size: 10.5px;
   color: #94a3b8;
   margin-top: 4px;
   padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.senderTag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 3px;
+  padding: 0 4px;
+}
+
+.readReceipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.errorBanner {
+  margin: 0 24px 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.mobileBackBtn {
+  display: none;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 6px;
+  cursor: pointer;
+  color: #334155;
+}
+
+@media (max-width: 768px) {
+  .chatContainer {
+    padding: 10px;
+    height: calc(100vh - 80px);
+  }
+  .chatWrapper {
+    grid-template-columns: 1fr;
+  }
+  .hideOnMobile {
+    display: none !important;
+  }
+  .mobileBackBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .msgRow {
+    max-width: 86%;
+  }
 }
 
 .systemMsg {

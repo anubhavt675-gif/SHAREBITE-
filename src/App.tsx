@@ -45,6 +45,8 @@ const SettingsPage = lazyWithRetry(() => import('./pages/app/SettingsPage'));
 const VerificationPage = lazyWithRetry(() => import('./pages/app/VerificationPage'));
 const AdminPage = lazyWithRetry(() => import('./pages/app/AdminPage'));
 const RiderDashboardPage = lazyWithRetry(() => import('./pages/app/RiderDashboardPage'));
+const RiderDeliveriesPage = lazyWithRetry(() => import('./pages/app/RiderDeliveriesPage'));
+const RiderEarningsPage = lazyWithRetry(() => import('./pages/app/RiderEarningsPage'));
 const NGOClaimsDashboard = lazyWithRetry(() => import('./pages/app/NGOClaimsDashboard'));
 const DonorDonationsStatus = lazyWithRetry(() => import('./pages/app/DonorDonationsStatus'));
 const ChatPage = lazyWithRetry(() => import('./pages/app/ChatPage'));
@@ -210,8 +212,9 @@ function AppRoutes() {
             {/* Role 2: Logistics / Delivery Rider Experience */}
             <Route path="/rider-dashboard" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDashboardPage /></RoleRouteGuard>} />
             <Route path="/rider/dashboard" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDashboardPage /></RoleRouteGuard>} />
-            <Route path="/rider/available-food" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDashboardPage /></RoleRouteGuard>} />
-            <Route path="/rider/deliveries" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDashboardPage /></RoleRouteGuard>} />
+            <Route path="/rider/available-food" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDeliveriesPage /></RoleRouteGuard>} />
+            <Route path="/rider/deliveries" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderDeliveriesPage /></RoleRouteGuard>} />
+            <Route path="/rider/earnings" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderEarningsPage /></RoleRouteGuard>} />
 
             {/* Role 3: NGO / Community Acceptor Experience */}
             <Route path="/my-claims" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />

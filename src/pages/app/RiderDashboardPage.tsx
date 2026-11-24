@@ -1,518 +1,59 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
-  MapPin, Clock, Package, Truck, CheckCircle, AlertTriangle,
-  Navigation, Phone, ChevronRight, X, Loader2, RefreshCw, MessageSquare, RotateCcw
+  Truck, Package, MapPin, Clock, CheckCircle2, Star, Navigation,
+  MessageSquare, Loader2, ArrowRight, ShieldCheck, X
 } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
-import { ClaimsService, type DeliveryTask } from '../../services/claims';
+import {
+  ClaimsService,
+  openGoogleMapsNavigation,
+  buildGoogleMapsNavigationUrl,
+  type DeliveryTask,
+  type RiderProfileRecord,
+} from '../../services/claims';
 import { LocationService, type Coordinates } from '../../services/location';
 import { ChatService } from '../../services/chat';
-import { supabase } from '../../lib/supabase';
 import LiveTrackingMap from '../../components/map/LiveTrackingMap';
-import { formatDistanceToNow } from 'date-fns';
-import styles from './RiderDashboard.module.css';
+import riderHeroBannerImg from '../../assets/rider_scooter_hero.jpg';
+import styles from './RiderDashboardPage.module.css';
 
-const STATUS_LABELS: Record<string, string> = {
-  awaiting_rider: 'Available',
-  rider_assigned: 'Assigned to You',
-  going_to_pickup: 'Going to Pickup',
-  food_collected: 'Food Collected',
-  in_transit: 'In Transit',
-  delivered: 'Delivered — Pending NGO Confirm',
+const STATUS_BADGES: Record<string, string> = {
+  rider_assigned: 'Accepted',
+  going_to_pickup: 'On the Way to Donor',
+  arrived_at_pickup: 'Arrived at Pickup',
+  food_collected: 'Picked Up',
+  in_transit: 'In Progress',
+  delivered: 'Delivered',
   completed: 'Completed',
-  incident: 'Incident Reported',
-  cancelled: 'Cancelled',
 };
 
-interface PickupModalProps {
-  task: DeliveryTask;
-  onClose: () => void;
-  onSuccess: () => void;
+function formatPickupWindow(deadlineIso?: string, createdIso?: string): string {
+  if (!deadlineIso) {
+    return createdIso
+      ? `Posted ${formatDistanceToNow(new Date(createdIso), { addSuffix: true })}`
+      : 'Ready for pickup';
+  }
+  const diffMs = new Date(deadlineIso).getTime() - Date.now();
+  if (diffMs <= 0) return 'Urgent pickup window';
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 60) return `Pickup within ${Math.max(5, mins)} min`;
+  const hrs = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return remMins > 0 ? `Pickup within ${hrs}h ${remMins}m` : `Pickup within ${hrs} hr${hrs > 1 ? 's' : ''}`;
 }
 
-function PickupConfirmModal({ task, onClose, onSuccess }: PickupModalProps) {
-  const [code, setCode] = useState('');
-  const [servings, setServings] = useState(task.servingsRequired);
-  const [discrepancy, setDiscrepancy] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const submit = async () => {
-    setError('');
-    if (!code.trim()) { setError('Enter the pickup verification code'); return; }
-    setLoading(true);
-    try {
-      await ClaimsService.confirmPickup(task.id, code, servings, discrepancy || undefined);
-      onSuccess();
-      onClose();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+function FoodFallbackThumb() {
   return (
-    <div className={styles.modal}>
-      <div className={styles.modalCard}>
-        <button className={styles.modalClose} onClick={onClose}><X size={14} /></button>
-        <h3 className={styles.modalTitle}>Confirm Food Pickup</h3>
-        <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-          Get the 6-character code from the donor to verify the handover.
-        </p>
-        <label className={styles.modalLabel}>Pickup Verification Code</label>
-        <input
-          className={styles.modalInput}
-          value={code}
-          onChange={e => setCode(e.target.value.toUpperCase())}
-          placeholder="ABC123"
-          maxLength={6}
-          style={{ letterSpacing: 4, fontFamily: 'monospace', fontSize: 18 }}
-        />
-        <label className={styles.modalLabel}>Servings Actually Collected</label>
-        <input
-          className={styles.modalInput}
-          type="number"
-          min={1}
-          value={servings}
-          onChange={e => setServings(parseInt(e.target.value) || 1)}
-        />
-        {servings !== task.servingsRequired && (
-          <>
-            <label className={styles.modalLabel}>Discrepancy Reason</label>
-            <textarea
-              className={`${styles.modalInput} ${styles.incidentTextarea}`}
-              value={discrepancy}
-              onChange={e => setDiscrepancy(e.target.value)}
-              placeholder="Explain the quantity difference..."
-            />
-          </>
-        )}
-        {error && <div className={styles.errorMsg}>{error}</div>}
-        <div className={styles.modalActions}>
-          <button className={`${styles.btn} ${styles.btnOutline}`} onClick={onClose}>Cancel</button>
-          <button className={`${styles.btn} ${styles.btnSuccess}`} onClick={submit} disabled={loading}>
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />} Confirm Pickup
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface DeliveryModalProps {
-  task: DeliveryTask;
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-function DeliveryConfirmModal({ task, onClose, onSuccess }: DeliveryModalProps) {
-  const [code, setCode] = useState('');
-  const [servings, setServings] = useState(task.servingsCollected || task.servingsRequired);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const submit = async () => {
-    setError('');
-    if (task.ngoId && !code.trim()) { setError('Enter the delivery verification code from the NGO'); return; }
-    setLoading(true);
-    try {
-      await ClaimsService.confirmDeliveryToNgo(task.id, code, servings);
-      onSuccess();
-      onClose();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className={styles.modal}>
-      <div className={styles.modalCard}>
-        <button className={styles.modalClose} onClick={onClose}><X size={14} /></button>
-        <h3 className={styles.modalTitle}>Confirm Delivery to NGO</h3>
-        <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-          Get the 6-character code from the NGO staff to confirm the handover.
-        </p>
-        <label className={styles.modalLabel}>Delivery Verification Code</label>
-        <input
-          className={styles.modalInput}
-          value={code}
-          onChange={e => setCode(e.target.value.toUpperCase())}
-          placeholder="XYZ456"
-          maxLength={6}
-          style={{ letterSpacing: 4, fontFamily: 'monospace', fontSize: 18 }}
-        />
-        <label className={styles.modalLabel}>Servings Actually Delivered</label>
-        <input
-          className={styles.modalInput}
-          type="number"
-          min={1}
-          value={servings}
-          onChange={e => setServings(parseInt(e.target.value) || 1)}
-        />
-        {error && <div className={styles.errorMsg}>{error}</div>}
-        <div className={styles.modalActions}>
-          <button className={`${styles.btn} ${styles.btnOutline}`} onClick={onClose}>Cancel</button>
-          <button className={`${styles.btn} ${styles.btnSuccess}`} onClick={submit} disabled={loading}>
-            {loading ? <Loader2 size={14} /> : <CheckCircle size={14} />} Confirm Delivery
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface IncidentModalProps {
-  task: DeliveryTask;
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-function IncidentModal({ task, onClose, onSuccess }: IncidentModalProps) {
-  const [type, setType] = useState('vehicle_issue');
-  const [notes, setNotes] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const submit = async () => {
-    setError('');
-    if (!notes.trim()) { setError('Please describe the incident'); return; }
-    setLoading(true);
-    try {
-      await ClaimsService.reportIncident(task.id, type, notes);
-      onSuccess();
-      onClose();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className={styles.modal}>
-      <div className={styles.modalCard}>
-        <button className={styles.modalClose} onClick={onClose}><X size={14} /></button>
-        <h3 className={styles.modalTitle}>Report Incident</h3>
-        <label className={styles.modalLabel}>Incident Type</label>
-        <select className={styles.incidentSelect} value={type} onChange={e => setType(e.target.value)}>
-          <option value="vehicle_issue">Vehicle Issue</option>
-          <option value="donor_unavailable">Donor Unavailable</option>
-          <option value="ngo_unavailable">NGO Unavailable</option>
-          <option value="quantity_mismatch">Quantity Mismatch</option>
-          <option value="food_damaged">Food Packaging Damaged</option>
-          <option value="delivery_delayed">Delivery Delayed</option>
-          <option value="cannot_complete">Cannot Complete Delivery</option>
-          <option value="other">Other</option>
-        </select>
-        <label className={styles.modalLabel}>Describe the Incident</label>
-        <textarea
-          className={styles.incidentTextarea}
-          value={notes}
-          onChange={e => setNotes(e.target.value)}
-          placeholder="Provide details about what happened..."
-          rows={4}
-        />
-        {error && <div className={styles.errorMsg}>{error}</div>}
-        <div className={styles.modalActions}>
-          <button className={`${styles.btn} ${styles.btnOutline}`} onClick={onClose}>Cancel</button>
-          <button className={`${styles.btn} ${styles.btnDanger}`} onClick={submit} disabled={loading}>
-            {loading ? <Loader2 size={14} /> : <AlertTriangle size={14} />} Report Incident
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TaskCard({
-  task,
-  userId,
-  riderCoords,
-  onRefresh,
-}: {
-  task: DeliveryTask;
-  userId?: string;
-  riderCoords: Coordinates | null;
-  onRefresh: () => void;
-}) {
-  const navigate = useNavigate();
-  const [showPickupModal, setShowPickupModal] = useState(false);
-  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
-  const [showIncident, setShowIncident] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-
-  const acceptJob = async () => {
-    setError('');
-    setLoading(true);
-    try {
-      if (task.isDirectFoodOpportunity) {
-        await ClaimsService.acceptDonation(task.foodListingId);
-        setSuccess('Pickup accepted! Navigate to the donor location.');
-      } else {
-        await ClaimsService.acceptDeliveryJob(task.id);
-        setSuccess('Delivery job accepted! Navigate to pickup.');
-      }
-      onRefresh();
-    } catch (e: any) {
-      setError(e.message || 'This opportunity was already claimed by another user.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleOpenChat = async () => {
-    if (!userId) return;
-    const isCollected = ['food_collected', 'in_transit'].includes(task.status);
-    const recipient = (isCollected && task.ngoId) ? task.ngoId : task.donorId;
-    if (!recipient) {
-      navigate('/chat');
-      return;
-    }
-    try {
-      const conv = await ChatService.getOrCreateDirectConversation(userId, recipient, {
-        type: 'delivery',
-        relatedListingId: task.foodListingId,
-        relatedTaskId: task.isDirectFoodOpportunity ? undefined : task.id,
-        title: task.foodTitle || 'Delivery Coordination',
-      });
-      navigate(`/chat/${conv.id}`);
-    } catch {
-      navigate('/chat');
-    }
-  };
-
-  const handleReleaseTask = async () => {
-    if (!window.confirm('Release this pickup so another rider can take it?')) return;
-    setError('');
-    setLoading(true);
-    try {
-      await ClaimsService.reassignDeliveryTask(task.id, 'Released by rider before pickup');
-      onRefresh();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const startTransit = async () => {
-    setError(''); setLoading(true);
-    try {
-      await ClaimsService.updateDeliveryTaskStatus(task.id, 'in_transit');
-      onRefresh();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const markArrived = async () => {
-    setError(''); setLoading(true);
-    try {
-      await ClaimsService.updateDeliveryTaskStatus(task.id, 'going_to_pickup');
-      setSuccess("Arrival recorded! Request the 6-digit pickup code from donor.");
-      onRefresh();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const deadline = task.collectionDeadline
-    ? formatDistanceToNow(new Date(task.collectionDeadline), { addSuffix: true })
-    : 'No deadline';
-
-  const isOverdue = task.collectionDeadline && new Date(task.collectionDeadline) < new Date();
-
-  // Calculated distance & ETA using actual rider GPS coordinates (never hardcoded fallback)
-  const etaInfo =
-    riderCoords && task.pickupLat && task.pickupLng
-      ? LocationService.calculateEtaBetween(
-          riderCoords.latitude,
-          riderCoords.longitude,
-          task.pickupLat,
-          task.pickupLng
-        )
-      : task.distanceKm != null
-      ? { distanceKm: task.distanceKm, ...LocationService.calculateEta(task.distanceKm) }
-      : null;
-
-  const isActiveAssignment = ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(task.status);
-  const contactPhone = ['food_collected', 'in_transit'].includes(task.status)
-    ? task.ngoPhone || task.donorPhone
-    : task.donorPhone || task.ngoPhone;
-
-  return (
-    <div className={styles.taskCard}>
-      {showPickupModal && <PickupConfirmModal task={task} onClose={() => setShowPickupModal(false)} onSuccess={onRefresh} />}
-      {showDeliveryModal && <DeliveryConfirmModal task={task} onClose={() => setShowDeliveryModal(false)} onSuccess={onRefresh} />}
-      {showIncident && <IncidentModal task={task} onClose={() => setShowIncident(false)} onSuccess={onRefresh} />}
-
-      <div className={styles.taskCardHeader}>
-        <div>
-          <h3 className={styles.taskTitle}>{task.foodTitle || 'Food Delivery'}</h3>
-          <div className={styles.taskMeta}>
-            <span className={styles.taskMetaItem}><Package size={12} /> {task.servingsRequired} {task.quantityUnit}</span>
-            <span className={styles.taskMetaItem}>
-              <Clock size={12} />
-              <span style={{ color: isOverdue ? '#dc2626' : undefined }}>
-                Deadline {deadline}
-              </span>
-            </span>
-            {etaInfo && (
-              <span className={styles.taskMetaItem} style={{ color: '#0284c7', fontWeight: 600 }}>
-                📍 ~{etaInfo.distanceKm} km ({etaInfo.text})
-              </span>
-            )}
-          </div>
-        </div>
-        <span className={`${styles.statusBadge} ${styles[`status_${task.status}`] || styles.status_pending}`}>
-          {task.isDirectFoodOpportunity ? 'Direct Pickup' : (STATUS_LABELS[task.status] || task.status)}
-        </span>
-      </div>
-
-      <div className={styles.routeRow}>
-        <div className={styles.locationPin}>
-          <MapPin size={12} color="#ea580c" style={{ marginRight: 4 }} />
-          <strong>Pickup:</strong> {task.pickupAddress || task.donorName || 'Donor location'}
-        </div>
-        <span className={styles.arrow}><ChevronRight size={16} /></span>
-        <div className={styles.locationPin}>
-          <MapPin size={12} color="#10b981" style={{ marginRight: 4 }} />
-          <strong>Deliver:</strong> {task.dropoffAddress || task.ngoOrgName || task.ngoName || 'Community destination'}
-        </div>
-      </div>
-
-      {/* Live GPS Route Map for active rider deliveries (OTP codes never exposed on rider screen) */}
-      {isActiveAssignment && !task.isDirectFoodOpportunity && (
-        <LiveTrackingMap
-          deliveryTaskId={task.id}
-          taskStatus={task.status}
-          pickupLat={task.pickupLat}
-          pickupLng={task.pickupLng}
-          pickupLabel={task.pickupAddress || task.donorName || 'Donor Pickup'}
-          dropoffLat={task.dropoffLat}
-          dropoffLng={task.dropoffLng}
-          dropoffLabel={task.ngoOrgName || task.ngoName || task.dropoffAddress || 'Destination'}
-          height={200}
-        />
-      )}
-
-      {error && <div className={styles.errorMsg}>{error}</div>}
-      {success && <div className={styles.successMsg}>{success}</div>}
-
-      <div className={styles.actionsRow}>
-        {/* Accept job or direct pickup */}
-        {task.status === 'awaiting_rider' && (
-          <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={acceptJob} disabled={loading}>
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <Truck size={14} />}
-            {task.isDirectFoodOpportunity ? 'Accept Pickup' : 'Accept Job'}
-          </button>
-        )}
-
-        {/* Navigate to pickup */}
-        {(task.status === 'rider_assigned' || task.status === 'going_to_pickup') && task.pickupLat && task.pickupLng && (
-          <a
-            href={`https://www.google.com/maps/dir/?api=1&destination=${task.pickupLat},${task.pickupLng}`}
-            target="_blank" rel="noopener noreferrer"
-            className={`${styles.btn} ${styles.btnWarning}`}
-            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <Navigation size={14} /> Navigate to Pickup
-          </a>
-        )}
-
-        {/* I've Arrived */}
-        {task.status === 'rider_assigned' && (
-          <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={markArrived} disabled={loading}>
-            <CheckCircle size={14} /> I've Arrived
-          </button>
-        )}
-
-        {/* Confirm pickup */}
-        {(task.status === 'rider_assigned' || task.status === 'going_to_pickup') && (
-          <button className={`${styles.btn} ${styles.btnSuccess}`} onClick={() => setShowPickupModal(true)}>
-            <CheckCircle size={14} /> Confirm Pickup
-          </button>
-        )}
-
-        {/* Start transit */}
-        {task.status === 'food_collected' && (
-          <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={startTransit} disabled={loading}>
-            <Truck size={14} /> Start Delivery
-          </button>
-        )}
-
-        {/* Navigate to NGO */}
-        {(task.status === 'food_collected' || task.status === 'in_transit') && task.dropoffLat && task.dropoffLng && (
-          <a
-            href={`https://www.google.com/maps/dir/?api=1&destination=${task.dropoffLat},${task.dropoffLng}`}
-            target="_blank" rel="noopener noreferrer"
-            className={`${styles.btn} ${styles.btnWarning}`}
-            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <Navigation size={14} /> Navigate to NGO
-          </a>
-        )}
-
-        {/* Confirm delivery */}
-        {(task.status === 'food_collected' || task.status === 'in_transit') && (
-          <button className={`${styles.btn} ${styles.btnSuccess}`} onClick={() => setShowDeliveryModal(true)}>
-            <CheckCircle size={14} /> Confirm Delivery
-          </button>
-        )}
-
-        {/* Chat with donor / NGO */}
-        {task.status !== 'completed' && task.status !== 'cancelled' && !task.isDirectFoodOpportunity && (
-          <button
-            type="button"
-            onClick={handleOpenChat}
-            className={`${styles.btn} ${styles.btnOutline}`}
-          >
-            <MessageSquare size={14} /> Chat
-          </button>
-        )}
-
-        {/* Release assignment before pickup */}
-        {['rider_assigned', 'going_to_pickup'].includes(task.status) && (
-          <button className={`${styles.btn} ${styles.btnOutline}`} onClick={handleReleaseTask} disabled={loading}>
-            <RotateCcw size={14} /> Release
-          </button>
-        )}
-
-        {/* Report incident */}
-        {['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(task.status) && (
-          <button className={`${styles.btn} ${styles.btnDanger}`} onClick={() => setShowIncident(true)} style={{ marginLeft: 'auto' }}>
-            <AlertTriangle size={14} /> Report Issue
-          </button>
-        )}
-
-        {/* Contact Donor / NGO (fixed: never dials rider's own number) */}
-        {contactPhone && task.status !== 'completed' && task.status !== 'cancelled' && !task.isDirectFoodOpportunity && (
-          <a
-            href={`tel:${contactPhone}`}
-            className={`${styles.btn} ${styles.btnOutline}`}
-            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <Phone size={14} /> Call
-          </a>
-        )}
-      </div>
-
-      {task.incidentReported && (
-        <div className={styles.errorMsg} style={{ marginTop: 10 }}>
-          <AlertTriangle size={14} style={{ marginRight: 4 }} />
-          <strong>Incident reported:</strong> {task.incidentType?.replace(/_/g, ' ')} — {task.incidentNotes}
-        </div>
-      )}
+    <div className={styles.foodThumbFallback} aria-hidden="true">
+      <svg width="34" height="34" viewBox="0 0 48 48" fill="none">
+        <circle cx="24" cy="24" r="20" fill="#FFEDD5" stroke="#FB923C" strokeWidth="2" />
+        <path d="M14 26C14 31.5 18.5 35 24 35C29.5 35 34 31.5 34 26H14Z" fill="#EA580C" />
+        <circle cx="20" cy="22" r="3" fill="#F59E0B" />
+        <circle cx="25" cy="20" r="3.2" fill="#16A34A" />
+        <circle cx="29" cy="22.5" r="2.8" fill="#FB923C" />
+      </svg>
     </div>
   );
 }
@@ -520,68 +61,106 @@ function TaskCard({
 export default function RiderDashboardPage() {
   const { user } = useAuth();
   const userId = user?.id;
-  const [tab, setTab] = useState<'available' | 'mine' | 'history'>('available');
+  const navigate = useNavigate();
+
+  const [riderProfile, setRiderProfile] = useState<RiderProfileRecord | null>(null);
   const [availableTasks, setAvailableTasks] = useState<DeliveryTask[]>([]);
   const [myTasks, setMyTasks] = useState<DeliveryTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
-  const [togglingOnline, setTogglingOnline] = useState(false);
   const [riderCoords, setRiderCoords] = useState<Coordinates | null>(null);
   const riderCoordsRef = useRef<Coordinates | null>(null);
   const [gpsError, setGpsError] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionBanner, setActionBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const fetchData = useCallback(async (isSilent = false) => {
     if (!userId) return;
     if (!isSilent) setLoading(true);
-    else setRefreshing(true);
 
     try {
       const currentCoords = riderCoordsRef.current;
-      const [available, mine] = await Promise.all([
+      const [available, mine, rProf] = await Promise.all([
         ClaimsService.getAvailableDeliveryTasks(currentCoords?.latitude, currentCoords?.longitude),
         ClaimsService.getMyDeliveryTasks(userId),
+        ClaimsService.getOrEnsureRiderProfile(userId, user?.name, user?.phone),
       ]);
       setAvailableTasks(available);
       setMyTasks(mine);
-
-      const { data: riderData } = await supabase
-        .from('riders')
-        .select('is_online')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (riderData) setIsOnline(riderData.is_online);
+      if (rProf) {
+        setRiderProfile(rProf);
+        setIsOnline(rProf.isOnline);
+        if (!riderCoordsRef.current && rProf.currentLat != null && rProf.currentLng != null) {
+          const savedCoords = { latitude: rProf.currentLat, longitude: rProf.currentLng };
+          riderCoordsRef.current = savedCoords;
+          setRiderCoords(savedCoords);
+        }
+      }
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
-  }, [userId]);
+  }, [userId, user?.name, user?.phone]);
 
   const fetchDataRef = useRef(fetchData);
   useEffect(() => {
     fetchDataRef.current = fetchData;
   }, [fetchData]);
 
+  // Initial load + realtime subscription to new donations & delivery tasks
   useEffect(() => {
     fetchDataRef.current(false);
     if (!userId) return;
+
+    // Capture a single GPS reading once so distances to available pickups are accurate
+    LocationService.detectCurrentGPS().then((gps) => {
+      if (gps.status === 'granted' && gps.latitude !== null && gps.longitude !== null) {
+        const coords = {
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          accuracy: gps.accuracy ?? undefined,
+        };
+        riderCoordsRef.current = coords;
+        setRiderCoords(coords);
+        fetchDataRef.current(true);
+      }
+    });
+
     const sub = ClaimsService.subscribeToAvailableTasks(() => {
       fetchDataRef.current(true);
     });
-    return () => { sub.unsubscribe(); };
+
+    const onOnlineSync = (ev: Event) => {
+      const custom = ev as CustomEvent<{ isOnline: boolean }>;
+      if (typeof custom.detail?.isOnline === 'boolean') {
+        setIsOnline(custom.detail.isOnline);
+      }
+    };
+    window.addEventListener('sharebite:rider-online', onOnlineSync);
+
+    return () => {
+      sub.unsubscribe();
+      window.removeEventListener('sharebite:rider-online', onOnlineSync);
+    };
   }, [userId]);
 
-  const activeTaskId = useMemo(
+  const activeTask = useMemo(
     () =>
-      myTasks.find((t) =>
-        ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(t.status)
-      )?.id,
+      myTasks.find(
+        (t) =>
+          ['rider_assigned', 'going_to_pickup', 'arrived_at_pickup', 'food_collected', 'in_transit'].includes(
+            t.status
+          ) ||
+          (t.status === 'delivered' && !t.ngoId)
+      ) || null,
     [myTasks]
   );
 
-  // Live GPS Tracking: Broadcast rider coordinates whenever online (idle or active task)
+  const activeTaskId =
+    activeTask && activeTask.status !== 'delivered' ? activeTask.id : undefined;
+
+  // Live GPS Tracking: ONLY track continuously when rider is online AND has an active in-transit delivery!
   useEffect(() => {
-    if (!isOnline || !userId) return;
+    if (!isOnline || !activeTaskId || !userId) return;
     setGpsError('');
 
     const stopWatching = LocationService.watchAndBroadcastRiderLocation({
@@ -592,15 +171,16 @@ export default function RiderDashboardPage() {
       onPosition: (coords) => {
         const prev = riderCoordsRef.current;
         riderCoordsRef.current = coords;
-        const movedKm =
-          prev ? LocationService.calculateDistance(prev.latitude, prev.longitude, coords.latitude, coords.longitude) : Infinity;
+        const movedKm = prev
+          ? LocationService.calculateDistance(prev.latitude, prev.longitude, coords.latitude, coords.longitude)
+          : Infinity;
         if (!prev || movedKm >= 0.01) {
           setRiderCoords(coords);
         }
         setGpsError('');
       },
       onError: (err) => {
-        setGpsError(err.message || 'Location permission denied. Enable GPS to share live location.');
+        setGpsError(err.message || 'Location permission denied. Enable GPS to share live route with donor.');
       },
     });
 
@@ -609,106 +189,599 @@ export default function RiderDashboardPage() {
     };
   }, [isOnline, activeTaskId, userId]);
 
-  const toggleOnline = async () => {
+  const completedDeliveries = useMemo(
+    () => myTasks.filter((t) => t.status === 'completed' || (t.status === 'delivered' && Boolean(t.ngoId))),
+    [myTasks]
+  );
+
+  const totalDeliveriesCount = Math.max(
+    riderProfile?.totalDeliveries ?? 0,
+    completedDeliveries.length
+  );
+  const totalEarnings = riderProfile?.totalEarnings ?? 0;
+  const computedDistance = useMemo(
+    () =>
+      completedDeliveries.reduce(
+        (sum, t) => sum + (t.estimatedKm ?? t.distanceKm ?? 0),
+        0
+      ),
+    [completedDeliveries]
+  );
+  const totalDistanceKm = Math.max(
+    riderProfile?.totalDistanceKm ?? 0,
+    Number(computedDistance.toFixed(1))
+  );
+  const ratingDisplay =
+    totalDeliveriesCount > 0
+      ? Number(riderProfile?.rating ?? 5.0).toFixed(1)
+      : 'New';
+
+  const handleAcceptPickup = async (task: DeliveryTask) => {
     if (!userId) return;
-    setTogglingOnline(true);
-    setGpsError('');
+    setBusyId(task.id);
+    setActionBanner(null);
     try {
-      const nextOnline = !isOnline;
-      if (nextOnline) {
-        const gps = await LocationService.detectCurrentGPS();
-        if (gps.status === 'granted' && gps.latitude !== null && gps.longitude !== null) {
-          setRiderCoords({ latitude: gps.latitude, longitude: gps.longitude, accuracy: gps.accuracy ?? undefined });
-          await LocationService.updateRiderLocation({
-            riderId: userId,
-            latitude: gps.latitude,
-            longitude: gps.longitude,
-            accuracyM: gps.accuracy ?? undefined,
-          });
-        } else {
-          setGpsError(gps.errorMessage || 'GPS unavailable. Enable location permissions.');
-        }
+      let pickupLat = task.pickupLat;
+      let pickupLng = task.pickupLng;
+      let pickupAddr = task.pickupAddress;
+      let assignedTaskId: string | undefined = task.isDirectFoodOpportunity ? undefined : task.id;
+
+      if (task.isDirectFoodOpportunity) {
+        const res = await ClaimsService.acceptDonation(task.foodListingId);
+        assignedTaskId = res.deliveryTaskId;
+        if (res.pickupLat != null) pickupLat = res.pickupLat;
+        if (res.pickupLng != null) pickupLng = res.pickupLng;
+        if (res.pickupAddress) pickupAddr = res.pickupAddress;
+      } else {
+        await ClaimsService.acceptDeliveryJob(task.id);
       }
 
-      const activeTask = myTasks.find(t => ['rider_assigned', 'going_to_pickup', 'food_collected', 'in_transit'].includes(t.status));
-      await supabase
-        .from('riders')
-        .update({ is_online: nextOnline, is_available: nextOnline && !activeTask })
-        .eq('user_id', userId);
-      setIsOnline(nextOnline);
+      setIsOnline(true);
+      window.dispatchEvent(new CustomEvent('sharebite:rider-online', { detail: { isOnline: true } }));
+
+      // Create / ensure Donor <-> Rider private chat channel
+      if (task.donorId) {
+        ChatService.openDeliveryConversation(userId, task.donorId, {
+          relatedListingId: task.foodListingId,
+          relatedTaskId: assignedTaskId,
+          title: task.foodTitle || 'Food Pickup',
+        }).catch(() => {});
+      }
+
+      // Automatically open Google Maps Directions to Donor pickup coordinates
+      openGoogleMapsNavigation(pickupLat, pickupLng, pickupAddr);
+
+      setActionBanner({
+        kind: 'ok',
+        text: `Pickup accepted! Google Maps directions opened for ${pickupAddr || 'donor location'}.`,
+      });
+      await fetchData(true);
+    } catch (e: any) {
+      setActionBanner({
+        kind: 'err',
+        text: e?.message || 'This donation was already accepted by another rider.',
+      });
+      await fetchData(true);
     } finally {
-      setTogglingOnline(false);
+      setBusyId(null);
     }
   };
 
-  const activeTasks = myTasks.filter(t => !['completed', 'cancelled'].includes(t.status));
-  const historyTasks = myTasks.filter(t => ['completed', 'cancelled', 'incident'].includes(t.status));
-  const displayTasks = tab === 'available' ? availableTasks : tab === 'mine' ? activeTasks : historyTasks;
+  const handleUpdateActiveStatus = async (task: DeliveryTask, nextStatus: string) => {
+    setBusyId(task.id);
+    setActionBanner(null);
+    try {
+      await ClaimsService.updateDeliveryTaskStatus(task.id, nextStatus);
+      setActionBanner({
+        kind: 'ok',
+        text: `Delivery status updated to ${STATUS_BADGES[nextStatus] || nextStatus}.`,
+      });
+      await fetchData(true);
+    } catch (e: any) {
+      setActionBanner({
+        kind: 'err',
+        text: e?.message || 'Could not update delivery status.',
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleOpenDonorChat = async (task: DeliveryTask) => {
+    if (!userId || !task.donorId) {
+      navigate('/chat');
+      return;
+    }
+    try {
+      const conv = await ChatService.openDeliveryConversation(userId, task.donorId, {
+        relatedListingId: task.foodListingId,
+        relatedTaskId: task.id,
+        title: task.foodTitle || 'Pickup Chat',
+      });
+      navigate(`/chat/${conv.id}`);
+    } catch {
+      navigate('/chat');
+    }
+  };
+
+  // Determine next workflow action for Active Delivery
+  const getNextStatusAction = (task: DeliveryTask): { next: string; label: string } | null => {
+    switch (task.status) {
+      case 'rider_assigned':
+        return { next: 'going_to_pickup', label: 'Start — On the Way to Donor' };
+      case 'going_to_pickup':
+        return { next: 'arrived_at_pickup', label: 'Mark Arrived at Pickup' };
+      case 'arrived_at_pickup':
+        return { next: 'food_collected', label: 'Confirm Food Collected' };
+      case 'food_collected':
+        return { next: 'in_transit', label: 'Start — On the Way to Destination' };
+      case 'in_transit':
+        return { next: 'delivered', label: 'Mark Delivered' };
+      case 'delivered':
+        return { next: 'completed', label: 'Complete Delivery' };
+      default:
+        return null;
+    }
+  };
+
+  const activeNavUrl = activeTask
+    ? ['food_collected', 'in_transit'].includes(activeTask.status)
+      ? buildGoogleMapsNavigationUrl(activeTask.dropoffLat, activeTask.dropoffLng, activeTask.dropoffAddress) ||
+        buildGoogleMapsNavigationUrl(activeTask.pickupLat, activeTask.pickupLng, activeTask.pickupAddress)
+      : buildGoogleMapsNavigationUrl(activeTask.pickupLat, activeTask.pickupLng, activeTask.pickupAddress)
+    : null;
+
+  const isPickedUpDone = activeTask
+    ? ['food_collected', 'in_transit', 'delivered', 'completed'].includes(activeTask.status)
+    : false;
+  const isInTransitDone = activeTask
+    ? ['in_transit', 'delivered', 'completed'].includes(activeTask.status)
+    : false;
+  const isDeliveredDone = activeTask
+    ? ['delivered', 'completed'].includes(activeTask.status)
+    : false;
 
   return (
-    <div className={styles.page}>
-      <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Rider Dashboard</h1>
-        <p className={styles.pageSubtitle}>Manage your food delivery assignments</p>
-      </div>
-
-      {/* Online Status */}
-      <div className={styles.statusRow}>
-        <div className={isOnline ? styles.onlineDot : styles.offlineDot} />
-        <span className={styles.statusText}>
-          {isOnline
-            ? riderCoords
-              ? `You are online · GPS active (${riderCoords.latitude.toFixed(4)}, ${riderCoords.longitude.toFixed(4)})`
-              : 'You are online — sharing live location for nearby pickups'
-            : 'You are offline — go online to receive nearby pickup alerts'}
-        </span>
-        <button
-          className={`${styles.toggleBtn} ${isOnline ? styles.goOffline : styles.goOnline}`}
-          onClick={toggleOnline}
-          disabled={togglingOnline}
-        >
-          {isOnline ? 'Go Offline' : 'Go Online'}
-        </button>
-      </div>
-      {gpsError && <div className={styles.errorMsg} style={{ marginBottom: 12 }}>{gpsError}</div>}
-
-      {/* Tabs */}
-      <div className={styles.tabs}>
-        <button className={`${styles.tab} ${tab === 'available' ? styles.tabActive : ''}`} onClick={() => setTab('available')}>
-          Available Jobs {availableTasks.length > 0 && `(${availableTasks.length})`}
-        </button>
-        <button className={`${styles.tab} ${tab === 'mine' ? styles.tabActive : ''}`} onClick={() => setTab('mine')}>
-          My Active Jobs {activeTasks.length > 0 && `(${activeTasks.length})`}
-        </button>
-        <button className={`${styles.tab} ${tab === 'history' ? styles.tabActive : ''}`} onClick={() => setTab('history')}>
-          History
-        </button>
-        <button
-          style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: '8px', color: '#6b7280' }}
-          onClick={() => fetchData(false)}
-          title="Refresh tasks"
-        >
-          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-        </button>
-      </div>
-
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: 48 }}><Loader2 size={32} className="animate-spin" style={{ color: '#ea580c' }} /></div>
-      ) : displayTasks.length === 0 ? (
-        <div className={styles.emptyState}>
-          <div className={styles.emptyIcon}>{tab === 'available' ? '🚴' : tab === 'mine' ? '📦' : '📋'}</div>
-          <h3 className={styles.emptyTitle}>
-            {tab === 'available' ? 'No available jobs right now' : tab === 'mine' ? 'No active deliveries' : 'No delivery history yet'}
-          </h3>
-          <p className={styles.emptyText}>
-            {tab === 'available' ? 'Check back soon — new delivery tasks appear when NGOs claim food.' : tab === 'mine' ? 'Accept a job from the Available tab to get started.' : 'Your completed deliveries will appear here.'}
-          </p>
+    <div className={styles.dashboard}>
+      {/* Feedback & GPS Permissions Alerts */}
+      {actionBanner && (
+        <div className={actionBanner.kind === 'ok' ? styles.bannerOk : styles.bannerErr}>
+          <span>{actionBanner.text}</span>
+          <button onClick={() => setActionBanner(null)} className={styles.bannerClose} aria-label="Dismiss">
+            <X size={14} />
+          </button>
         </div>
-      ) : (
-        displayTasks.map(task => (
-          <TaskCard key={task.id} task={task} userId={userId} riderCoords={riderCoords} onRefresh={() => fetchData(true)} />
-        ))
       )}
+
+      {gpsError && <div className={styles.bannerErr}>{gpsError}</div>}
+
+      {/* ─── Hero Banner: Deliver Food, Spread Happiness ─────────────────── */}
+      <section className={styles.heroBanner}>
+        <img
+          src={riderHeroBannerImg}
+          alt="ShareBite Delivery Rider"
+          className={styles.heroBgArt}
+        />
+        <div className={styles.heroOverlay} />
+        <div className={styles.heroContent}>
+          <h1 className={styles.heroHeading}>
+            Deliver Food,
+            <br />
+            Spread <span className={styles.heroAccent}>Happiness</span>{' '}
+            <span className={styles.heartIcon} aria-hidden="true">❤️</span>
+          </h1>
+          <p className={styles.heroSubtext}>Every delivery helps someone in need.</p>
+          <Link to="/rider/deliveries" className={styles.heroCta}>
+            View My Deliveries <ArrowRight size={16} />
+          </Link>
+        </div>
+      </section>
+
+      {/* ─── 4 Real KPI Metric Cards ─────────────────────────────────────── */}
+      <section className={styles.statsGrid}>
+        <div className={styles.statCard}>
+          <div className={`${styles.statIconWrap} ${styles.statIconOrange}`}>
+            <Truck size={22} />
+          </div>
+          <div>
+            <div className={styles.statValue}>{totalDeliveriesCount}</div>
+            <div className={styles.statLabel}>Total Deliveries</div>
+          </div>
+        </div>
+
+        <div className={styles.statCard}>
+          <div className={`${styles.statIconWrap} ${styles.statIconGreen}`}>
+            <span className={styles.rupeeGlyph}>₹</span>
+          </div>
+          <div>
+            <div className={styles.statValue}>₹{totalEarnings.toLocaleString('en-IN')}</div>
+            <div className={styles.statLabel}>Total Earnings</div>
+          </div>
+        </div>
+
+        <div className={styles.statCard}>
+          <div className={`${styles.statIconWrap} ${styles.statIconAmber}`}>
+            <Star size={22} fill="#f59e0b" color="#f59e0b" />
+          </div>
+          <div>
+            <div className={styles.statValue}>{ratingDisplay}</div>
+            <div className={styles.statLabel}>Your Rating</div>
+          </div>
+        </div>
+
+        <div className={styles.statCard}>
+          <div className={`${styles.statIconWrap} ${styles.statIconCoral}`}>
+            <Clock size={22} />
+          </div>
+          <div>
+            <div className={styles.statValue}>{totalDistanceKm} km</div>
+            <div className={styles.statLabel}>Total Distance</div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Middle Grid: Available Pickups + Active Delivery ────────────── */}
+      <section className={styles.mainGrid}>
+        {/* Left: Available Pickups */}
+        <div className={styles.panelCard}>
+          <div className={styles.panelHeader}>
+            <div className={styles.panelTitleGroup}>
+              <span className={styles.panelIconBox}>
+                <Package size={18} />
+              </span>
+              <h2 className={styles.panelTitle}>Available Pickups</h2>
+            </div>
+            <Link to="/rider/deliveries?tab=available" className={styles.viewAllLink}>
+              View All <ArrowRight size={13} />
+            </Link>
+          </div>
+
+          {loading ? (
+            <div className={styles.loadingBlock}>
+              <Loader2 size={26} className="animate-spin" style={{ color: '#ea580c' }} />
+            </div>
+          ) : availableTasks.length === 0 ? (
+            <div className={styles.emptyBox}>
+              <Package size={32} color="#fb923c" />
+              <p className={styles.emptyHeading}>No available pickups right now</p>
+              <span className={styles.emptySub}>
+                New food donations posted by donors appear here automatically in real time.
+              </span>
+            </div>
+          ) : (
+            <div className={styles.pickupList}>
+              {availableTasks.slice(0, 5).map((item) => {
+                const distKm =
+                  riderCoords && item.pickupLat != null && item.pickupLng != null
+                    ? LocationService.calculateDistance(
+                        riderCoords.latitude,
+                        riderCoords.longitude,
+                        item.pickupLat,
+                        item.pickupLng
+                      )
+                    : item.distanceKm;
+                const isAccepting = busyId === item.id;
+                const donorTitle = item.donorName
+                  ? `${item.foodTitle || 'Food'} · ${item.donorName}`
+                  : item.foodTitle || 'Food Donation';
+
+                return (
+                  <div key={item.id} className={styles.pickupRow}>
+                    <div className={styles.pickupThumb}>
+                      {item.foodImageUrl ? (
+                        <img src={item.foodImageUrl} alt={item.foodTitle} className={styles.pickupImg} />
+                      ) : (
+                        <FoodFallbackThumb />
+                      )}
+                    </div>
+
+                    <div className={styles.pickupDetails}>
+                      <h3 className={styles.pickupName} title={donorTitle}>
+                        {donorTitle}
+                      </h3>
+                      <p className={styles.pickupMetaLine}>
+                        <MapPin size={12} color="#64748b" />
+                        <span>
+                          {item.pickupAddress || 'Donor pickup point'}
+                          {distKm != null ? ` • ${distKm} km` : ''}
+                        </span>
+                      </p>
+                      <p className={styles.pickupMetaLine}>
+                        <Clock size={12} color="#64748b" />
+                        <span>
+                          {formatPickupWindow(item.collectionDeadline, item.createdAt)} ·{' '}
+                          <strong>
+                            {item.servingsRequired} {item.quantityUnit}
+                          </strong>
+                        </span>
+                      </p>
+                      {item.instructions && (
+                        <p className={styles.pickupInstruction} title={item.instructions}>
+                          {item.instructions}
+                        </p>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      className={styles.acceptBtn}
+                      disabled={isAccepting || Boolean(activeTask)}
+                      title={
+                        activeTask
+                          ? 'Complete your active delivery before accepting another'
+                          : 'Accept pickup & launch Google Maps navigation'
+                      }
+                      onClick={() => handleAcceptPickup(item)}
+                    >
+                      {isAccepting ? <Loader2 size={15} className="animate-spin" /> : 'Accept'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Right: Active Delivery */}
+        <div className={styles.panelCard}>
+          <div className={styles.panelHeader}>
+            <div className={styles.panelTitleGroup}>
+              <span className={styles.panelIconBox}>
+                <Truck size={18} />
+              </span>
+              <h2 className={styles.panelTitle}>Active Delivery</h2>
+            </div>
+            {activeTask ? (
+              <span className={styles.inProgressPill}>
+                <span className={styles.pulseDot} />{' '}
+                {STATUS_BADGES[activeTask.status] || 'In Progress'}
+              </span>
+            ) : (
+              <span className={styles.idlePill}>Standby</span>
+            )}
+          </div>
+
+          {!activeTask ? (
+            <div className={styles.emptyBox}>
+              <Truck size={34} color="#fb923c" />
+              <p className={styles.emptyHeading}>No active delivery assigned</p>
+              <span className={styles.emptySub}>
+                Click <strong>Accept</strong> on any available donation to lock the pickup, notify the donor, and launch Google Maps navigation.
+              </span>
+            </div>
+          ) : (
+            <div className={styles.activeBody}>
+              <div className={styles.timelineCol}>
+                <div className={styles.activeFoodSummary}>
+                  <strong>{activeTask.foodTitle || 'Food Pickup'}</strong>
+                  <span>
+                    {activeTask.servingsRequired} {activeTask.quantityUnit} · Donor:{' '}
+                    {activeTask.donorName || 'Verified Donor'}
+                  </span>
+                </div>
+
+                {/* Vertical Milestone Stepper */}
+                <div className={styles.vTimeline}>
+                  <div className={styles.vStep}>
+                    <div className={`${styles.vDot} ${styles.vDotDone}`}>
+                      <CheckCircle2 size={14} />
+                    </div>
+                    <div className={styles.vStepContent}>
+                      <div className={styles.vStepTitle}>
+                        {activeTask.status === 'arrived_at_pickup'
+                          ? 'Arrived at Pickup'
+                          : activeTask.status === 'going_to_pickup'
+                          ? 'On the Way to Donor'
+                          : 'Accepted Pickup'}
+                      </div>
+                      <div className={styles.vStepSub}>
+                        {activeTask.pickupAddress || 'Donor location'}
+                      </div>
+                      {activeTask.riderAssignedAt && (
+                        <div className={styles.vStepTime}>
+                          {new Date(activeTask.riderAssignedAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={styles.vStep}>
+                    <div className={`${styles.vDot} ${isPickedUpDone ? styles.vDotDone : ''}`}>
+                      <CheckCircle2 size={14} />
+                    </div>
+                    <div className={styles.vStepContent}>
+                      <div className={styles.vStepTitle}>Picked Up</div>
+                      <div className={styles.vStepSub}>
+                        Food collected from {activeTask.donorName || 'Donor'}
+                      </div>
+                      {activeTask.pickupConfirmedAt && (
+                        <div className={styles.vStepTime}>
+                          {new Date(activeTask.pickupConfirmedAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={styles.vStep}>
+                    <div className={`${styles.vDot} ${isInTransitDone ? styles.vDotDone : ''}`}>
+                      <CheckCircle2 size={14} />
+                    </div>
+                    <div className={styles.vStepContent}>
+                      <div className={styles.vStepTitle}>On the Way</div>
+                      <div className={styles.vStepSub}>
+                        Delivering to{' '}
+                        {activeTask.ngoOrgName ||
+                          activeTask.ngoName ||
+                          activeTask.dropoffAddress ||
+                          'destination'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.vStep}>
+                    <div className={`${styles.vDot} ${isDeliveredDone ? styles.vDotDone : ''}`}>
+                      <CheckCircle2 size={14} />
+                    </div>
+                    <div className={styles.vStepContent}>
+                      <div className={styles.vStepTitle}>Delivered</div>
+                      <div className={styles.vStepSub}>Complete delivery</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Next Step Action + Chat + Directions */}
+                <div className={styles.activeControls}>
+                  {(() => {
+                    const nextStep = getNextStatusAction(activeTask);
+                    if (!nextStep) return null;
+                    return (
+                      <button
+                        type="button"
+                        className={styles.nextStatusBtn}
+                        disabled={busyId === activeTask.id}
+                        onClick={() => handleUpdateActiveStatus(activeTask, nextStep.next)}
+                      >
+                        {busyId === activeTask.id ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <ShieldCheck size={15} />
+                        )}
+                        {nextStep.label}
+                      </button>
+                    );
+                  })()}
+
+                  <div className={styles.secondaryActionRow}>
+                    {activeNavUrl && (
+                      <a
+                        href={activeNavUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.liveTrackBtn}
+                      >
+                        <Navigation size={13} /> Open Directions
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      className={styles.liveTrackBtn}
+                      onClick={() => handleOpenDonorChat(activeTask)}
+                    >
+                      <MessageSquare size={13} /> Chat
+                    </button>
+                  </div>
+
+                  <Link to="/rider/deliveries?tab=active" className={styles.viewTrackingPill}>
+                    <MapPin size={13} color="#ea580c" /> View Live Tracking <ArrowRight size={13} />
+                  </Link>
+                </div>
+              </div>
+
+              <div className={styles.mapCol}>
+                <LiveTrackingMap
+                  deliveryTaskId={activeTask.id}
+                  taskStatus={activeTask.status}
+                  pickupLat={activeTask.pickupLat}
+                  pickupLng={activeTask.pickupLng}
+                  pickupLabel={activeTask.pickupAddress || activeTask.donorName || 'Donor Pickup'}
+                  dropoffLat={activeTask.dropoffLat}
+                  dropoffLng={activeTask.dropoffLng}
+                  dropoffLabel={
+                    activeTask.ngoOrgName ||
+                    activeTask.ngoName ||
+                    activeTask.dropoffAddress ||
+                    'Destination'
+                  }
+                  height={250}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ─── Bottom Row: Recent Deliveries + Motivational Card ───────────── */}
+      <section className={styles.bottomGrid}>
+        <div className={styles.panelCard}>
+          <div className={styles.panelHeader}>
+            <div className={styles.panelTitleGroup}>
+              <span className={styles.panelIconBox}>
+                <Clock size={17} />
+              </span>
+              <h2 className={styles.panelTitle}>Recent Deliveries</h2>
+            </div>
+            <Link to="/rider/deliveries?tab=completed" className={styles.viewAllLink}>
+              View All <ArrowRight size={13} />
+            </Link>
+          </div>
+
+          {completedDeliveries.length === 0 ? (
+            <div className={styles.recentEmpty}>
+              Your completed food rescues will appear here once delivered.
+            </div>
+          ) : (
+            <div className={styles.recentList}>
+              {completedDeliveries.slice(0, 3).map((rec) => {
+                const ts = rec.completedAt || rec.deliveryConfirmedAt || rec.updatedAt;
+                return (
+                  <div key={rec.id} className={styles.recentRow}>
+                    <div className={styles.recentLeft}>
+                      <div className={styles.recentThumb}>
+                        {rec.foodImageUrl ? (
+                          <img src={rec.foodImageUrl} alt={rec.foodTitle} className={styles.pickupImg} />
+                        ) : (
+                          <FoodFallbackThumb />
+                        )}
+                      </div>
+                      <span className={styles.recentTitle}>
+                        {rec.foodTitle || 'Food Rescue'}
+                      </span>
+                    </div>
+
+                    <span className={styles.deliveredBadge}>Delivered</span>
+
+                    <span className={styles.recentDate}>
+                      {new Date(ts).toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                      })}
+                      ,{' '}
+                      {new Date(ts).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+
+                    <span className={styles.recentRightStat}>
+                      {rec.servingsDelivered ?? rec.servingsRequired} {rec.quantityUnit}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className={styles.motivationCard}>
+          <div className={styles.trophyWrap} aria-hidden="true">
+            🏆
+          </div>
+          <div>
+            <h3 className={styles.motivationTitle}>Great Work, Rider!</h3>
+            <p className={styles.motivationSub}>
+              {totalDeliveriesCount > 0
+                ? `You've completed ${totalDeliveriesCount} rescue${totalDeliveriesCount > 1 ? 's' : ''} — keep spreading happiness ❤️`
+                : 'Go online and accept a pickup nearby to rescue meals ❤️'}
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

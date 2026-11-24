@@ -1,10 +1,28 @@
-import { useState, useRef } from 'react';
-import { Camera, CheckCircle } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Camera, CheckCircle, ShieldAlert, Truck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { normalizeRole } from '../../services/auth';
+import { ClaimsService, type RiderProfileRecord } from '../../services/claims';
+import { supabase } from '../../lib/supabase';
 import styles from './ProfilePage.module.css';
 
 export default function ProfilePage() {
   const { user, updateProfile } = useAuth();
+  const isRider = normalizeRole(user?.role) === 'rider';
+  const [riderRec, setRiderRec] = useState<RiderProfileRecord | null>(null);
+  const [vehicleType, setVehicleType] = useState('bike');
+  const [vehicleNumber, setVehicleNumber] = useState('');
+
+  useEffect(() => {
+    if (!isRider || !user?.id) return;
+    ClaimsService.getOrEnsureRiderProfile(user.id, user.name, user.phone).then((r) => {
+      if (r) {
+        setRiderRec(r);
+        setVehicleType(r.vehicleType || 'bike');
+        setVehicleNumber(r.vehicleNumber || '');
+      }
+    });
+  }, [isRider, user?.id, user?.name, user?.phone]);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [bio, setBio] = useState(user?.bio || '');
@@ -21,6 +39,18 @@ export default function ProfilePage() {
     if (!file || !user) return;
     setUploadingAvatar(true);
     try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${user.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, file, { upsert: true, contentType: file.type || 'image/jpeg' });
+      if (!upErr) {
+        const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+        await updateProfile({ avatar: pub.publicUrl });
+        setSaved(true);
+        setTimeout(() => setSaved(false), 3000);
+        return;
+      }
       const reader = new FileReader();
       reader.onload = async (ev) => {
         const dataUrl = ev.target?.result as string;
@@ -40,6 +70,20 @@ export default function ProfilePage() {
     setSaving(true);
     try {
       await updateProfile({ name, bio, phone, location: { ...user?.location, city, address: user?.location?.address || '', latitude: (user?.location?.latitude ?? 0) as number, longitude: (user?.location?.longitude ?? 0) as number } });
+      if (isRider && user?.id) {
+        await supabase
+          .from('riders')
+          .update({
+            name,
+            phone,
+            vehicle_type: vehicleType,
+            vehicle_number: vehicleNumber,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', user.id);
+        const updated = await ClaimsService.getOrEnsureRiderProfile(user.id, name, phone);
+        if (updated) setRiderRec(updated);
+      }
       setSaved(true);
       setEditing(false);
       setTimeout(() => setSaved(false), 3000);
@@ -82,15 +126,26 @@ export default function ProfilePage() {
           </div>
           <h2 className={styles.profileName}>{user?.name}</h2>
           <span className={styles.roleBadge}>{user?.role}</span>
-          {user?.isVerified && (
+          {user?.isVerified || riderRec?.idVerified ? (
             <div className={styles.verifiedBadge}>
               <CheckCircle size={14} /> Verified
+            </div>
+          ) : isRider ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#d97706', background: '#fef3c7', padding: '4px 10px', borderRadius: 999, marginTop: 6 }}>
+              <ShieldAlert size={13} /> Verification Pending
+            </div>
+          ) : null}
+          {isRider && riderRec && (
+            <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: riderRec.isOnline ? '#15803d' : '#64748b' }}>
+              ● {riderRec.isOnline ? (riderRec.isAvailable ? 'Online & Available' : 'Online · On Active Delivery') : 'Offline'}
             </div>
           )}
           <div className={styles.profileStats}>
             <div className={styles.stat}>
-              <span className={styles.statVal}>{user?.totalDonations || 0}</span>
-              <span className={styles.statLbl}>Donations</span>
+              <span className={styles.statVal}>
+                {isRider ? (riderRec?.totalDeliveries ?? 0) : (user?.totalDonations || 0)}
+              </span>
+              <span className={styles.statLbl}>{isRider ? 'Deliveries' : 'Donations'}</span>
             </div>
             <div className={styles.statDivider} />
             <div className={styles.stat}>
@@ -144,6 +199,32 @@ export default function ProfilePage() {
               <label className={styles.label}>Role</label>
               <p className={styles.value} style={{ textTransform: 'capitalize' }}>{user?.role}</p>
             </div>
+            {isRider && (
+              <>
+                <div className={styles.field}>
+                  <label className={styles.label}><Truck size={12} style={{ display: 'inline', marginRight: 4 }} /> Vehicle Type</label>
+                  {editing ? (
+                    <select className={styles.input} value={vehicleType} onChange={e => setVehicleType(e.target.value)}>
+                      <option value="bike">Bike</option>
+                      <option value="scooter">Scooter</option>
+                      <option value="motorcycle">Motorcycle</option>
+                      <option value="bicycle">Bicycle</option>
+                      <option value="car">Car / Van</option>
+                    </select>
+                  ) : (
+                    <p className={styles.value} style={{ textTransform: 'capitalize' }}>{vehicleType}</p>
+                  )}
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>Vehicle Number</label>
+                  {editing ? (
+                    <input className={styles.input} value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value)} placeholder="e.g. DL 01 AB 1234" />
+                  ) : (
+                    <p className={styles.value}>{vehicleNumber || 'Not set'}</p>
+                  )}
+                </div>
+              </>
+            )}
             <div className={styles.fieldFull}>
               <label className={styles.label}>Bio</label>
               {editing ? (

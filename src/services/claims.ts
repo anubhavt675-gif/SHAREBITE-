@@ -77,11 +77,13 @@ export interface DeliveryTask {
   pickupWindowEnd?: string;
   collectionDeadline?: string;
   status: string;
+  arrivedAtPickupAt?: string;
   pickupConfirmedAt?: string;
   servingsCollected?: number;
   collectionDiscrepancy?: string;
   deliveryConfirmedAt?: string;
   servingsDelivered?: number;
+  completedAt?: string;
   incidentReported: boolean;
   incidentType?: string;
   incidentNotes?: string;
@@ -134,6 +136,55 @@ export interface DistributionRecord {
   receiptConfirmedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RiderProfileRecord {
+  id: string;
+  userId: string;
+  name: string;
+  phone: string;
+  vehicleType: string;
+  vehicleNumber: string;
+  profileImage?: string;
+  idVerified: boolean;
+  isOnline: boolean;
+  isAvailable: boolean;
+  rating: number;
+  totalDeliveries: number;
+  totalEarnings: number;
+  totalDistanceKm: number;
+  currentLat?: number;
+  currentLng?: number;
+}
+
+export function buildGoogleMapsNavigationUrl(
+  lat?: number | null,
+  lng?: number | null,
+  address?: string | null
+): string | null {
+  if (typeof lat === 'number' && typeof lng === 'number' && !Number.isNaN(lat) && !Number.isNaN(lng)) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=two-wheeler`;
+  }
+  if (address && address.trim().length > 0) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address.trim())}&travelmode=two-wheeler`;
+  }
+  return null;
+}
+
+export function openGoogleMapsNavigation(
+  lat?: number | null,
+  lng?: number | null,
+  address?: string | null
+): string | null {
+  const url = buildGoogleMapsNavigationUrl(lat, lng, address);
+  if (url && typeof window !== 'undefined') {
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      // Ignore popup-blocker errors; caller still renders a direct anchor button
+    }
+  }
+  return url;
 }
 
 function mapClaim(row: any): NgoClaim {
@@ -210,11 +261,13 @@ function mapDeliveryTask(row: any): DeliveryTask {
     pickupWindowEnd: row.pickup_window_end,
     collectionDeadline: row.collection_deadline,
     status: row.status,
+    arrivedAtPickupAt: row.arrived_at_pickup_at,
     pickupConfirmedAt: row.pickup_confirmed_at,
     servingsCollected: row.servings_collected != null ? Number(row.servings_collected) : undefined,
     collectionDiscrepancy: row.collection_discrepancy,
     deliveryConfirmedAt: row.delivery_confirmed_at,
     servingsDelivered: row.servings_delivered != null ? Number(row.servings_delivered) : undefined,
+    completedAt: row.completed_at,
     incidentReported: !!row.incident_reported,
     incidentType: row.incident_type,
     incidentNotes: row.incident_notes,
@@ -277,7 +330,17 @@ export const ClaimsService = {
     pickupTime?: string,
     notes?: string,
     collectionMethod: 'ngo_delivery' | 'direct_ngo_pickup' = 'ngo_delivery'
-  ): Promise<{ acceptedBy: 'ngo' | 'rider'; claimId?: string; deliveryTaskId?: string; status: string; collectionMethod?: string }> {
+  ): Promise<{
+    acceptedBy: 'ngo' | 'rider';
+    claimId?: string;
+    deliveryTaskId?: string;
+    conversationId?: string;
+    pickupLat?: number;
+    pickupLng?: number;
+    pickupAddress?: string;
+    status: string;
+    collectionMethod?: string;
+  }> {
     if (!isValidUUID(foodListingId)) {
       throw new Error('Invalid food donation ID');
     }
@@ -295,6 +358,10 @@ export const ClaimsService = {
         acceptedBy: data.accepted_by,
         claimId: data.claim_id,
         deliveryTaskId: data.delivery_task_id,
+        conversationId: data.conversation_id,
+        pickupLat: data.pickup_lat,
+        pickupLng: data.pickup_lng,
+        pickupAddress: data.pickup_address,
         status: data.status,
         collectionMethod: data.collection_method || collectionMethod,
       };
@@ -513,6 +580,85 @@ export const ClaimsService = {
     }
 
     return results.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
+  },
+
+  async getOrEnsureRiderProfile(
+    riderUserId: string,
+    fallbackName?: string,
+    fallbackPhone?: string
+  ): Promise<RiderProfileRecord | null> {
+    if (!isValidUUID(riderUserId)) return null;
+
+    let { data: row } = await supabase
+      .from('riders')
+      .select('*')
+      .eq('user_id', riderUserId)
+      .maybeSingle();
+
+    if (!row) {
+      const { data: inserted } = await supabase
+        .from('riders')
+        .upsert(
+          {
+            user_id: riderUserId,
+            name: fallbackName || 'ShareBite Rider',
+            phone: fallbackPhone || '',
+            is_online: false,
+            is_available: true,
+          },
+          { onConflict: 'user_id' }
+        )
+        .select('*')
+        .maybeSingle();
+      row = inserted;
+    }
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      userId: row.user_id,
+      name: row.name || fallbackName || 'Rider',
+      phone: row.phone || fallbackPhone || '',
+      vehicleType: row.vehicle_type || 'bike',
+      vehicleNumber: row.vehicle_number || '',
+      profileImage: row.profile_image || undefined,
+      idVerified: !!row.id_verified,
+      isOnline: !!row.is_online,
+      isAvailable: row.is_available !== false,
+      rating: row.rating != null ? Number(row.rating) : 5.0,
+      totalDeliveries: Number(row.total_deliveries ?? 0),
+      totalEarnings: Number(row.total_earnings ?? 0),
+      totalDistanceKm: Number(row.total_distance_km ?? 0),
+      currentLat: row.current_lat ?? undefined,
+      currentLng: row.current_lng ?? undefined,
+    };
+  },
+
+  async setRiderOnlineStatus(
+    riderUserId: string,
+    nextOnline: boolean,
+    hasActiveTask: boolean,
+    fallbackName?: string,
+    fallbackPhone?: string
+  ): Promise<void> {
+    if (!isValidUUID(riderUserId)) return;
+
+    const existing = await ClaimsService.getOrEnsureRiderProfile(riderUserId, fallbackName, fallbackPhone);
+    if (existing) {
+      await supabase
+        .from('riders')
+        .update({
+          is_online: nextOnline,
+          is_available: nextOnline && !hasActiveTask,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', riderUserId);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('sharebite:rider-online', { detail: { isOnline: nextOnline } }));
+    }
   },
 
   async getMyDeliveryTasks(riderUserId: string): Promise<DeliveryTask[]> {

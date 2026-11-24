@@ -1036,7 +1036,7 @@ async function runSuite() {
     // Accept the initial donation ("Fresh Veg Biryani Trays") directly as Rider
     await sleep(600);
     const riderAccepted = await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')].find((b) => /^\s*accept\s+(pickup|job)\s*$/i.test(b.innerText));
+      const btn = [...document.querySelectorAll('button')].find((b) => /^\s*accept(\s+(pickup|job))?\s*$/i.test(b.innerText));
       if (!btn) return { ok: false, btns: [...document.querySelectorAll('button')].map((b) => b.innerText.trim()) };
       btn.click();
       return { ok: true, text: btn.innerText.trim() };
