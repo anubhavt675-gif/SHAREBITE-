@@ -28,7 +28,13 @@ end;
 $$;
 grant execute on function public.get_auth_user_role() to authenticated;
 
--- ─── 1. Schema Extensions on Existing Messaging Tables ───────────────────────
+-- ─── 1. Schema Extensions on Existing Messaging & Notifications Tables ───────
+alter table public.notifications
+  add column if not exists related_food_id uuid references public.food_listings(id) on delete set null,
+  add column if not exists related_claim_id uuid,
+  add column if not exists related_delivery_id uuid,
+  add column if not exists action_url text;
+
 alter table public.conversations
   add column if not exists status text not null default 'ACTIVE',
   add column if not exists closed_at timestamptz,
@@ -501,7 +507,81 @@ end;
 $$;
 grant execute on function public.get_or_create_delivery_conversation(uuid, uuid) to authenticated;
 
--- ─── 8. Ensure Single Unambiguous accept_donation Signature (No PGRST203) ────
+-- ─── 8. Harden Chat Message Trigger (Never Roll Back Message on Notif Error) ─
+create or replace function public.handle_new_chat_message()
+returns trigger
+security definer
+set search_path = public
+language plpgsql as $$
+declare
+  v_sender_name text;
+  v_conv        public.conversations%rowtype;
+  v_part        record;
+begin
+  update public.conversations
+  set last_message_at = new.created_at,
+      updated_at = new.created_at
+  where id = new.conversation_id
+  returning * into v_conv;
+
+  if coalesce(new.message_type, 'text') = 'system' then
+    return new;
+  end if;
+
+  select coalesce(full_name, organization_name, 'ShareBite Partner')
+  into v_sender_name
+  from public.profiles
+  where id = new.sender_id;
+
+  for v_part in
+    select user_id from public.conversation_participants
+    where conversation_id = new.conversation_id
+      and user_id <> new.sender_id
+  loop
+    begin
+      insert into public.notifications (
+        user_id, type, title, message, data, related_food_id, related_delivery_id, action_url
+      ) values (
+        v_part.user_id,
+        'new_message',
+        'New Message from ' || coalesce(v_sender_name, 'Partner'),
+        left(new.content, 140),
+        jsonb_build_object(
+          'conversation_id', new.conversation_id,
+          'message_id', new.id,
+          'sender_id', new.sender_id
+        ),
+        v_conv.related_listing_id,
+        v_conv.related_task_id,
+        '/chat/' || new.conversation_id
+      );
+    exception when others then
+      begin
+        insert into public.notifications (user_id, type, title, message, data, action_url)
+        values (
+          v_part.user_id,
+          'system',
+          'New Message from ' || coalesce(v_sender_name, 'Partner'),
+          left(new.content, 140),
+          jsonb_build_object('conversation_id', new.conversation_id, 'sender_id', new.sender_id),
+          '/chat/' || new.conversation_id
+        );
+      exception when others then
+        null;
+      end;
+    end;
+  end loop;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_handle_new_chat_message on public.messages;
+create trigger trg_handle_new_chat_message
+  after insert on public.messages
+  for each row execute function public.handle_new_chat_message();
+
+-- ─── 9. Ensure Single Unambiguous accept_donation Signature (No PGRST203) ────
 drop function if exists public.accept_donation(uuid, integer, timestamptz, text);
 
 -- ─── 9. Ensure Realtime Publication Includes Messaging Tables ────────────────
