@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, CheckCircle, ShieldAlert, Truck, Bike, Utensils } from 'lucide-react';
+import { Camera, CheckCircle, ShieldAlert, Truck, Bike, Utensils, Building2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { normalizeRole, getSafeDashboardPath } from '../../services/auth';
 import { ClaimsService, type RiderProfileRecord } from '../../services/claims';
+import { NGOService } from '../../services/ngo';
 import { supabase } from '../../lib/supabase';
 import styles from './ProfilePage.module.css';
 
@@ -11,10 +12,17 @@ export default function ProfilePage() {
   const { user, updateProfile, switchRole } = useAuth();
   const navigate = useNavigate();
   const [switchingRole, setSwitchingRole] = useState(false);
-  const isRider = normalizeRole(user?.role) === 'rider';
+  const canonicalRole = normalizeRole(user?.role);
+  const isRider = canonicalRole === 'rider';
+  const isNgo = canonicalRole === 'ngo';
   const [riderRec, setRiderRec] = useState<RiderProfileRecord | null>(null);
   const [vehicleType, setVehicleType] = useState('bike');
   const [vehicleNumber, setVehicleNumber] = useState('');
+  const [organizationName, setOrganizationName] = useState(user?.organizationName || '');
+  const [address, setAddress] = useState(user?.location?.address || '');
+  const [operatingHours, setOperatingHours] = useState(user?.operatingHours || '');
+  const [dailyCapacity, setDailyCapacity] = useState<number>(user?.dailyCapacity ?? 100);
+  const [serviceRadiusKm, setServiceRadiusKm] = useState<number>(user?.serviceRadiusKm ?? 15);
 
   useEffect(() => {
     if (!isRider || !user?.id) return;
@@ -72,7 +80,28 @@ export default function ProfilePage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await updateProfile({ name, bio, phone, location: { ...user?.location, city, address: user?.location?.address || '', latitude: (user?.location?.latitude ?? 0) as number, longitude: (user?.location?.longitude ?? 0) as number } });
+      await updateProfile({
+        name,
+        bio,
+        phone,
+        organizationName: isNgo ? organizationName : user?.organizationName,
+        location: {
+          ...user?.location,
+          city,
+          address: isNgo ? address : (user?.location?.address || ''),
+          latitude: (user?.location?.latitude ?? 0) as number,
+          longitude: (user?.location?.longitude ?? 0) as number,
+        },
+      });
+      if (isNgo && user?.id) {
+        await NGOService.updateAvailability(user.id, {
+          address,
+          city,
+          serviceRadiusKm,
+          dailyCapacity,
+          operatingHours,
+        });
+      }
       if (isRider && user?.id) {
         await supabase
           .from('riders')
@@ -286,6 +315,45 @@ export default function ProfilePage() {
                     <input className={styles.input} value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value)} placeholder="e.g. DL 01 AB 1234" />
                   ) : (
                     <p className={styles.value}>{vehicleNumber || 'Not set'}</p>
+                  )}
+                </div>
+              </>
+            )}
+            {isNgo && (
+              <>
+                <div className={styles.field}>
+                  <label className={styles.label}><Building2 size={12} style={{ display: 'inline', marginRight: 4 }} /> Organization Name</label>
+                  {editing ? (
+                    <input className={styles.input} value={organizationName} onChange={e => setOrganizationName(e.target.value)} placeholder="e.g. HopeCare NGO" />
+                  ) : (
+                    <p className={styles.value}>{organizationName || user?.organizationName || 'Not set'}</p>
+                  )}
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>NGO Address</label>
+                  {editing ? (
+                    <input className={styles.input} value={address} onChange={e => setAddress(e.target.value)} placeholder="Full drop-off / NGO address" />
+                  ) : (
+                    <p className={styles.value}>{address || user?.location?.address || 'Not set'}</p>
+                  )}
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>Operating Hours</label>
+                  {editing ? (
+                    <input className={styles.input} value={operatingHours} onChange={e => setOperatingHours(e.target.value)} placeholder="e.g. 8:00 AM - 10:00 PM" />
+                  ) : (
+                    <p className={styles.value}>{operatingHours || user?.operatingHours || 'Not set'}</p>
+                  )}
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>Daily Capacity (servings) & Service Radius (km)</label>
+                  {editing ? (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input className={styles.input} type="number" min={10} value={dailyCapacity} onChange={e => setDailyCapacity(Number(e.target.value) || 0)} placeholder="Capacity" />
+                      <input className={styles.input} type="number" min={1} max={100} value={serviceRadiusKm} onChange={e => setServiceRadiusKm(Number(e.target.value) || 15)} placeholder="Radius km" />
+                    </div>
+                  ) : (
+                    <p className={styles.value}>{dailyCapacity} servings/day · {serviceRadiusKm} km radius</p>
                   )}
                 </div>
               </>

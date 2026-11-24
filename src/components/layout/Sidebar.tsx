@@ -3,11 +3,13 @@ import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutGrid, Search, Utensils, MapPin, ClipboardList,
   BarChart2, User, Settings, ShieldCheck, ShieldAlert, X, Leaf,
-  Truck, Plus, MessageSquare, Heart, Building2, Home, Wallet, LogOut, Bike
+  Truck, Plus, MessageSquare, Heart, Building2, Home, Wallet, LogOut, Bike,
+  Package, ShoppingBag, Bell, ArrowRight
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { normalizeRole } from '../../services/auth';
 import { ChatService } from '../../services/chat';
+import { NotificationsService } from '../../services/notifications';
 import { ShareBiteLogo } from './Navbar';
 import UserAvatar from '../ui/UserAvatar';
 import styles from './Sidebar.module.css';
@@ -32,12 +34,16 @@ export default function Sidebar({ open, onClose }: Props) {
   const location = useLocation();
   const role = normalizeRole(user?.role);
   const isRider = role === 'rider';
+  const isNgo = role === 'ngo';
+  const isDedicatedShell = isRider || isNgo;
   const userId = user?.id;
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
   useEffect(() => {
     if (!userId) {
       setUnreadChatCount(0);
+      setUnreadNotifCount(0);
       return;
     }
     let active = true;
@@ -49,18 +55,32 @@ export default function Sidebar({ open, onClose }: Props) {
         .catch(() => {});
     };
 
+    const refreshNotifs = () => {
+      NotificationsService.getUnreadCount(userId)
+        .then((c) => {
+          if (active) setUnreadNotifCount(c > 0 ? c : 0);
+        })
+        .catch(() => {});
+    };
+
     refreshUnread();
+    refreshNotifs();
     const sub = ChatService.subscribeToUserConversations(userId, refreshUnread);
+    const notifSub = NotificationsService.subscribeToNotifications(userId, () => {
+      if (active) setUnreadNotifCount((c) => c + 1);
+    });
     window.addEventListener('sharebite:chat-unread-sync', refreshUnread);
 
     return () => {
       active = false;
       sub.unsubscribe();
+      notifSub.unsubscribe();
       window.removeEventListener('sharebite:chat-unread-sync', refreshUnread);
     };
   }, [userId]);
 
   const chatBadge = unreadChatCount > 0 ? String(unreadChatCount > 99 ? '99+' : unreadChatCount) : undefined;
+  const notifBadge = unreadNotifCount > 0 ? String(unreadNotifCount > 99 ? '99+' : unreadNotifCount) : undefined;
 
   // Purpose-built navigation strictly segregated by trusted role
   // Donor, NGO, Community, and Admin menus remain 100% preserved.
@@ -117,16 +137,50 @@ export default function Sidebar({ open, onClose }: Props) {
 
       case 'ngo':
         return [
-          { to: '/ngo-dashboard', icon: <LayoutGrid size={18} />, label: 'NGO Hub' },
-          { to: '/discover', icon: <Search size={18} />, label: 'Claim Surplus Food', highlight: true },
-          { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs Across India' },
-          { to: '/my-claims', icon: <ClipboardList size={18} />, label: 'Incoming Deliveries', badge: 'Active' },
-          { to: '/requests', icon: <Utensils size={18} />, label: 'Distribution Log' },
-          { to: '/map', icon: <MapPin size={18} />, label: 'Live Food Map' },
-          { to: '/chat', icon: <MessageSquare size={18} />, label: 'Coordination Chat', badge: chatBadge },
-          { to: '/impact-dashboard', icon: <BarChart2 size={18} />, label: 'Relief Impact' },
-          { to: '/verification', icon: <ShieldCheck size={18} />, label: 'NGO Verification' },
-          { to: '/profile', icon: <User size={18} />, label: 'Organisation Profile' },
+          {
+            to: '/ngo-dashboard',
+            icon: <Home size={18} />,
+            label: 'Dashboard',
+            matchPaths: ['/ngo-dashboard', '/ngo/dashboard'],
+          },
+          {
+            to: '/ngo/food-requests',
+            icon: <Package size={18} />,
+            label: 'Food Requests',
+            matchPaths: ['/ngo/food-requests', '/ngo/available-food'],
+          },
+          {
+            to: '/ngo/collections',
+            icon: <Bike size={18} />,
+            label: 'Active Collections',
+            matchPaths: ['/ngo/collections', '/my-claims'],
+          },
+          {
+            to: '/ngo/received-food',
+            icon: <ShoppingBag size={18} />,
+            label: 'Received Food',
+            matchPaths: ['/ngo/received-food'],
+          },
+          {
+            to: '/chat',
+            icon: <MessageSquare size={18} />,
+            label: 'Messages',
+            badge: chatBadge,
+            matchPaths: ['/chat'],
+          },
+          {
+            to: '/notifications',
+            icon: <Bell size={18} />,
+            label: 'Notifications',
+            badge: notifBadge,
+          },
+          {
+            to: '/ngo/reports',
+            icon: <BarChart2 size={18} />,
+            label: 'Reports',
+            matchPaths: ['/ngo/reports', '/impact-dashboard'],
+          },
+          { to: '/profile', icon: <User size={18} />, label: 'Profile' },
           { to: '/settings', icon: <Settings size={18} />, label: 'Settings' },
         ];
 
@@ -165,7 +219,7 @@ export default function Sidebar({ open, onClose }: Props) {
           { to: '/settings', icon: <Settings size={18} />, label: 'Settings' },
         ];
     }
-  }, [role, chatBadge]);
+  }, [role, chatBadge, notifBadge]);
 
   const roleLabel = useMemo(() => {
     if (!role) return 'ShareBite Member';
@@ -192,10 +246,14 @@ export default function Sidebar({ open, onClose }: Props) {
   return (
     <>
       {open && <div className={styles.overlay} onClick={onClose} />}
-      <aside className={`${styles.sidebar} ${isRider ? styles.riderSidebar : ''} ${open ? styles.open : ''}`}>
-        {isRider ? (
+      <aside className={`${styles.sidebar} ${isDedicatedShell ? styles.riderSidebar : ''} ${open ? styles.open : ''}`}>
+        {isDedicatedShell ? (
           <div className={styles.riderBrandTop}>
-            <Link to="/rider-dashboard" className={styles.riderLogoLink} onClick={() => { if (window.innerWidth < 1024) onClose(); }}>
+            <Link
+              to={isNgo ? '/ngo-dashboard' : '/rider-dashboard'}
+              className={styles.riderLogoLink}
+              onClick={() => { if (window.innerWidth < 1024) onClose(); }}
+            >
               <ShareBiteLogo />
             </Link>
             <button className={styles.closeBtnMobileOnly} onClick={onClose} aria-label="Close sidebar">
@@ -213,7 +271,7 @@ export default function Sidebar({ open, onClose }: Props) {
           </div>
         )}
 
-        {user && !isRider && (
+        {user && !isDedicatedShell && (
           <div className={styles.userCard}>
             <UserAvatar size={48} src={user.avatar} name={user.name} />
             <div className={styles.userInfo}>
@@ -224,7 +282,7 @@ export default function Sidebar({ open, onClose }: Props) {
                 </span>
               </div>
               <p className={styles.userTagline}>
-                {role === 'ngo' ? 'Feeding communities 🍲' : 'Sharing food, saving lives 🌱'}
+                Sharing food, saving lives 🌱
               </p>
             </div>
           </div>
@@ -267,7 +325,7 @@ export default function Sidebar({ open, onClose }: Props) {
             );
           })}
 
-          {isRider && (
+          {isDedicatedShell && (
             <button
               type="button"
               className={`${styles.navItem} ${styles.logoutNavBtn}`}
@@ -314,7 +372,53 @@ export default function Sidebar({ open, onClose }: Props) {
           </div>
         )}
 
-        {isRider ? (
+        {isNgo ? (
+          <div
+            style={{
+              margin: '12px 14px 16px',
+              padding: '16px 14px',
+              background: 'linear-gradient(180deg, #fff8f0 0%, #ffefe0 100%)',
+              border: '1px solid #fed7aa',
+              borderRadius: 16,
+              textAlign: 'center',
+            }}
+          >
+            <div aria-hidden="true" style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}>
+              <svg width="64" height="52" viewBox="0 0 72 58" fill="none">
+                <path d="M36 6C32.5 2 26 2.5 24 7C22 11.5 26 16 36 22C46 16 50 11.5 48 7C46 2.5 39.5 2 36 6Z" fill="#EF4444" />
+                <circle cx="24" cy="28" r="7" fill="#16A34A" />
+                <circle cx="48" cy="27" r="6.5" fill="#F97316" />
+                <circle cx="36" cy="26" r="7.5" fill="#FACC15" />
+                <rect x="14" y="28" width="44" height="24" rx="6" fill="#D97706" />
+                <rect x="18" y="32" width="36" height="16" rx="4" fill="#F59E0B" />
+              </svg>
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: 13.5, fontWeight: 800, color: '#192538', lineHeight: 1.3 }}>
+              Help Us<br />Feed More People
+            </p>
+            <Link
+              to="/ngo/food-requests?create=1"
+              onClick={() => { if (window.innerWidth < 1024) onClose(); }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                width: '100%',
+                background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+                color: '#FFFFFF',
+                padding: '9px 12px',
+                borderRadius: 10,
+                fontSize: 12.5,
+                fontWeight: 700,
+                textDecoration: 'none',
+                boxShadow: '0 4px 12px rgba(234, 88, 12, 0.25)',
+              }}
+            >
+              Create Food Request <ArrowRight size={13} />
+            </Link>
+          </div>
+        ) : isRider ? (
           <div className={styles.riderHungerCard}>
             <div className={styles.scooterGraphic} aria-hidden="true">
               <svg width="88" height="58" viewBox="0 0 100 66" fill="none">

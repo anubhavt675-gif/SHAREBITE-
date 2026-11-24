@@ -42,6 +42,13 @@ const DONOR_QUICK_MESSAGES = [
   'Food is packed and ready for pickup.',
 ];
 
+const NGO_QUICK_MESSAGES = [
+  'Our NGO team is ready to receive the food.',
+  'Please share the pickup/handover gate details.',
+  'Our volunteer is on the way for direct collection.',
+  'Thank you! We will record receipt upon handover.',
+];
+
 const DELIVERY_STATUS_LABELS: Record<string, string> = {
   rider_assigned: 'Active Delivery · Rider Assigned',
   going_to_pickup: 'Active Delivery · On the Way',
@@ -334,8 +341,18 @@ export default function ChatPage() {
     await dispatchMessage(msg);
   };
 
-  const quickOptions = userRole === 'donor' ? DONOR_QUICK_MESSAGES : RIDER_QUICK_MESSAGES;
-  const activeDeliveryRoute = userRole === 'rider' ? '/rider-dashboard' : '/donor-dashboard';
+  const quickOptions =
+    userRole === 'donor'
+      ? DONOR_QUICK_MESSAGES
+      : userRole === 'ngo'
+      ? NGO_QUICK_MESSAGES
+      : RIDER_QUICK_MESSAGES;
+  const activeDeliveryRoute =
+    userRole === 'ngo'
+      ? '/ngo/collections'
+      : userRole === 'rider'
+      ? '/rider-dashboard'
+      : '/donor-dashboard';
   const activeStatusLabel = activeConv
     ? activeConv.status === 'CLOSED'
       ? 'Delivery Completed'
@@ -357,7 +374,11 @@ export default function ChatPage() {
           <div className={styles.sidebarHeader}>
             <div>
               <h2 className={styles.sidebarTitle}>Pickup & Delivery Chat</h2>
-              <p className={styles.sidebarSub}>Private channel between Donor & assigned Rider</p>
+              <p className={styles.sidebarSub}>
+                {userRole === 'ngo'
+                  ? 'Private coordination with assigned Riders & Donors'
+                  : 'Private channel between Donor & assigned Rider'}
+              </p>
             </div>
           </div>
           <div className={styles.convList}>
@@ -373,6 +394,8 @@ export default function ChatPage() {
                 <span>
                   {userRole === 'rider'
                     ? 'Accept an available food pickup to unlock direct private chat with the donor.'
+                    : userRole === 'ngo'
+                    ? 'Claim an available food donation or wait for a rider assignment to unlock direct coordination chat.'
                     : 'Once a rider accepts your food donation, your private coordination chat appears here automatically.'}
                 </span>
               </div>

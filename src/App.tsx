@@ -48,6 +48,11 @@ const RiderDashboardPage = lazyWithRetry(() => import('./pages/app/RiderDashboar
 const RiderDeliveriesPage = lazyWithRetry(() => import('./pages/app/RiderDeliveriesPage'));
 const RiderEarningsPage = lazyWithRetry(() => import('./pages/app/RiderEarningsPage'));
 const NGOClaimsDashboard = lazyWithRetry(() => import('./pages/app/NGOClaimsDashboard'));
+const NGODashboardPage = lazyWithRetry(() => import('./pages/app/NGODashboardPage'));
+const NGOFoodRequestsPage = lazyWithRetry(() => import('./pages/app/NGOFoodRequestsPage'));
+const NGOReceivedFoodPage = lazyWithRetry(() => import('./pages/app/NGOReceivedFoodPage'));
+const NGOReportsPage = lazyWithRetry(() => import('./pages/app/NGOReportsPage'));
+const NGOVolunteersPage = lazyWithRetry(() => import('./pages/app/NGOVolunteersPage'));
 const DonorDonationsStatus = lazyWithRetry(() => import('./pages/app/DonorDonationsStatus'));
 const ChatPage = lazyWithRetry(() => import('./pages/app/ChatPage'));
 const NGODiscoveryPage = lazyWithRetry(() => import('./pages/app/NGODiscoveryPage'));
@@ -228,11 +233,15 @@ function AppRoutes() {
             <Route path="/rider/earnings" element={<RoleRouteGuard allowedRoles={['rider', 'volunteer', 'admin']}><RiderEarningsPage /></RoleRouteGuard>} />
 
             {/* Role 3: NGO / Community Acceptor Experience */}
-            <Route path="/my-claims" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
-            <Route path="/ngo-dashboard" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
-            <Route path="/ngo/dashboard" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
+            <Route path="/ngo-dashboard" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGODashboardPage /></RoleRouteGuard>} />
+            <Route path="/ngo/dashboard" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGODashboardPage /></RoleRouteGuard>} />
+            <Route path="/ngo/food-requests" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOFoodRequestsPage /></RoleRouteGuard>} />
+            <Route path="/ngo/available-food" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOFoodRequestsPage /></RoleRouteGuard>} />
             <Route path="/ngo/collections" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
-            <Route path="/ngo/available-food" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><DiscoverPage /></RoleRouteGuard>} />
+            <Route path="/my-claims" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOClaimsDashboard /></RoleRouteGuard>} />
+            <Route path="/ngo/received-food" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOReceivedFoodPage /></RoleRouteGuard>} />
+            <Route path="/ngo/reports" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOReportsPage /></RoleRouteGuard>} />
+            <Route path="/ngo/volunteers" element={<RoleRouteGuard allowedRoles={['ngo', 'receiver', 'acceptor', 'admin']}><NGOVolunteersPage /></RoleRouteGuard>} />
 
             {/* Role 4: Beneficiary / Community Member Experience */}
             <Route path="/community-dashboard" element={<RoleRouteGuard allowedRoles={['community', 'admin']}><BeneficiaryDashboardPage /></RoleRouteGuard>} />

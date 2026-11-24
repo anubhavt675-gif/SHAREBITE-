@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { ClaimsService, type NgoClaim, type DistributionRecord } from '../../services/claims';
 import { NGOService } from '../../services/ngo';
+import { NGOOperationsService } from '../../services/ngoOperations';
 import { LocationService } from '../../services/location';
 import { ChatService } from '../../services/chat';
 import LiveTrackingMap from '../../components/map/LiveTrackingMap';
@@ -32,11 +33,13 @@ const STATUS_LABELS: Record<string, string> = {
 
 interface ReceiptModalProps {
   claim: NgoClaim;
+  userId?: string;
+  isDirectPickup: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-function ReceiptConfirmModal({ claim, onClose, onSuccess }: ReceiptModalProps) {
+function ReceiptConfirmModal({ claim, userId, isDirectPickup, onClose, onSuccess }: ReceiptModalProps) {
   const [quantity, setQuantity] = useState(claim.servingsClaimed);
   const [conditionNotes, setConditionNotes] = useState('');
   const [safetyConcern, setSafetyConcern] = useState(false);
@@ -52,14 +55,26 @@ function ReceiptConfirmModal({ claim, onClose, onSuccess }: ReceiptModalProps) {
     setError('');
     setLoading(true);
     try {
-      await ClaimsService.confirmNgoReceipt(
-        claim.deliveryTaskId,
-        quantity,
-        conditionNotes || undefined,
-        safetyConcern,
-        safetyNotes || undefined,
-        claim.id
-      );
+      if (isDirectPickup && userId) {
+        await NGOOperationsService.completeDirectCollection({
+          claimId: claim.id,
+          foodListingId: claim.foodListingId,
+          ngoId: userId,
+          quantityReceived: quantity,
+          conditionNotes: conditionNotes || undefined,
+          safetyConcern,
+          safetyNotes: safetyNotes || undefined,
+        });
+      } else {
+        await ClaimsService.confirmNgoReceipt(
+          claim.deliveryTaskId,
+          quantity,
+          conditionNotes || undefined,
+          safetyConcern,
+          safetyNotes || undefined,
+          claim.id
+        );
+      }
       onSuccess();
       onClose();
     } catch (e: any) {
@@ -73,9 +88,13 @@ function ReceiptConfirmModal({ claim, onClose, onSuccess }: ReceiptModalProps) {
     <div className={styles.receiptModal}>
       <div className={styles.receiptModalCard}>
         <button className={styles.modalClose} onClick={onClose}><X size={14} /></button>
-        <h3 className={styles.modalTitle}>Confirm Food Receipt</h3>
+        <h3 className={styles.modalTitle}>
+          {isDirectPickup ? 'Complete Direct Collection & Record Receipt' : 'Acknowledge Food Receipt'}
+        </h3>
         <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-          Record the food you actually received from the rider. This starts your distribution workflow.
+          {isDirectPickup
+            ? 'Record the food collected directly from the donor. Completing this direct collection moves the food to Received Food and closes the Donor–NGO chat.'
+            : 'Record the food actually received from the rider. The assigned rider remains responsible for finalizing delivery completion.'}
         </p>
 
         <div className={styles.formGrid}>
@@ -283,6 +302,8 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
   const [distribution, setDistribution] = useState<DistributionRecord | null>(null);
   const [loadingDist, setLoadingDist] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [capacityConfirmed, setCapacityConfirmed] = useState(false);
+  const [confirmingCapacity, setConfirmingCapacity] = useState(false);
   const [error, setError] = useState('');
 
   const handleOpenChat = async () => {
@@ -344,6 +365,20 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
 
   const isDirectPickup = !claim.deliveryTaskId && claim.collectionMethod === 'direct_ngo_pickup';
 
+  const handleConfirmCapacity = async () => {
+    setError('');
+    setConfirmingCapacity(true);
+    try {
+      await NGOOperationsService.confirmIncomingCapacity(claim.id);
+      setCapacityConfirmed(true);
+      onRefresh();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to confirm capacity');
+    } finally {
+      setConfirmingCapacity(false);
+    }
+  };
+
   const handleConfirmDirectPickup = async () => {
     setError('');
     setCancelling(true);
@@ -359,6 +394,10 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
 
   const canCancel = ['pending', 'confirmed', 'awaiting_rider'].includes(claim.status);
   const canNgoDirectPickup = isDirectPickup && claim.status === 'confirmed';
+  const canConfirmCapacity =
+    !isDirectPickup &&
+    !capacityConfirmed &&
+    ['confirmed', 'awaiting_rider', 'rider_assigned', 'pickup_in_progress', 'food_collected', 'in_transit'].includes(claim.status);
   const needsDeliveryTask = (claim.status === 'confirmed' || claim.status === 'awaiting_rider') && !claim.deliveryTaskId;
   const canConfirmReceipt =
     !claim.distributionRecordId &&
@@ -371,7 +410,13 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
   return (
     <div className={styles.claimCard}>
       {showReceiptModal && (
-        <ReceiptConfirmModal claim={claim} onClose={() => setShowReceiptModal(false)} onSuccess={() => { onRefresh(); setShowReceiptModal(false); }} />
+        <ReceiptConfirmModal
+          claim={claim}
+          userId={userId}
+          isDirectPickup={isDirectPickup}
+          onClose={() => setShowReceiptModal(false)}
+          onSuccess={() => { onRefresh(); setShowReceiptModal(false); }}
+        />
       )}
 
       <div className={styles.claimHeader}>
@@ -478,9 +523,27 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
           </button>
         )}
 
+        {canConfirmCapacity && (
+          <button className={`${styles.btn} ${styles.btnOutline}`} onClick={handleConfirmCapacity} disabled={confirmingCapacity}>
+            {confirmingCapacity ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+            Confirm Capacity
+          </button>
+        )}
+
+        {capacityConfirmed && !isDirectPickup && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '5px 10px', borderRadius: 999 }}>
+            <CheckCircle size={12} /> Capacity Confirmed
+          </span>
+        )}
+
         {canConfirmReceipt && (
-          <button className={`${styles.btn} ${styles.btnSuccess}`} onClick={() => setShowReceiptModal(true)}>
-            <CheckCircle size={14} /> Confirm Receipt
+          <button
+            className={`${styles.btn} ${styles.btnSuccess}`}
+            onClick={() => setShowReceiptModal(true)}
+            data-testid={isDirectPickup ? 'complete-direct-collection-btn' : 'acknowledge-receipt-btn'}
+          >
+            <CheckCircle size={14} />
+            {isDirectPickup ? 'Complete Direct Collection' : 'Acknowledge Receipt'}
           </button>
         )}
 
@@ -617,8 +680,8 @@ export default function NGOClaimsDashboard() {
   return (
     <div className={styles.page}>
       <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>My Claims & Distribution</h1>
-        <p className={styles.pageSubtitle}>Manage your food claims and record distribution to beneficiaries</p>
+        <h1 className={styles.pageTitle}>Active Collections & Distribution</h1>
+        <p className={styles.pageSubtitle}>Track rider-assisted deliveries, complete direct NGO pickups, and record beneficiary distribution</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 12 }}>
           <button
             type="button"
