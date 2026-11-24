@@ -506,7 +506,7 @@ export const ClaimsService = {
       };
     }
 
-    if (error && /gen_random_bytes|Donors cannot accept their own food donation/i.test(error.message || '')) {
+    if (error && !/ALREADY_CLAIMED/i.test(error.message || '')) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -554,7 +554,7 @@ export const ClaimsService = {
             .update({
               status: 'reserved',
               available_servings: 0,
-              assigned_rider_id: riderProf?.id ?? null,
+              assigned_rider_id: riderProf?.id ?? user.id,
               accepted_by_role: 'rider',
               packaging_notes: withRiderStatusTag(listing.packaging_notes, 'rider_assigned'),
               updated_at: new Date().toISOString(),
@@ -607,9 +607,55 @@ export const ClaimsService = {
               acceptedOk = true;
             }
           }
+
+          // Also attempt to record assigned rider on listing directly
+          try {
+            await supabase
+              .from('food_listings')
+              .update({
+                status: 'reserved',
+                available_servings: 0,
+                assigned_rider_id: riderProf?.id ?? user.id,
+                accepted_by_role: 'rider',
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', foodListingId);
+          } catch {}
         }
 
         if (acceptedOk) {
+          let resolvedTaskId = foodListingId;
+
+          // Attempt to insert delivery_tasks row if not already created
+          try {
+            const { data: taskRow } = await supabase
+              .from('delivery_tasks')
+              .insert({
+                food_listing_id: foodListingId,
+                rider_id: riderProf?.id || user.id,
+                donor_id: listing.donor_id,
+                assignment_type: 'rider_direct_pickup',
+                pickup_address: listing.pickup_address || listing.city || 'Donor Location',
+                pickup_lat: listing.latitude,
+                pickup_lng: listing.longitude,
+                dropoff_address: 'Community Distribution / Partner Shelter',
+                food_title: listing.title,
+                servings_required: reqServings,
+                quantity_unit: listing.quantity_unit || 'servings',
+                collection_deadline: listing.available_until,
+                instructions: taggedNotes,
+                status: 'rider_assigned',
+                pickup_code: derivePickupCode(foodListingId),
+                rider_assigned_at: new Date().toISOString(),
+              })
+              .select('id')
+              .maybeSingle();
+
+            if (taskRow?.id) {
+              resolvedTaskId = taskRow.id;
+            }
+          } catch {}
+
           const riderName = riderProf?.name || user.user_metadata?.full_name || 'ShareBite Rider';
           try {
             await supabase.from('notifications').insert({
@@ -619,7 +665,8 @@ export const ClaimsService = {
               message: `Order Accepted! Rider ${riderName} has accepted "${listing.title || 'your food donation'}" and is coming to pick up your order from ${listing.pickup_address || 'your pickup location'}.`,
               data: {
                 food_listing_id: foodListingId,
-                delivery_task_id: foodListingId,
+                delivery_task_id: resolvedTaskId,
+                rider_id: riderProf?.id || user.id,
               },
               related_food_id: foodListingId,
               action_url: '/donor-dashboard',
@@ -630,20 +677,20 @@ export const ClaimsService = {
                 user_id: user.id,
                 type: 'rider_assigned',
                 title: 'Donation Acceptance Confirmed!',
-                message: `Order Accepted! You accepted pickup at ${listing.pickup_address || 'donor location'}. Navigate now in Google Maps to collect the food.`,
+                message: `Order Accepted! You accepted pickup for "${listing.title || 'food donation'}" at ${listing.pickup_address || 'donor location'}. Live in-app tracking started.`,
                 data: {
                   food_listing_id: foodListingId,
-                  delivery_task_id: foodListingId,
+                  delivery_task_id: resolvedTaskId,
                 },
                 related_food_id: foodListingId,
-                action_url: '/rider/deliveries?tab=active',
+                action_url: '/rider-dashboard',
               });
             }
           } catch {}
 
           return {
             acceptedBy: 'rider',
-            deliveryTaskId: foodListingId,
+            deliveryTaskId: resolvedTaskId,
             pickupLat: listing.latitude,
             pickupLng: listing.longitude,
             pickupAddress: listing.pickup_address || listing.city,
@@ -966,147 +1013,201 @@ export const ClaimsService = {
 
   async getMyDeliveryTasks(riderUserId: string): Promise<DeliveryTask[]> {
     if (!isValidUUID(riderUserId)) return [];
-    const { data: riderData } = await supabase
-      .from('riders')
-      .select('id, name, phone')
-      .eq('user_id', riderUserId)
+
+    // Ensure rider profile exists and resolve rider IDs (both riders.id and auth user_id)
+    let riderRow: any = null;
+    try {
+      riderRow = await ClaimsService.getOrEnsureRiderProfile(riderUserId);
+    } catch {}
+
+    const { data: userProfile } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone')
+      .eq('id', riderUserId)
       .maybeSingle();
 
-    if (!riderData?.id) return [];
+    const riderName = riderRow?.name || userProfile?.full_name || 'ShareBite Rider';
+    const riderPhone = riderRow?.phone || userProfile?.phone || '';
+    const possibleRiderIds = [riderRow?.id, riderUserId].filter(Boolean) as string[];
 
-    const { data, error } = await supabase
-      .from('rider_tasks_view')
-      .select('*')
-      .eq('rider_id', riderData.id)
-      .order('created_at', { ascending: false });
+    const tasks: DeliveryTask[] = [];
+    const seenFoodIds = new Set<string>();
+    const seenTaskIds = new Set<string>();
 
-    const tasks: DeliveryTask[] = !error && data ? data.map(mapDeliveryTask) : [];
-    const seenFoodIds = new Set(tasks.map((t) => t.foodListingId));
-
-    // Also include single-account or direct food_listings assigned to this rider without a delivery_tasks row
-    let { data: directListings, error: directErr } = await supabase
-      .from('food_listings')
-      .select('*, donor:profiles!food_listings_donor_id_fkey(id, full_name, organization_name, phone)')
-      .eq('assigned_rider_id', riderData.id)
-      .order('updated_at', { ascending: false });
-
-    if (directErr) {
-      const fb = await supabase
-        .from('food_listings')
+    // 1. Query delivery_tasks / rider_tasks_view by rider_id (both riders.id and auth user_id)
+    if (possibleRiderIds.length > 0) {
+      const { data: viewTasks } = await supabase
+        .from('rider_tasks_view')
         .select('*')
-        .eq('assigned_rider_id', riderData.id)
-        .order('updated_at', { ascending: false });
-      directListings = fb.data;
-    }
+        .in('rider_id', possibleRiderIds)
+        .order('created_at', { ascending: false });
 
-    if (directListings) {
-      for (const fl of directListings) {
-        if (seenFoodIds.has(fl.id)) continue;
-        const inferredStatus = extractRiderStatusFromListing(fl);
-        const cleanNotes = stripRiderStatusTag(fl.packaging_notes);
-        tasks.push({
-          id: fl.id,
-          foodListingId: fl.id,
-          riderId: riderData.id,
-          donorId: fl.donor_id,
-          assignmentType: 'rider_direct_pickup',
-          pickupAddress: fl.pickup_address || fl.city || 'Donor Location',
-          pickupLat: fl.latitude,
-          pickupLng: fl.longitude,
-          dropoffAddress: 'Community Distribution / Shelter',
-          foodTitle: fl.title,
-          foodDescription: fl.description,
-          servingsRequired: Number(fl.servings ?? fl.available_servings ?? 1),
-          quantityValue: Number(fl.quantity_value ?? fl.servings ?? 1),
-          quantityUnit: fl.quantity_unit || 'servings',
-          preparationTime: fl.preparation_date || fl.available_from || fl.created_at,
-          collectionDeadline: fl.available_until,
-          status: inferredStatus,
-          incidentReported: false,
-          instructions: cleanNotes || fl.description,
-          riderAssignedAt: fl.updated_at || fl.created_at,
-          createdAt: fl.created_at,
-          updatedAt: fl.updated_at,
-          foodType: fl.food_type,
-          foodCategory: fl.category,
-          foodImageUrl: fl.image_url,
-          donorName: fl.donor?.full_name || fl.donor?.organization_name || 'Verified Food Donor',
-          donorPhone: fl.donor?.phone,
-          riderName: riderData.name,
-          riderPhone: riderData.phone,
-          riderUserId,
-          pickupCode: derivePickupCode(fl.id),
-          isDirectFoodOpportunity: false,
-        });
-        seenFoodIds.add(fl.id);
+      if (viewTasks && viewTasks.length > 0) {
+        for (const t of viewTasks) {
+          const mapped = mapDeliveryTask(t);
+          tasks.push(mapped);
+          if (mapped.id) seenTaskIds.add(mapped.id);
+          if (mapped.foodListingId) seenFoodIds.add(mapped.foodListingId);
+        }
+      } else {
+        const { data: rawTasks } = await supabase
+          .from('delivery_tasks')
+          .select('*')
+          .in('rider_id', possibleRiderIds)
+          .order('created_at', { ascending: false });
+
+        if (rawTasks && rawTasks.length > 0) {
+          for (const dt of rawTasks) {
+            if (seenTaskIds.has(dt.id)) continue;
+            seenTaskIds.add(dt.id);
+            if (dt.food_listing_id) seenFoodIds.add(dt.food_listing_id);
+            tasks.push(mapDeliveryTask(dt));
+          }
+        }
       }
     }
 
-    // Also include reservation-backed rider pickups (when reserve_food fallback ran for another donor's food)
-    let { data: riderReservations, error: resQueryErr } = await supabase
-      .from('reservations')
-      .select('*, food:food_listings(*, donor:profiles!food_listings_donor_id_fkey(id, full_name, organization_name, phone))')
-      .eq('user_id', riderUserId)
-      .order('updated_at', { ascending: false });
-
-    if (resQueryErr) {
-      const fbRes = await supabase
-        .from('reservations')
-        .select('*, food:food_listings(*)')
-        .eq('user_id', riderUserId)
+    // 2. Query food_listings where assigned_rider_id is either riderRow.id or riderUserId
+    if (possibleRiderIds.length > 0) {
+      const { data: assignedListings } = await supabase
+        .from('food_listings')
+        .select('*')
+        .in('assigned_rider_id', possibleRiderIds)
         .order('updated_at', { ascending: false });
-      riderReservations = fbRes.data;
+
+      if (assignedListings && assignedListings.length > 0) {
+        const donorIds = [...new Set(assignedListings.map((l: any) => l.donor_id).filter(Boolean))];
+        const { data: donorProfiles } =
+          donorIds.length > 0
+            ? await supabase.from('profiles').select('id, full_name, organization_name, phone').in('id', donorIds)
+            : { data: [] as any[] };
+        const donorMap = new Map((donorProfiles || []).map((p: any) => [p.id, p]));
+
+        for (const fl of assignedListings) {
+          if (seenFoodIds.has(fl.id) || seenTaskIds.has(fl.id)) continue;
+          seenFoodIds.add(fl.id);
+          seenTaskIds.add(fl.id);
+          const donor = donorMap.get(fl.donor_id);
+          const inferredStatus = extractRiderStatusFromListing(fl);
+          const cleanNotes = stripRiderStatusTag(fl.packaging_notes);
+          tasks.push({
+            id: fl.id,
+            foodListingId: fl.id,
+            riderId: riderRow?.id || riderUserId,
+            donorId: fl.donor_id,
+            assignmentType: 'rider_direct_pickup',
+            pickupAddress: fl.pickup_address || fl.city || 'Donor Location',
+            pickupLat: fl.latitude,
+            pickupLng: fl.longitude,
+            dropoffAddress: 'Community Distribution / Partner Shelter',
+            foodTitle: fl.title,
+            foodDescription: fl.description,
+            servingsRequired: Number(fl.servings ?? fl.available_servings ?? 1),
+            quantityValue: Number(fl.quantity_value ?? fl.servings ?? 1),
+            quantityUnit: fl.quantity_unit || 'servings',
+            preparationTime: fl.preparation_date || fl.available_from || fl.created_at,
+            collectionDeadline: fl.available_until,
+            status: inferredStatus,
+            incidentReported: false,
+            instructions: cleanNotes || fl.description,
+            riderAssignedAt: fl.updated_at || fl.created_at,
+            createdAt: fl.created_at,
+            updatedAt: fl.updated_at,
+            foodType: fl.food_type,
+            foodCategory: fl.category,
+            foodImageUrl: fl.image_url,
+            donorName: donor?.full_name || donor?.organization_name || 'Verified Food Donor',
+            donorPhone: donor?.phone,
+            riderName,
+            riderPhone,
+            riderUserId,
+            pickupCode: derivePickupCode(fl.id),
+            isDirectFoodOpportunity: false,
+          });
+        }
+      }
     }
 
-    if (riderReservations) {
-      for (const res of riderReservations) {
-        const fl = res.food;
-        if (!fl?.id || seenFoodIds.has(fl.id)) continue;
-        seenFoodIds.add(fl.id);
-        const resStatusFallback =
-          res.status === 'completed'
-            ? 'completed'
-            : res.status === 'picked_up'
-            ? 'food_collected'
-            : res.status === 'cancelled'
-            ? 'cancelled'
-            : fl.status;
-        const inferredStatus = extractRiderStatusFromText(res.notes, resStatusFallback);
-        const cleanNotes = stripRiderStatusTag(res.notes);
-        tasks.push({
-          id: fl.id,
-          foodListingId: fl.id,
-          riderId: riderData.id,
-          donorId: fl.donor_id,
-          assignmentType: 'rider_direct_pickup',
-          pickupAddress: fl.pickup_address || fl.city || 'Donor Location',
-          pickupLat: fl.latitude,
-          pickupLng: fl.longitude,
-          dropoffAddress: 'Community Distribution / Shelter',
-          foodTitle: fl.title,
-          foodDescription: fl.description,
-          servingsRequired: Number(res.servings ?? fl.servings ?? fl.available_servings ?? 1),
-          quantityValue: Number(fl.quantity_value ?? res.servings ?? fl.servings ?? 1),
-          quantityUnit: fl.quantity_unit || 'servings',
-          preparationTime: fl.preparation_date || fl.available_from || fl.created_at,
-          collectionDeadline: fl.available_until,
-          status: inferredStatus,
-          incidentReported: false,
-          instructions: cleanNotes || fl.description,
-          riderAssignedAt: res.created_at || fl.updated_at || fl.created_at,
-          createdAt: res.created_at || fl.created_at,
-          updatedAt: res.updated_at || fl.updated_at,
-          foodType: fl.food_type,
-          foodCategory: fl.category,
-          foodImageUrl: fl.image_url,
-          donorName: fl.donor?.full_name || fl.donor?.organization_name || 'Verified Food Donor',
-          donorPhone: fl.donor?.phone,
-          riderName: riderData.name,
-          riderPhone: riderData.phone,
-          riderUserId,
-          pickupCode: derivePickupCode(fl.id),
-          isDirectFoodOpportunity: false,
-        });
+    // 3. Query reservations table for this rider (user_id = riderUserId)
+    const { data: riderReservations } = await supabase
+      .from('reservations')
+      .select('*')
+      .eq('user_id', riderUserId)
+      .neq('status', 'cancelled')
+      .order('created_at', { ascending: false });
+
+    if (riderReservations && riderReservations.length > 0) {
+      const neededListingIds = riderReservations
+        .map((r: any) => r.food_listing_id)
+        .filter((id: string) => id && !seenFoodIds.has(id));
+
+      if (neededListingIds.length > 0) {
+        const { data: resListings } = await supabase
+          .from('food_listings')
+          .select('*')
+          .in('id', neededListingIds);
+
+        if (resListings && resListings.length > 0) {
+          const donorIds = [...new Set(resListings.map((l: any) => l.donor_id).filter(Boolean))];
+          const { data: donorProfiles } =
+            donorIds.length > 0
+              ? await supabase.from('profiles').select('id, full_name, organization_name, phone').in('id', donorIds)
+              : { data: [] as any[] };
+          const donorMap = new Map((donorProfiles || []).map((p: any) => [p.id, p]));
+          const listingMap = new Map(resListings.map((l: any) => [l.id, l]));
+
+          for (const res of riderReservations) {
+            const fl = listingMap.get(res.food_listing_id);
+            if (!fl || seenFoodIds.has(fl.id) || seenTaskIds.has(fl.id)) continue;
+            seenFoodIds.add(fl.id);
+            seenTaskIds.add(fl.id);
+            const donor = donorMap.get(fl.donor_id);
+            const resStatusFallback =
+              res.status === 'completed'
+                ? 'completed'
+                : res.status === 'picked_up'
+                ? 'food_collected'
+                : res.status === 'cancelled'
+                ? 'cancelled'
+                : fl.status;
+            const inferredStatus = extractRiderStatusFromText(res.notes, resStatusFallback);
+            const cleanNotes = stripRiderStatusTag(res.notes);
+            tasks.push({
+              id: fl.id,
+              foodListingId: fl.id,
+              riderId: riderRow?.id || riderUserId,
+              donorId: fl.donor_id,
+              assignmentType: 'rider_direct_pickup',
+              pickupAddress: fl.pickup_address || fl.city || 'Donor Location',
+              pickupLat: fl.latitude,
+              pickupLng: fl.longitude,
+              dropoffAddress: 'Community Distribution / Partner Shelter',
+              foodTitle: fl.title,
+              foodDescription: fl.description,
+              servingsRequired: Number(res.servings ?? fl.servings ?? fl.available_servings ?? 1),
+              quantityValue: Number(fl.quantity_value ?? res.servings ?? fl.servings ?? 1),
+              quantityUnit: fl.quantity_unit || 'servings',
+              preparationTime: fl.preparation_date || fl.available_from || fl.created_at,
+              collectionDeadline: fl.available_until,
+              status: inferredStatus,
+              incidentReported: false,
+              instructions: cleanNotes || fl.description,
+              riderAssignedAt: res.created_at || fl.updated_at || fl.created_at,
+              createdAt: res.created_at || fl.created_at,
+              updatedAt: res.updated_at || fl.updated_at,
+              foodType: fl.food_type,
+              foodCategory: fl.category,
+              foodImageUrl: fl.image_url,
+              donorName: donor?.full_name || donor?.organization_name || 'Verified Food Donor',
+              donorPhone: donor?.phone,
+              riderName,
+              riderPhone,
+              riderUserId,
+              pickupCode: derivePickupCode(fl.id),
+              isDirectFoodOpportunity: false,
+            });
+          }
+        }
       }
     }
 
@@ -1423,11 +1524,62 @@ export const ClaimsService = {
       return true;
     }
 
-    if (error.code !== 'PGRST202') {
+    // Check if taskId is in delivery_tasks table
+    const { data: dtRow } = await supabase
+      .from('delivery_tasks')
+      .select('id, food_listing_id, donor_id, rider_id')
+      .eq('id', taskId)
+      .maybeSingle();
+
+    if (dtRow) {
+      const { error: updErr } = await supabase
+        .from('delivery_tasks')
+        .update({
+          status,
+          updated_at: new Date().toISOString(),
+          ...(status === 'food_collected' ? { pickup_confirmed_at: new Date().toISOString(), pickup_confirmed_by: user.id } : {}),
+          ...(status === 'completed' || status === 'delivered' ? { delivery_confirmed_at: new Date().toISOString(), completed_at: new Date().toISOString() } : {}),
+        })
+        .eq('id', taskId);
+
+      if (!updErr) {
+        if (dtRow.food_listing_id) {
+          const flStatus =
+            status === 'completed'
+              ? 'completed'
+              : status === 'food_collected' || status === 'in_transit' || status === 'delivered'
+              ? 'picked_up'
+              : status === 'cancelled'
+              ? 'cancelled'
+              : 'reserved';
+
+          await supabase
+            .from('food_listings')
+            .update({ status: flStatus, updated_at: new Date().toISOString() })
+            .eq('id', dtRow.food_listing_id);
+
+          await supabase
+            .from('reservations')
+            .update({ status: flStatus === 'picked_up' ? 'picked_up' : flStatus, updated_at: new Date().toISOString() })
+            .eq('food_listing_id', dtRow.food_listing_id);
+        }
+
+        if (status === 'completed' || status === 'delivered' || status === 'cancelled') {
+          await supabase
+            .from('riders')
+            .update({ is_available: true, updated_at: new Date().toISOString() })
+            .eq('user_id', user.id);
+        }
+
+        return true;
+      }
+    }
+
+    if (error && error.code !== 'PGRST202') {
       throw new Error(error.message || 'Failed to update status');
     }
 
-    // Fallback only if update_donation_status RPC is not yet deployed
+    // Secondary fallback
     const { data: rider } = await supabase
       .from('riders')
       .select('id')
@@ -1443,8 +1595,8 @@ export const ClaimsService = {
       query = query.eq('rider_id', rider.id);
     }
 
-    const { error: updErr } = await query;
-    if (updErr) throw new Error(updErr.message);
+    const { error: finalUpdErr } = await query;
+    if (finalUpdErr) throw new Error(finalUpdErr.message);
     return true;
   },
 

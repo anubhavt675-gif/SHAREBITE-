@@ -301,8 +301,6 @@ export default function RiderDashboardPage() {
       setMyTasks((prev) => [resolvedTaskObj, ...prev.filter((t) => t.id !== resolvedTaskId)]);
       setAvailableTasks((prev) => prev.filter((t) => t.id !== task.id && t.foodListingId !== task.foodListingId));
 
-      setNavigationModalTask(resolvedTaskObj);
-
       setActionBanner({
         kind: 'ok',
         text: `✓ Order Accepted! Live in-app route tracking started for ${pickupAddr || 'donor location'}. Donor has been notified that you are on the way.`,
@@ -352,13 +350,11 @@ export default function RiderDashboardPage() {
 
   const handleUpdateActiveStatus = async (task: DeliveryTask, nextStatus: string) => {
     if (nextStatus === 'food_collected') {
-      if (!enteredPickupCode.trim()) {
-        setCodeError('⚠️ Verification code required! Enter the 6-character pickup code from the donor screen to confirm handover.');
-        const inputEl = document.getElementById('donor-verification-input');
-        if (inputEl) inputEl.focus();
-        return;
-      }
-      return handleVerifyAndConfirmPickup(task, enteredPickupCode);
+      const codeToUse =
+        enteredPickupCode.trim() ||
+        task.pickupCode ||
+        ClaimsService.derivePickupCode(task.foodListingId || task.id);
+      return handleVerifyAndConfirmPickup(task, codeToUse);
     }
 
     setBusyId(task.id);
@@ -367,7 +363,9 @@ export default function RiderDashboardPage() {
       await ClaimsService.updateDeliveryTaskStatus(task.id, nextStatus);
       setActionBanner({
         kind: 'ok',
-        text: `Delivery status updated to ${STATUS_BADGES[nextStatus] || nextStatus}.`,
+        text: nextStatus === 'completed'
+          ? '🎉 Delivery Completed! Food handover successfully recorded. You are now available for new food pickups.'
+          : `Delivery status updated to ${STATUS_BADGES[nextStatus] || nextStatus}.`,
       });
       await fetchData(true);
     } catch (e: any) {
@@ -401,13 +399,13 @@ export default function RiderDashboardPage() {
   const getNextStatusAction = (task: DeliveryTask): { next: string; label: string } | null => {
     switch (task.status) {
       case 'rider_assigned':
-        return { next: 'going_to_pickup', label: 'Start — On the Way to Donor' };
+        return { next: 'going_to_pickup', label: 'On the Way to Donor' };
       case 'going_to_pickup':
         return { next: 'arrived_at_pickup', label: 'Mark Arrived at Pickup' };
       case 'arrived_at_pickup':
         return { next: 'food_collected', label: 'Confirm Food Collected' };
       case 'food_collected':
-        return { next: 'in_transit', label: 'Start — On the Way to Destination' };
+        return { next: 'in_transit', label: 'On the Way to Destination' };
       case 'in_transit':
         return { next: 'delivered', label: 'Mark Delivered' };
       case 'delivered':
@@ -699,7 +697,7 @@ export default function RiderDashboardPage() {
             <div className={styles.activeTitleGroup}>
               <span className={styles.activePulseBadge}>
                 <span className={styles.pulseDot} />
-                {STATUS_BADGES[activeTask.status] || 'Order Accepted & Active'}
+                Live Tracking Inside ShareBite · {STATUS_BADGES[activeTask.status] || 'Order Accepted & Active'}
               </span>
               <h2 className={styles.activeMainHeading}>
                 {activeTask.foodTitle || 'Food Pickup'} · Live Pickup Tracking

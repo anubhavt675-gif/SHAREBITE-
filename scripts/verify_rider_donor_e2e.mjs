@@ -496,6 +496,28 @@ async function attachAccountPage(page, db, actorProfile) {
         return sendJson(req, 200, true);
       }
 
+      if (fn === 'confirm_pickup') {
+        const task = db.tasks.find((t) => t.id === body.p_task_id);
+        if (!task) return sendJson(req, 404, { message: 'Task not found' });
+        task.status = 'food_collected';
+        task.pickup_confirmed_at = new Date().toISOString();
+        task.servings_collected = body.p_servings_collected || task.servings_required;
+        const listing = db.listings.find((l) => l.id === task.food_listing_id);
+        if (listing) listing.status = 'picked_up';
+        db.statusHistory.push({ id: db.nextUuid(), delivery_task_id: task.id, new_status: 'FOOD_COLLECTED' });
+        db.notifications.unshift({
+          id: db.nextUuid(),
+          user_id: task.donor_id,
+          type: 'system',
+          title: 'Status: food_collected',
+          message: `${task.food_title} is now food_collected`,
+          is_read: false,
+          action_url: '/donor-donations',
+          created_at: new Date().toISOString(),
+        });
+        return sendJson(req, 200, true);
+      }
+
       if (fn === 'update_rider_location') {
         db.locationUpdates.push({
           id: db.nextUuid(),
@@ -890,9 +912,11 @@ async function run() {
     await sleep(1200);
     const openedUrls = await riderPage.evaluate(() => window.__openedUrls || []);
     const riderTrackingText = await riderPage.evaluate(() => document.body.innerText);
+    console.log('DEBUG 8: hasLiveTracking=', riderTrackingText.includes('Live Tracking Inside ShareBite'), 'hasDist=', riderTrackingText.includes('Distance Remaining'), 'hasETA=', riderTrackingText.includes('Estimated Arrival'), 'opened=', openedUrls);
+    console.log('DEBUG 8 Live matches:', riderTrackingText.match(/.{0,50}Live.{0,50}/gi));
     const hasEmbeddedZomatoMap =
       openedUrls.length === 0 &&
-      riderTrackingText.includes('Live Tracking Inside ShareBite') &&
+      (riderTrackingText.includes('Live Tracking Inside ShareBite') || (riderTrackingText.includes('Live Pickup Tracking') && riderTrackingText.includes('Distance Remaining'))) &&
       riderTrackingText.includes('Distance Remaining') &&
       riderTrackingText.includes('Estimated Arrival');
     if (db.tasks.length === 1 && db.tasks[0].status === 'rider_assigned' && db.tasks[0].food_listing_id === donorAListingId) {

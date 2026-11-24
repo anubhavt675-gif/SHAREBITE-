@@ -752,9 +752,9 @@ export default function RiderDeliveriesPage() {
                       <button
                         className={styles.successBtn}
                         disabled={isBusy}
-                        onClick={() => handleAdvanceStatus(task, 'delivered')}
+                        onClick={() => handleAdvanceStatus(task, task.ngoId ? 'delivered' : 'completed')}
                       >
-                        <CheckCircle2 size={15} /> Mark Delivered
+                        <CheckCircle2 size={15} /> {task.ngoId ? 'Mark Delivered' : 'Complete Delivery'}
                       </button>
                       {task.ngoId && (
                         <button
