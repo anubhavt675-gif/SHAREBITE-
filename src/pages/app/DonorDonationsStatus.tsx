@@ -208,7 +208,11 @@ export default function DonorDonationsStatus() {
                     dropoffLat={row.dropoff_lat}
                     dropoffLng={row.dropoff_lng}
                     dropoffLabel={row.ngo_name || 'Destination'}
-                    height={180}
+                    viewerRole="donor"
+                    riderName={row.rider_name || 'Assigned Rider'}
+                    riderPhone={row.rider_phone}
+                    assignedAt={row.created_at}
+                    height={220}
                   />
                 )}
 

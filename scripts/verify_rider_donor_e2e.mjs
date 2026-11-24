@@ -289,7 +289,12 @@ async function attachAccountPage(page, db, actorProfile) {
         routes: [{ distance: 1800, duration: 360, geometry: { coordinates: [[77.318, 28.578], [77.326, 28.5708]] } }],
       });
     }
-    if (url.includes('tile.openstreetmap.org') || url.includes('fonts.googleapis.com') || url.includes('fonts.gstatic.com')) {
+    if (
+      url.includes('tile.openstreetmap.org') ||
+      url.includes('mt1.google.com') ||
+      url.includes('fonts.googleapis.com') ||
+      url.includes('fonts.gstatic.com')
+    ) {
       return req.respond({ status: 204, body: '' });
     }
     if (!url.includes('lzyuvgbhpkiqxscqxggq.supabase.co')) {
@@ -869,7 +874,7 @@ async function run() {
       fail('5. Global food visibility check failed for multiple donors/riders');
     }
 
-    // Step 6 & 8: Rider A clicks Accept on Donor A's Paneer Tikka -> atomic lock + auto Google Maps navigation
+    // Step 6 & 8: Rider A clicks Accept on Donor A's Paneer Tikka -> atomic lock + embedded Zomato-style Live Map inside ShareBite (zero external redirects)
     const donorAListingId = db.listings.find((l) => l.donor_id === IDS.donor)?.id;
     await riderPage.evaluate(() => {
       window.__openedUrls = [];
@@ -884,17 +889,22 @@ async function run() {
     });
     await sleep(1200);
     const openedUrls = await riderPage.evaluate(() => window.__openedUrls || []);
-    const gmapsUrl = openedUrls.find((u) => u.includes('google.com/maps/dir') && u.includes('28.5708,77.326'));
+    const riderTrackingText = await riderPage.evaluate(() => document.body.innerText);
+    const hasEmbeddedZomatoMap =
+      openedUrls.length === 0 &&
+      riderTrackingText.includes('Live Tracking Inside ShareBite') &&
+      riderTrackingText.includes('Distance Remaining') &&
+      riderTrackingText.includes('Estimated Arrival');
     if (db.tasks.length === 1 && db.tasks[0].status === 'rider_assigned' && db.tasks[0].food_listing_id === donorAListingId) {
       pass('6. Rider A accepted Donor A pickup atomically (status -> rider_assigned)');
     } else {
       fail('6. Rider A accept failed');
     }
 
-    if (gmapsUrl) {
-      pass(`8. Google Maps navigation opened automatically to donor coordinates (${gmapsUrl})`);
+    if (hasEmbeddedZomatoMap) {
+      pass('8. Zomato-style embedded live tracking map opened directly inside ShareBite with ETA & Distance Remaining (0 external redirects)');
     } else {
-      fail(`8. Google Maps auto-open missing (opened=${JSON.stringify(openedUrls)})`);
+      fail(`8. Zomato-style embedded map check failed (opened=${JSON.stringify(openedUrls)})`);
     }
 
     // Step 7: Competing Rider B reloads feed -> Donor A's food is GONE, Donor B's food REMAINS; Rider B & Donor B blocked from Donor A private chat & listing edit

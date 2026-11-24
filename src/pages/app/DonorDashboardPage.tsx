@@ -338,136 +338,173 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
             </button>
           </div>
 
-          {activeTasks.map(task => {
-            const isCollected = ['food_collected', 'in_transit', 'delivered'].includes(task.status);
-            const statusLabel =
-              task.status === 'delivered'
-                ? 'Delivered to Destination'
-                : task.status === 'in_transit' || task.status === 'food_collected'
-                ? 'Food Collected — In Transit'
-                : task.status === 'arrived_at_pickup'
-                ? 'Rider Arrived at Pickup Location'
-                : task.status === 'going_to_pickup'
-                ? 'Rider On the Way for Pickup'
-                : 'Rider Assigned — Heading to Pickup';
+          {activeTasks.map((task) => {
+            const matchedListing = listings.find((l) => l.id === task.foodListingId);
+            const thumbUrl = matchedListing?.imageUrl || task.foodImageUrl;
 
             return (
-              <div key={task.id} className={styles.liveCard}>
-                {/* Header */}
-                <div className={styles.liveCardHeader}>
-                  <div className={styles.liveFoodTitle}>
-                    <Bike size={20} color="#ea580c" />
-                    <span>{task.foodTitle} ({task.servingsRequired} Servings)</span>
+              <div
+                key={task.id}
+                className={styles.liveCard}
+                style={{
+                  background: '#fffcf8',
+                  border: '1px solid #f1e4d3',
+                  borderRadius: 22,
+                  padding: '20px 22px',
+                  boxShadow: '0 10px 30px rgba(15, 23, 42, 0.06)',
+                }}
+              >
+                {/* Top Food Info & Live Tracking Pill Header (Matches Reference Design) */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 14,
+                    marginBottom: 14,
+                    paddingBottom: 14,
+                    borderBottom: '1px solid #f5ece0',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+                    {thumbUrl ? (
+                      <img
+                        src={thumbUrl}
+                        alt={task.foodTitle}
+                        style={{
+                          width: 56,
+                          height: 56,
+                          borderRadius: 14,
+                          objectFit: 'cover',
+                          border: '1px solid #fed7aa',
+                          flexShrink: 0,
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 56,
+                          height: 56,
+                          borderRadius: 14,
+                          background: '#fff7ed',
+                          border: '1px solid #fed7aa',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 24,
+                          flexShrink: 0,
+                        }}
+                      >
+                        🍱
+                      </div>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <h3
+                        style={{
+                          margin: 0,
+                          fontSize: 19,
+                          fontWeight: 800,
+                          color: '#0f172a',
+                          lineHeight: 1.25,
+                        }}
+                      >
+                        {task.foodTitle || 'Fresh Food Donation'}
+                      </h3>
+                      <p style={{ margin: '3px 0 0', fontSize: 13, color: '#64748b', fontWeight: 500 }}>
+                        {task.servingsRequired} people can eat · Donated{' '}
+                        {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}
+                      </p>
+                    </div>
                   </div>
-                  <div className={styles.etaBadge}>
-                    <Clock size={14} />
-                    <span>{statusLabel}</span>
+
+                  <div
+                    style={{
+                      background: '#fff3e6',
+                      color: '#c2410c',
+                      border: '1px solid #fed7aa',
+                      borderRadius: 999,
+                      padding: '7px 16px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontWeight: 800,
+                      fontSize: 13,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: '50%',
+                        background: '#ea580c',
+                        boxShadow: '0 0 0 3px rgba(234, 88, 12, 0.2)',
+                      }}
+                    />
+                    <span>Live Tracking</span>
                   </div>
                 </div>
 
-                <div className={styles.liveCardBody}>
-                  {/* Rider Profile Row */}
-                  <div className={styles.riderProfileRow}>
-                    <div className={styles.riderLeft}>
-                      <div className={styles.riderPlaceholder}>
-                        {task.riderName?.charAt(0) || 'R'}
-                      </div>
-                      <div>
-                        <h3 className={styles.riderName}>{task.riderName}</h3>
-                        <p className={styles.riderVehicle}>
-                          <ShieldCheck size={14} color="#16a34a" /> Verified ShareBite Rider Fleet Partner
-                        </p>
-                      </div>
-                    </div>
+                {/* Split Zomato-Style Embedded Live Map + Right Tracking Info Panel */}
+                <LiveTrackingMap
+                  deliveryTaskId={task.id}
+                  taskStatus={task.status}
+                  pickupLat={task.pickupLat}
+                  pickupLng={task.pickupLng}
+                  pickupLabel={task.pickupAddress || 'Your Pickup Location'}
+                  dropoffLat={task.dropoffLat}
+                  dropoffLng={task.dropoffLng}
+                  dropoffLabel={task.ngoName || 'Destination'}
+                  viewerRole="donor"
+                  riderName={task.riderName || 'Assigned Rider'}
+                  riderPhone={task.riderPhone}
+                  donorName={user?.name || 'Food Donor'}
+                  assignedAt={task.createdAt}
+                  updatedAt={task.updatedAt}
+                  onOpenChat={() => handleOpenChat(task)}
+                  showTrackingPanel={true}
+                  height={330}
+                />
 
-                    <div className={styles.riderContactActions}>
-                      {task.riderPhone && (
-                        <a href={`tel:${task.riderPhone}`} className={styles.callBtn}>
-                          <Phone size={14} /> Call Rider
-                        </a>
-                      )}
-                      <button
-                        onClick={() => handleOpenChat(task)}
-                        className={styles.chatBtn}
-                      >
-                        <MessageSquare size={14} /> Chat
-                      </button>
+                {/* Pickup Verification Code Box (only when real code exists) */}
+                {task.pickupCode && (
+                  <div className={styles.pickupCodeBox} style={{ marginTop: 14 }}>
+                    <div className={styles.codeExplainer}>
+                      <strong>Pickup Handover Verification Code</strong>
+                      Share this 6-character code with your rider upon arrival to verify food collection.
                     </div>
+                    <div className={styles.secretCode}>{task.pickupCode}</div>
                   </div>
+                )}
 
-                  {/* Live Zomato-Style GPS Map */}
-                  <LiveTrackingMap
-                    deliveryTaskId={task.id}
-                    taskStatus={task.status}
-                    pickupLat={task.pickupLat}
-                    pickupLng={task.pickupLng}
-                    pickupLabel={task.pickupAddress || 'Your Pickup Location'}
-                    dropoffLat={task.dropoffLat}
-                    dropoffLng={task.dropoffLng}
-                    dropoffLabel={task.ngoName || 'Destination'}
-                    height={220}
-                  />
-
-                  {/* Pickup Verification Code Box (only when real code exists) */}
-                  {task.pickupCode && (
-                    <div className={styles.pickupCodeBox}>
-                      <div className={styles.codeExplainer}>
-                        <strong>Pickup Handover Verification Code</strong>
-                        Share this 6-character code with your rider upon arrival to verify food collection.
-                      </div>
-                      <div className={styles.secretCode}>
-                        {task.pickupCode}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Interactive Stepper Timeline */}
-                  <div className={styles.timeline}>
-                    <div className={`${styles.timelineStep} ${styles.stepCompleted}`}>
-                      <div className={styles.stepCircle}>✓</div>
-                      <span className={styles.stepLabel}>Food Listed</span>
-                    </div>
-
-                    <div className={`${styles.timelineStep} ${task.status === 'rider_assigned' ? styles.stepActive : styles.stepCompleted}`}>
-                      <div className={styles.stepCircle}>
-                        {task.status === 'rider_assigned' ? '●' : '✓'}
-                      </div>
-                      <span className={styles.stepLabel}>Rider Heading to Pickup</span>
-                    </div>
-
-                    <div className={`${styles.timelineStep} ${task.status === 'food_collected' ? styles.stepActive : isCollected ? styles.stepCompleted : ''}`}>
-                      <div className={styles.stepCircle}>
-                        {task.status === 'food_collected' ? '●' : isCollected ? '✓' : '3'}
-                      </div>
-                      <span className={styles.stepLabel}>Food Collected</span>
-                    </div>
-
-                    <div className={`${styles.timelineStep} ${task.status === 'in_transit' ? styles.stepActive : isCollected ? styles.stepCompleted : ''}`}>
-                      <div className={styles.stepCircle}>
-                        {task.status === 'in_transit' ? '●' : isCollected ? '✓' : '4'}
-                      </div>
-                      <span className={styles.stepLabel}>In Transit to NGO</span>
-                    </div>
-
-                    <div className={`${styles.timelineStep} ${task.status === 'delivered' ? styles.stepCompleted : ''}`}>
-                      <div className={styles.stepCircle}>
-                        {task.status === 'delivered' ? '✓' : '5'}
-                      </div>
-                      <span className={styles.stepLabel}>Delivered to NGO</span>
-                    </div>
+                {/* Route & Dropoff Information */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 13,
+                    color: '#4b5563',
+                    background: '#fff7ed',
+                    border: '1px solid #fed7aa',
+                    padding: '11px 16px',
+                    borderRadius: 12,
+                    marginTop: 14,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Navigation size={15} color="#ea580c" />
+                    <span>
+                      <strong>Destination:</strong> {task.ngoName}
+                    </span>
                   </div>
-
-                  {/* Route & Dropoff Information */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, color: '#4b5563', background: '#f9fafb', padding: '12px 16px', borderRadius: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Navigation size={15} color="#ea580c" />
-                      <span><strong>Destination:</strong> {task.ngoName}</span>
-                    </div>
-                    <div>
-                      <Link to="/donor-donations" style={{ color: '#ea580c', fontWeight: 600, textDecoration: 'none' }}>
-                        View Full Lifecycle Details &rarr;
-                      </Link>
-                    </div>
+                  <div>
+                    <Link
+                      to="/donor-donations"
+                      style={{ color: '#ea580c', fontWeight: 700, textDecoration: 'none' }}
+                    >
+                      View Full Lifecycle Details &rarr;
+                    </Link>
                   </div>
                 </div>
               </div>

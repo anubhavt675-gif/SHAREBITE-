@@ -8,9 +8,6 @@ import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import {
   ClaimsService,
-  openGoogleMapsNavigation,
-  buildGoogleMapsNavigationUrl,
-  buildGoogleMapsEmbedUrl,
   type DeliveryTask,
   type RiderProfileRecord,
 } from '../../services/claims';
@@ -68,7 +65,7 @@ export default function RiderDashboardPage() {
   const [availableTasks, setAvailableTasks] = useState<DeliveryTask[]>([]);
   const [myTasks, setMyTasks] = useState<DeliveryTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isOnline, setIsOnline] = useState(false);
+  const [, setIsOnline] = useState(false);
   const [riderCoords, setRiderCoords] = useState<Coordinates | null>(null);
   const riderCoordsRef = useRef<Coordinates | null>(null);
   const [gpsError, setGpsError] = useState('');
@@ -158,25 +155,27 @@ export default function RiderDashboardPage() {
   );
 
   const activeTaskId =
-    activeTask && activeTask.status !== 'delivered' ? activeTask.id : undefined;
+    activeTask && !['delivered', 'completed', 'cancelled'].includes(activeTask.status)
+      ? activeTask.id
+      : undefined;
 
-  // Live GPS Tracking: ONLY track continuously when rider is online AND has an active in-transit delivery!
+  // Live GPS Tracking: continuously capture & broadcast rider coordinates while pickup is active, and stop on completion/cancellation
   useEffect(() => {
-    if (!isOnline || !activeTaskId || !userId) return;
+    if (!activeTaskId || !userId) return;
     setGpsError('');
 
     const stopWatching = LocationService.watchAndBroadcastRiderLocation({
       riderUserId: userId,
       deliveryTaskId: activeTaskId,
-      minIntervalMs: 5000,
-      minDistanceMeters: 15,
+      minIntervalMs: 3500,
+      minDistanceMeters: 10,
       onPosition: (coords) => {
         const prev = riderCoordsRef.current;
         riderCoordsRef.current = coords;
         const movedKm = prev
           ? LocationService.calculateDistance(prev.latitude, prev.longitude, coords.latitude, coords.longitude)
           : Infinity;
-        if (!prev || movedKm >= 0.01) {
+        if (!prev || movedKm >= 0.005) {
           setRiderCoords(coords);
         }
         setGpsError('');
@@ -189,7 +188,7 @@ export default function RiderDashboardPage() {
     return () => {
       stopWatching();
     };
-  }, [isOnline, activeTaskId, userId]);
+  }, [activeTaskId, userId]);
 
   const completedDeliveries = useMemo(
     () => myTasks.filter((t) => t.status === 'completed' || (t.status === 'delivered' && Boolean(t.ngoId))),
@@ -250,18 +249,43 @@ export default function RiderDashboardPage() {
         }).catch(() => {});
       }
 
-      // Automatically open Google Maps Directions to Donor pickup coordinates
-      openGoogleMapsNavigation(
-        pickupLat,
-        pickupLng,
-        pickupAddr,
-        riderCoordsRef.current?.latitude,
-        riderCoordsRef.current?.longitude
-      );
+      // Capture & broadcast initial GPS reading immediately on acceptance (no external map redirect)
+      const resolvedTaskId = assignedTaskId || task.id;
+      if (riderCoordsRef.current) {
+        LocationService.updateRiderLocation({
+          riderId: userId,
+          deliveryTaskId: resolvedTaskId,
+          latitude: riderCoordsRef.current.latitude,
+          longitude: riderCoordsRef.current.longitude,
+          accuracyM: riderCoordsRef.current.accuracy,
+        }).catch(() => {});
+      } else {
+        LocationService.detectCurrentGPS()
+          .then((gps) => {
+            if (gps.status === 'granted' && gps.latitude !== null && gps.longitude !== null) {
+              const c = {
+                latitude: gps.latitude,
+                longitude: gps.longitude,
+                accuracy: gps.accuracy ?? undefined,
+                timestamp: gps.timestamp,
+              };
+              riderCoordsRef.current = c;
+              setRiderCoords(c);
+              LocationService.updateRiderLocation({
+                riderId: userId,
+                deliveryTaskId: resolvedTaskId,
+                latitude: c.latitude,
+                longitude: c.longitude,
+                accuracyM: c.accuracy,
+              }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
 
       setNavigationModalTask({
         ...task,
-        id: assignedTaskId || task.id,
+        id: resolvedTaskId,
         pickupLat,
         pickupLng,
         pickupAddress: pickupAddr,
@@ -270,7 +294,7 @@ export default function RiderDashboardPage() {
 
       setActionBanner({
         kind: 'ok',
-        text: `✓ Order Accepted! Google Maps & Directions opened for ${pickupAddr || 'donor location'}. Donor has been notified that you are coming to pick up the order.`,
+        text: `✓ Order Accepted! Live in-app route tracking started for ${pickupAddr || 'donor location'}. Donor has been notified that you are on the way.`,
       });
       await fetchData(true);
     } catch (e: any) {
@@ -285,23 +309,6 @@ export default function RiderDashboardPage() {
   };
 
   const handleUpdateActiveStatus = async (task: DeliveryTask, nextStatus: string) => {
-    if (nextStatus === 'going_to_pickup') {
-      openGoogleMapsNavigation(
-        task.pickupLat,
-        task.pickupLng,
-        task.pickupAddress,
-        riderCoordsRef.current?.latitude,
-        riderCoordsRef.current?.longitude
-      );
-    } else if (nextStatus === 'in_transit' && (task.dropoffLat != null || task.dropoffAddress)) {
-      openGoogleMapsNavigation(
-        task.dropoffLat,
-        task.dropoffLng,
-        task.dropoffAddress,
-        riderCoordsRef.current?.latitude,
-        riderCoordsRef.current?.longitude
-      );
-    }
     setBusyId(task.id);
     setActionBanner(null);
     try {
@@ -358,31 +365,6 @@ export default function RiderDashboardPage() {
     }
   };
 
-  const activeNavUrl = activeTask
-    ? ['food_collected', 'in_transit'].includes(activeTask.status)
-      ? buildGoogleMapsNavigationUrl(
-          activeTask.dropoffLat,
-          activeTask.dropoffLng,
-          activeTask.dropoffAddress,
-          riderCoords?.latitude,
-          riderCoords?.longitude
-        ) ||
-        buildGoogleMapsNavigationUrl(
-          activeTask.pickupLat,
-          activeTask.pickupLng,
-          activeTask.pickupAddress,
-          riderCoords?.latitude,
-          riderCoords?.longitude
-        )
-      : buildGoogleMapsNavigationUrl(
-          activeTask.pickupLat,
-          activeTask.pickupLng,
-          activeTask.pickupAddress,
-          riderCoords?.latitude,
-          riderCoords?.longitude
-        )
-    : null;
-
   const isPickedUpDone = activeTask
     ? ['food_collected', 'in_transit', 'delivered', 'completed'].includes(activeTask.status)
     : false;
@@ -395,164 +377,154 @@ export default function RiderDashboardPage() {
 
   return (
     <div className={styles.dashboard}>
-      {/* Instant Pickup Map & Google Maps Turn-by-Turn Modal after Accept */}
-      {navigationModalTask && (() => {
-        const navUrl = buildGoogleMapsNavigationUrl(
-          navigationModalTask.pickupLat,
-          navigationModalTask.pickupLng,
-          navigationModalTask.pickupAddress,
-          riderCoords?.latitude,
-          riderCoords?.longitude
-        );
-        const embedUrl = buildGoogleMapsEmbedUrl(
-          navigationModalTask.pickupLat,
-          navigationModalTask.pickupLng,
-          navigationModalTask.pickupAddress,
-          riderCoords?.latitude,
-          riderCoords?.longitude
-        );
-        return (
+      {/* In-App Zomato-Style Live Pickup Tracking Modal after Accept (Zero External Redirects) */}
+      {navigationModalTask && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.58)',
+            zIndex: 300,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
           <div
             style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(15, 23, 42, 0.58)',
-              zIndex: 300,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 16,
+              background: '#fffcf8',
+              borderRadius: 22,
+              padding: 22,
+              width: '100%',
+              maxWidth: 880,
+              position: 'relative',
+              boxShadow: '0 24px 60px rgba(15, 23, 42, 0.25)',
+              border: '1px solid #fed7aa',
+              maxHeight: '92vh',
+              overflowY: 'auto',
             }}
           >
-            <div
+            <button
+              type="button"
+              onClick={() => setNavigationModalTask(null)}
+              aria-label="Close live pickup map"
               style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
                 background: '#ffffff',
-                borderRadius: 20,
-                padding: 22,
-                width: '100%',
-                maxWidth: 540,
-                position: 'relative',
-                boxShadow: '0 24px 60px rgba(15, 23, 42, 0.25)',
-                maxHeight: '92vh',
-                overflowY: 'auto',
+                border: '1px solid #e2e8f0',
+                borderRadius: 10,
+                padding: 7,
+                cursor: 'pointer',
               }}
             >
-              <button
-                type="button"
-                onClick={() => setNavigationModalTask(null)}
-                aria-label="Close pickup map"
+              <X size={16} />
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+              <span
                 style={{
-                  position: 'absolute',
-                  top: 14,
-                  right: 14,
-                  background: '#f1f5f9',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: 6,
-                  cursor: 'pointer',
+                  background: '#DCFCE7',
+                  color: '#15803D',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  padding: '3px 10px',
+                  borderRadius: 999,
                 }}
               >
-                <X size={16} />
-              </button>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <span style={{ background: '#DCFCE7', color: '#15803D', fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 999 }}>
-                  ✓ ORDER ACCEPTED
-                </span>
-              </div>
-              <h3 style={{ margin: '4px 0 4px', fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
-                Order Accepted — Navigate to Pickup
-              </h3>
-              <p style={{ margin: '0 0 6px', fontSize: 12.5, color: '#15803d', fontWeight: 600 }}>
-                Donor has been notified that you are coming to pick up this order.
-              </p>
-              <p style={{ margin: '0 0 12px', fontSize: 13, color: '#475569' }}>
-                <MapPin size={13} style={{ verticalAlign: 'middle', color: '#ea580c' }} />{' '}
-                <strong>{navigationModalTask.pickupAddress || 'Donor Pickup Location'}</strong>
-                {navigationModalTask.donorName ? ` · Donor: ${navigationModalTask.donorName}` : ''}
-                {navigationModalTask.servingsRequired ? ` · ${navigationModalTask.servingsRequired} ${navigationModalTask.quantityUnit}` : ''}
-              </p>
-
-              {embedUrl && (
-                <div style={{ height: 240, width: '100%', borderRadius: 14, overflow: 'hidden', border: '1px solid #e2e8f0', marginBottom: 14 }}>
-                  <iframe
-                    title="Donor Pickup Location Google Map"
-                    src={embedUrl}
-                    style={{ width: '100%', height: '100%', border: 0 }}
-                    loading="eager"
-                    referrerPolicy="no-referrer-when-downgrade"
-                  />
-                </div>
-              )}
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {navUrl && (
-                  <a
-                    href={navUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => {
-                      const t = navigationModalTask;
-                      setNavigationModalTask(null);
-                      if (t.status === 'rider_assigned') {
-                        ClaimsService.updateDeliveryTaskStatus(t.id, 'going_to_pickup').then(() => fetchData(true)).catch(() => {});
-                      }
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      padding: '12px 18px',
-                      borderRadius: 12,
-                      background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-                      color: '#ffffff',
-                      fontWeight: 800,
-                      fontSize: 14,
-                      textDecoration: 'none',
-                      boxShadow: '0 6px 18px rgba(234, 88, 12, 0.28)',
-                    }}
-                  >
-                    <Navigation size={16} /> Open Google Maps &amp; Directions
-                  </a>
-                )}
-
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className={styles.liveTrackBtn}
-                    style={{ flex: 1, justifyContent: 'center' }}
-                    onClick={() => {
-                      const t = navigationModalTask;
-                      setNavigationModalTask(null);
-                      handleOpenDonorChat(t);
-                    }}
-                  >
-                    <MessageSquare size={14} /> Chat with Donor
-                  </button>
-                  {navigationModalTask.donorPhone && (
-                    <a
-                      href={`tel:${navigationModalTask.donorPhone}`}
-                      className={styles.liveTrackBtn}
-                      style={{ flex: 1, justifyContent: 'center', textDecoration: 'none' }}
-                    >
-                      <Phone size={14} /> Call Donor
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    className={styles.liveTrackBtn}
-                    style={{ flex: 1, justifyContent: 'center' }}
-                    onClick={() => setNavigationModalTask(null)}
-                  >
-                    Active Delivery
-                  </button>
-                </div>
-              </div>
+                ✓ ORDER ACCEPTED
+              </span>
+              <span
+                style={{
+                  background: '#fff3e6',
+                  color: '#c2410c',
+                  fontSize: 11.5,
+                  fontWeight: 800,
+                  padding: '3px 10px',
+                  borderRadius: 999,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ea580c' }} />
+                Live Tracking Inside ShareBite
+              </span>
             </div>
+
+            <h3 style={{ margin: '4px 0 4px', fontSize: 19, fontWeight: 800, color: '#0f172a' }}>
+              {navigationModalTask.foodTitle || 'Food Pickup'} · Live Route to Donor
+            </h3>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: '#475569' }}>
+              <MapPin size={13} style={{ verticalAlign: 'middle', color: '#ea580c' }} />{' '}
+              <strong>{navigationModalTask.pickupAddress || 'Donor Pickup Location'}</strong>
+              {navigationModalTask.donorName ? ` · Donor: ${navigationModalTask.donorName}` : ''}
+              {navigationModalTask.servingsRequired
+                ? ` · ${navigationModalTask.servingsRequired} ${navigationModalTask.quantityUnit}`
+                : ''}
+            </p>
+
+            <LiveTrackingMap
+              deliveryTaskId={navigationModalTask.id}
+              taskStatus={activeTask?.id === navigationModalTask.id ? activeTask.status : navigationModalTask.status}
+              pickupLat={navigationModalTask.pickupLat}
+              pickupLng={navigationModalTask.pickupLng}
+              pickupLabel={navigationModalTask.pickupAddress || navigationModalTask.donorName || 'Donor Pickup'}
+              dropoffLat={navigationModalTask.dropoffLat}
+              dropoffLng={navigationModalTask.dropoffLng}
+              dropoffLabel={navigationModalTask.dropoffAddress || 'Destination'}
+              viewerRole="rider"
+              riderCoordOverride={
+                riderCoords
+                  ? {
+                      latitude: riderCoords.latitude,
+                      longitude: riderCoords.longitude,
+                      recordedAt: riderCoords.timestamp,
+                    }
+                  : null
+              }
+              riderName={user?.name || 'ShareBite Rider'}
+              donorName={navigationModalTask.donorName || 'Food Donor'}
+              donorPhone={navigationModalTask.donorPhone}
+              assignedAt={navigationModalTask.riderAssignedAt || new Date().toISOString()}
+              updatedAt={navigationModalTask.updatedAt || new Date().toISOString()}
+              onOpenChat={() => {
+                const t = navigationModalTask;
+                setNavigationModalTask(null);
+                handleOpenDonorChat(t);
+              }}
+              showTrackingPanel={true}
+              height={300}
+              actionSlot={
+                <button
+                  type="button"
+                  onClick={() => setNavigationModalTask(null)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    padding: '11px 16px',
+                    borderRadius: 12,
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                    color: '#ffffff',
+                    fontWeight: 800,
+                    fontSize: 13.5,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(234, 88, 12, 0.25)',
+                  }}
+                >
+                  <Navigation size={15} /> Continue in Live Dashboard
+                </button>
+              }
+            />
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {/* Feedback & GPS Permissions Alerts */}
       {actionBanner && (
@@ -889,16 +861,13 @@ export default function RiderDashboardPage() {
                   })()}
 
                   <div className={styles.secondaryActionRow}>
-                    {activeNavUrl && (
-                      <a
-                        href={activeNavUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={styles.liveTrackBtn}
-                      >
-                        <Navigation size={13} /> Open Directions
-                      </a>
-                    )}
+                    <button
+                      type="button"
+                      className={styles.liveTrackBtn}
+                      onClick={() => setNavigationModalTask(activeTask)}
+                    >
+                      <Navigation size={13} /> Expand Live Map
+                    </button>
                     <button
                       type="button"
                       className={styles.liveTrackBtn}
@@ -906,6 +875,15 @@ export default function RiderDashboardPage() {
                     >
                       <MessageSquare size={13} /> Chat
                     </button>
+                    {activeTask.donorPhone && (
+                      <a
+                        href={`tel:${activeTask.donorPhone}`}
+                        className={styles.liveTrackBtn}
+                        style={{ textDecoration: 'none' }}
+                      >
+                        <Phone size={13} /> Call
+                      </a>
+                    )}
                   </div>
 
                   <Link to="/rider/deliveries?tab=active" className={styles.viewTrackingPill}>
@@ -929,6 +907,22 @@ export default function RiderDashboardPage() {
                     activeTask.dropoffAddress ||
                     'Destination'
                   }
+                  viewerRole="rider"
+                  riderCoordOverride={
+                    riderCoords
+                      ? {
+                          latitude: riderCoords.latitude,
+                          longitude: riderCoords.longitude,
+                          recordedAt: riderCoords.timestamp,
+                        }
+                      : null
+                  }
+                  riderName={user?.name || 'ShareBite Rider'}
+                  donorName={activeTask.donorName || 'Food Donor'}
+                  donorPhone={activeTask.donorPhone}
+                  assignedAt={activeTask.riderAssignedAt}
+                  updatedAt={activeTask.updatedAt}
+                  onOpenChat={() => handleOpenDonorChat(activeTask)}
                   height={250}
                 />
               </div>

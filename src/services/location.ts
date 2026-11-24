@@ -33,6 +33,50 @@ export interface ReverseGeocodeResult {
 const geocodeCache = new Map<string, GeocodeResult>();
 const reverseGeocodeCache = new Map<string, ReverseGeocodeResult>();
 
+const RIDER_GPS_TAG_RE = /\[RIDER_GPS:([0-9.+-]+),([0-9.+-]+),([0-9.+-]*),([0-9.+-]*),([0-9.+-]*),([^\]]+)\]/i;
+
+function withRiderGpsTag(
+  notes: string | null | undefined,
+  lat: number,
+  lng: number,
+  heading?: number | null,
+  speed?: number | null,
+  accuracyM?: number | null,
+  isoTs?: string
+): string {
+  const cleaned = (notes || '').replace(/\s*\[RIDER_GPS:[^\]]+\]\s*/gi, ' ').trim();
+  const tag = `[RIDER_GPS:${lat.toFixed(6)},${lng.toFixed(6)},${heading ?? ''},${speed ?? ''},${accuracyM ?? ''},${isoTs || new Date().toISOString()}]`;
+  return cleaned ? `${cleaned}\n${tag}` : tag;
+}
+
+function parseRiderGpsFromNotes(
+  notes: string | null | undefined,
+  deliveryTaskId: string,
+  riderId = ''
+): RiderLocationUpdate | null {
+  if (typeof notes !== 'string') return null;
+  const m = notes.match(RIDER_GPS_TAG_RE);
+  if (!m) return null;
+  const latitude = parseFloat(m[1]);
+  const longitude = parseFloat(m[2]);
+  if (Number.isNaN(latitude) || Number.isNaN(longitude)) return null;
+  const heading = m[3] ? parseFloat(m[3]) : undefined;
+  const speed = m[4] ? parseFloat(m[4]) : undefined;
+  const accuracyM = m[5] ? parseFloat(m[5]) : undefined;
+  const recordedAt = m[6] || new Date().toISOString();
+  return {
+    id: `gps-${deliveryTaskId}`,
+    riderId,
+    deliveryTaskId,
+    latitude,
+    longitude,
+    heading: heading !== undefined && !Number.isNaN(heading) ? heading : undefined,
+    speed: speed !== undefined && !Number.isNaN(speed) ? speed : undefined,
+    accuracyM: accuracyM !== undefined && !Number.isNaN(accuracyM) ? accuracyM : undefined,
+    recordedAt,
+  };
+}
+
 // Default center (India center for broad view when location is unspecified)
 export const DEFAULT_COORDINATES: Coordinates = {
   latitude: 20.5937,
@@ -438,7 +482,41 @@ export class LocationService {
     speed?: number;
     accuracyM?: number;
   }): Promise<void> {
+    const nowIso = new Date().toISOString();
     try {
+      // If a reservation row exists for this rider + listing (reserve_food fallback), embed live GPS in notes for realtime donor sync
+      if (params.deliveryTaskId && params.riderId) {
+        Promise.resolve(
+          supabase
+            .from('reservations')
+            .select('id, notes')
+            .eq('food_listing_id', params.deliveryTaskId)
+            .eq('user_id', params.riderId)
+            .neq('status', 'cancelled')
+            .maybeSingle()
+        )
+          .then(({ data: resRow }) => {
+            if (resRow?.id) {
+              const updatedNotes = withRiderGpsTag(
+                resRow.notes,
+                params.latitude,
+                params.longitude,
+                params.heading,
+                params.speed,
+                params.accuracyM,
+                nowIso
+              );
+              Promise.resolve(
+                supabase
+                  .from('reservations')
+                  .update({ notes: updatedNotes, updated_at: nowIso })
+                  .eq('id', resRow.id)
+              ).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+
       const { error: rpcErr } = await supabase.rpc('update_rider_location', {
         p_lat: params.latitude,
         p_lng: params.longitude,
@@ -451,10 +529,9 @@ export class LocationService {
       if (!rpcErr) return;
       if (rpcErr.code !== 'PGRST202') {
         console.warn('Rider location RPC warning:', rpcErr.message);
-        return;
       }
 
-      // Fallback only if migration RPC is not yet deployed
+      // Fallback if migration RPC is not yet deployed or task ID is a direct listing
       const { data: riderRow } = await supabase
         .from('riders')
         .select('id')
@@ -462,14 +539,17 @@ export class LocationService {
         .maybeSingle();
 
       if (riderRow?.id && params.deliveryTaskId) {
-        await supabase.from('rider_location_updates').insert({
-          rider_id: riderRow.id,
-          delivery_task_id: params.deliveryTaskId,
-          latitude: params.latitude,
-          longitude: params.longitude,
-          heading: params.heading ?? null,
-          speed: params.speed ?? null,
-        });
+        await supabase
+          .from('rider_location_updates')
+          .insert({
+            rider_id: riderRow.id,
+            delivery_task_id: params.deliveryTaskId,
+            latitude: params.latitude,
+            longitude: params.longitude,
+            heading: params.heading ?? null,
+            speed: params.speed ?? null,
+          })
+          .then(() => {});
       }
 
       await supabase
@@ -477,7 +557,7 @@ export class LocationService {
         .update({
           current_lat: params.latitude,
           current_lng: params.longitude,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         })
         .eq('user_id', params.riderId);
     } catch (err) {
@@ -486,7 +566,7 @@ export class LocationService {
   }
 
   /**
-   * Subscribe to live location updates for a specific delivery task
+   * Subscribe to live location updates for a specific delivery task (supports both rider_location_updates & reservations)
    */
   static subscribeToDeliveryTracking(
     deliveryTaskId: string,
@@ -514,8 +594,24 @@ export class LocationService {
             heading: row.heading,
             speed: row.speed,
             accuracyM: row.accuracy_m,
-            recordedAt: row.recorded_at,
+            recordedAt: row.recorded_at || new Date().toISOString(),
           });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reservations',
+          filter: `food_listing_id=eq.${deliveryTaskId}`,
+        },
+        (payload) => {
+          const row = payload.new as any;
+          const parsed = parseRiderGpsFromNotes(row?.notes, deliveryTaskId, row?.user_id || '');
+          if (parsed) {
+            onLocation(parsed);
+          }
         }
       )
       .subscribe((status) => {
@@ -545,18 +641,37 @@ export class LocationService {
       .limit(1)
       .maybeSingle();
 
-    if (error || !data) return null;
+    if (!error && data) {
+      return {
+        id: data.id,
+        riderId: data.rider_id,
+        deliveryTaskId: data.delivery_task_id,
+        latitude: data.latitude,
+        longitude: data.longitude,
+        heading: data.heading,
+        speed: data.speed,
+        accuracyM: data.accuracy_m,
+        recordedAt: data.recorded_at,
+      };
+    }
 
-    return {
-      id: data.id,
-      riderId: data.rider_id,
-      deliveryTaskId: data.delivery_task_id,
-      latitude: data.latitude,
-      longitude: data.longitude,
-      heading: data.heading,
-      speed: data.speed,
-      accuracyM: data.accuracy_m,
-      recordedAt: data.recorded_at,
-    };
+    // Fallback: check reservation notes for [RIDER_GPS:...] when reserve_food fallback is active
+    try {
+      const { data: resRow } = await supabase
+        .from('reservations')
+        .select('id, user_id, notes, updated_at')
+        .eq('food_listing_id', deliveryTaskId)
+        .neq('status', 'cancelled')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (resRow?.notes) {
+        const parsed = parseRiderGpsFromNotes(resRow.notes, deliveryTaskId, resRow.user_id || '');
+        if (parsed) return parsed;
+      }
+    } catch {}
+
+    return null;
   }
 }
