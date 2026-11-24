@@ -233,6 +233,37 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
                 <strong>{activeTasks[0].foodTitle}</strong> ({activeTasks[0].servingsRequired} servings) and is
                 heading to {activeTasks[0].pickupAddress || 'your pickup location'}.
               </div>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginTop: 6,
+                  background: '#ffffff',
+                  border: '1.5px solid #86efac',
+                  padding: '4px 12px',
+                  borderRadius: 8,
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>
+                  🔑 Handover Code:
+                </span>
+                <span
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 900,
+                    color: '#15803d',
+                    letterSpacing: 2.5,
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  {activeTasks[0].pickupCode || ClaimsService.derivePickupCode(activeTasks[0].foodListingId || activeTasks[0].id)}
+                </span>
+                <span style={{ fontSize: 11.5, color: '#4b5563' }}>
+                  (Share with rider upon arrival)
+                </span>
+              </div>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -466,16 +497,19 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
                   height={330}
                 />
 
-                {/* Pickup Verification Code Box (only when real code exists) */}
-                {task.pickupCode && (
-                  <div className={styles.pickupCodeBox} style={{ marginTop: 14 }}>
-                    <div className={styles.codeExplainer}>
-                      <strong>Pickup Handover Verification Code</strong>
-                      Share this 6-character code with your rider upon arrival to verify food collection.
+                {/* Pickup Verification Code Box - ALWAYS shown so donor has full verification authority */}
+                {(() => {
+                  const resolvedCode = task.pickupCode || ClaimsService.derivePickupCode(task.foodListingId || task.id);
+                  return (
+                    <div className={styles.pickupCodeBox} style={{ marginTop: 14 }}>
+                      <div className={styles.codeExplainer}>
+                        <strong>🔑 Food Handover Verification Code</strong>
+                        Tell this 6-character code to rider <strong>{task.riderName || 'Rider'}</strong> when they arrive at your location to verify and release the food.
+                      </div>
+                      <div className={styles.secretCode}>{resolvedCode}</div>
                     </div>
-                    <div className={styles.secretCode}>{task.pickupCode}</div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Route & Dropoff Information */}
                 <div

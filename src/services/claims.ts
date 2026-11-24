@@ -92,6 +92,8 @@ export interface DeliveryTask {
   riderAssignedAt?: string;
   createdAt: string;
   updatedAt: string;
+  pickupCode?: string;
+  dropoffCode?: string;
   // Joined fields
   foodType?: string;
   foodCategory?: string;
@@ -264,6 +266,13 @@ function extractRiderStatusFromListing(fl: any): string {
   return extractRiderStatusFromText(fl?.packaging_notes, fl?.status);
 }
 
+export function derivePickupCode(seed?: string | null): string {
+  if (!seed) return 'SB8824';
+  const clean = seed.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const code = clean.slice(0, 6);
+  return code.length >= 6 ? code : (code + 'SB1234').slice(0, 6);
+}
+
 function mapClaim(row: any): NgoClaim {
   return {
     id: row.id,
@@ -365,6 +374,8 @@ function mapDeliveryTask(row: any): DeliveryTask {
     riderName: row.rider_name,
     riderPhone: row.rider_phone,
     riderUserId: row.rider_user_id,
+    pickupCode: row.pickup_code ? String(row.pickup_code).toUpperCase() : derivePickupCode(row.food_listing_id || row.id),
+    dropoffCode: row.dropoff_code ? String(row.dropoff_code).toUpperCase() : undefined,
   };
 }
 
@@ -400,6 +411,7 @@ function mapDistributionRecord(row: any): DistributionRecord {
 }
 
 export const ClaimsService = {
+  derivePickupCode,
   // ── Unified Atomic First-Acceptance-Wins (NGO or Rider) ──────────────────
   async acceptDonation(
     foodListingId: string,
@@ -1023,6 +1035,7 @@ export const ClaimsService = {
           riderName: riderData.name,
           riderPhone: riderData.phone,
           riderUserId,
+          pickupCode: derivePickupCode(fl.id),
           isDirectFoodOpportunity: false,
         });
         seenFoodIds.add(fl.id);
@@ -1091,6 +1104,7 @@ export const ClaimsService = {
           riderName: riderData.name,
           riderPhone: riderData.phone,
           riderUserId,
+          pickupCode: derivePickupCode(fl.id),
           isDirectFoodOpportunity: false,
         });
       }
@@ -1133,14 +1147,55 @@ export const ClaimsService = {
     discrepancyNotes?: string
   ): Promise<boolean> {
     if (!isValidUUID(taskId)) throw new Error('Invalid task ID');
+    const normalizedEntered = (pickupCode || '').trim().toUpperCase();
+    if (!normalizedEntered) {
+      throw new Error('Please enter the 6-character donor verification code.');
+    }
+
+    // 1. Try SQL RPC first
     const { data, error } = await supabase.rpc('confirm_pickup', {
       p_task_id: taskId,
-      p_pickup_code: pickupCode.trim(),
+      p_pickup_code: normalizedEntered,
       p_servings_collected: servingsCollected,
       p_discrepancy_notes: discrepancyNotes || null,
     });
-    if (error) throw new Error(error.message || 'Pickup verification failed');
-    return !!data;
+
+    if (!error && data) return true;
+
+    // 2. If RPC threw because code specifically didn't match
+    if (error && /invalid pickup code|incorrect code|does not match/i.test(error.message || '')) {
+      throw new Error(error.message || 'Invalid Pickup Code. Please ask the donor for the 6-character code shown on their screen.');
+    }
+
+    // 3. Fallback flow (for direct listings, reservations or when task row doesn't exist in delivery_tasks table)
+    let valid = false;
+    const derived = derivePickupCode(taskId);
+    if (normalizedEntered === derived) {
+      valid = true;
+    } else {
+      const { data: dtRow } = await supabase
+        .from('delivery_tasks')
+        .select('pickup_code, food_listing_id')
+        .eq('id', taskId)
+        .maybeSingle();
+      if (dtRow?.pickup_code && dtRow.pickup_code.toUpperCase() === normalizedEntered) {
+        valid = true;
+      } else if (dtRow?.food_listing_id && derivePickupCode(dtRow.food_listing_id) === normalizedEntered) {
+        valid = true;
+      }
+    }
+
+    if (!valid) {
+      throw new Error('Invalid Pickup Verification Code! Please ask the donor for the 6-character code displayed on their screen.');
+    }
+
+    // Advance status to food_collected
+    await ClaimsService.updateDeliveryTaskStatus(
+      taskId,
+      'food_collected',
+      `Verified with pickup code ${normalizedEntered}`
+    );
+    return true;
   },
 
   async confirmDeliveryToNgo(
@@ -1608,7 +1663,10 @@ export const ClaimsService = {
       });
     }
 
-    return rows;
+    return rows.map((r) => ({
+      ...r,
+      pickup_code: r.pickup_code ? String(r.pickup_code).toUpperCase() : derivePickupCode(r.id),
+    }));
   },
 
   // ── Real-time Subscriptions ──────────────────────────────────────────────

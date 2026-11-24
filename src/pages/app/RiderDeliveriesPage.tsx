@@ -211,21 +211,26 @@ export default function RiderDeliveriesPage() {
           .catch(() => {});
       }
 
-      setNavigationModalTask({
+      const resolvedTaskObj: DeliveryTask = {
         ...task,
         id: resolvedTaskId,
         pickupLat,
         pickupLng,
         pickupAddress: pickupAddr,
         status: 'rider_assigned',
-      });
+        riderAssignedAt: new Date().toISOString(),
+      };
+
+      setMyTasks((prev) => [resolvedTaskObj, ...prev.filter((t) => t.id !== resolvedTaskId)]);
+      setAvailable((prev) => prev.filter((t) => t.id !== task.id && t.foodListingId !== task.foodListingId));
+      setNavigationModalTask(resolvedTaskObj);
 
       setFeedback({
         type: 'ok',
         text: `✓ Order Accepted! Live in-app route tracking started for "${task.foodTitle || 'Food Pickup'}". Donor has been notified that you are on the way.`,
       });
-      await fetchAll(true);
       selectTab('active');
+      await fetchAll(true);
     } catch (e: any) {
       setFeedback({
         type: 'err',
@@ -238,6 +243,16 @@ export default function RiderDeliveriesPage() {
   };
 
   const handleAdvanceStatus = async (task: DeliveryTask, nextStatus: string) => {
+    if (nextStatus === 'food_collected') {
+      setCodeModal({
+        mode: 'pickup',
+        task,
+        code: '',
+        servings: task.servingsRequired || 1,
+        error: '',
+      });
+      return;
+    }
     setBusyId(task.id);
     setFeedback(null);
     try {
@@ -638,8 +653,7 @@ export default function RiderDeliveriesPage() {
                 )}
 
                 {/* Live Route Map for Active Deliveries */}
-                {['rider_assigned', 'going_to_pickup', 'arrived_at_pickup', 'food_collected', 'in_transit'].includes(task.status) &&
-                  !task.isDirectFoodOpportunity && (
+                {['rider_assigned', 'going_to_pickup', 'arrived_at_pickup', 'food_collected', 'in_transit'].includes(task.status) && (
                     <div style={{ marginTop: 14 }}>
                       <LiveTrackingMap
                         deliveryTaskId={task.id}
@@ -706,32 +720,21 @@ export default function RiderDeliveriesPage() {
                   )}
 
                   {(task.status === 'arrived_at_pickup' || task.status === 'going_to_pickup' || task.status === 'rider_assigned') && (
-                    <>
-                      <button
-                        className={styles.successBtn}
-                        disabled={isBusy}
-                        onClick={() => handleAdvanceStatus(task, 'food_collected')}
-                      >
-                        <CheckCircle2 size={15} /> Confirm Food Collected
-                      </button>
-                      {task.ngoId && (
-                        <button
-                          className={styles.secondaryBtn}
-                          disabled={isBusy}
-                          onClick={() =>
-                            setCodeModal({
-                              mode: 'pickup',
-                              task,
-                              code: '',
-                              servings: task.servingsRequired,
-                              error: '',
-                            })
-                          }
-                        >
-                          <ShieldCheck size={14} /> Verify OTP
-                        </button>
-                      )}
-                    </>
+                    <button
+                      className={styles.successBtn}
+                      disabled={isBusy}
+                      onClick={() =>
+                        setCodeModal({
+                          mode: 'pickup',
+                          task,
+                          code: '',
+                          servings: task.servingsRequired || 1,
+                          error: '',
+                        })
+                      }
+                    >
+                      <ShieldCheck size={15} /> Enter Donor Code & Confirm Pickup
+                    </button>
                   )}
 
                   {task.status === 'food_collected' && (

@@ -72,6 +72,10 @@ export default function RiderDashboardPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionBanner, setActionBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [navigationModalTask, setNavigationModalTask] = useState<DeliveryTask | null>(null);
+  const [enteredPickupCode, setEnteredPickupCode] = useState('');
+  const [codeError, setCodeError] = useState('');
+  const [codeSuccess, setCodeSuccess] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const fetchData = useCallback(async (isSilent = false) => {
     if (!userId) return;
@@ -283,19 +287,32 @@ export default function RiderDashboardPage() {
           .catch(() => {});
       }
 
-      setNavigationModalTask({
+      const resolvedTaskObj: DeliveryTask = {
         ...task,
         id: resolvedTaskId,
         pickupLat,
         pickupLng,
         pickupAddress: pickupAddr,
         status: 'rider_assigned',
-      });
+        riderAssignedAt: new Date().toISOString(),
+      };
+
+      // Optimistically insert into myTasks so activeTask is immediately set on screen
+      setMyTasks((prev) => [resolvedTaskObj, ...prev.filter((t) => t.id !== resolvedTaskId)]);
+      setAvailableTasks((prev) => prev.filter((t) => t.id !== task.id && t.foodListingId !== task.foodListingId));
+
+      setNavigationModalTask(resolvedTaskObj);
 
       setActionBanner({
         kind: 'ok',
         text: `✓ Order Accepted! Live in-app route tracking started for ${pickupAddr || 'donor location'}. Donor has been notified that you are on the way.`,
       });
+
+      setTimeout(() => {
+        const el = document.getElementById('active-delivery-command-center');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+
       await fetchData(true);
     } catch (e: any) {
       setActionBanner({
@@ -308,7 +325,42 @@ export default function RiderDashboardPage() {
     }
   };
 
+  const handleVerifyAndConfirmPickup = async (task: DeliveryTask, codeOverride?: string) => {
+    const codeToVerify = (codeOverride || enteredPickupCode).trim().toUpperCase();
+    if (!codeToVerify) {
+      setCodeError('Please enter the 6-character pickup verification code shown on the donor screen.');
+      return;
+    }
+    setIsVerifying(true);
+    setCodeError('');
+    setCodeSuccess('');
+    try {
+      await ClaimsService.confirmPickup(task.id, codeToVerify, task.servingsRequired || 1);
+      setCodeSuccess('✓ Food handover verified! Food collected from donor. Now delivering to destination.');
+      setEnteredPickupCode('');
+      setActionBanner({
+        kind: 'ok',
+        text: '✓ Handover verified! Food collected. Head to destination to complete delivery.',
+      });
+      await fetchData(true);
+    } catch (e: any) {
+      setCodeError(e?.message || 'Invalid verification code. Please ask the donor for the 6-character code shown on their screen.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handleUpdateActiveStatus = async (task: DeliveryTask, nextStatus: string) => {
+    if (nextStatus === 'food_collected') {
+      if (!enteredPickupCode.trim()) {
+        setCodeError('⚠️ Verification code required! Enter the 6-character pickup code from the donor screen to confirm handover.');
+        const inputEl = document.getElementById('donor-verification-input');
+        if (inputEl) inputEl.focus();
+        return;
+      }
+      return handleVerifyAndConfirmPickup(task, enteredPickupCode);
+    }
+
     setBusyId(task.id);
     setActionBanner(null);
     try {
@@ -522,6 +574,43 @@ export default function RiderDashboardPage() {
                 </button>
               }
             />
+
+            {/* Embedded Verification Input inside modal so rider never needs to exit the map */}
+            {(!activeTask || ['rider_assigned', 'going_to_pickup', 'arrived_at_pickup'].includes(activeTask.status)) && (
+              <div className={styles.verificationCard} style={{ marginTop: 14 }}>
+                <div className={styles.verificationHeader}>
+                  <ShieldCheck size={18} color="#ea580c" />
+                  <span>Donor Pickup Verification Code</span>
+                </div>
+                <p className={styles.verificationPrompt}>
+                  Ask the donor for their 6-character code shown on their dashboard to verify handover and complete pickup.
+                </p>
+                <div className={styles.verificationRow}>
+                  <input
+                    type="text"
+                    maxLength={8}
+                    placeholder="ENTER 6-CHAR CODE"
+                    value={enteredPickupCode}
+                    onChange={(e) => {
+                      setEnteredPickupCode(e.target.value.toUpperCase());
+                      setCodeError('');
+                    }}
+                    className={styles.verificationInput}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyAndConfirmPickup(activeTask || navigationModalTask)}
+                    disabled={isVerifying || !enteredPickupCode.trim()}
+                    className={styles.verifyBtn}
+                  >
+                    {isVerifying ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                    Verify & Confirm Handover
+                  </button>
+                </div>
+                {codeError && <div className={styles.verificationError}>{codeError}</div>}
+                {codeSuccess && <div className={styles.verificationSuccess}>{codeSuccess}</div>}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -602,6 +691,200 @@ export default function RiderDashboardPage() {
           </div>
         </div>
       </section>
+
+      {/* ─── Hero Active Delivery Command Center (Zomato-Style, Persistent, Never Vanishes) ─── */}
+      {activeTask && (
+        <section id="active-delivery-command-center" className={styles.activeDeliverySection}>
+          <div className={styles.activeHeaderBar}>
+            <div className={styles.activeTitleGroup}>
+              <span className={styles.activePulseBadge}>
+                <span className={styles.pulseDot} />
+                {STATUS_BADGES[activeTask.status] || 'Order Accepted & Active'}
+              </span>
+              <h2 className={styles.activeMainHeading}>
+                {activeTask.foodTitle || 'Food Pickup'} · Live Pickup Tracking
+              </h2>
+              <p className={styles.activeSubheading}>
+                <MapPin size={13} style={{ color: '#ea580c', verticalAlign: 'middle' }} />{' '}
+                <strong>{activeTask.pickupAddress || 'Donor Location'}</strong> · Donor:{' '}
+                {activeTask.donorName || 'Verified Donor'} · Serves {activeTask.servingsRequired}{' '}
+                {activeTask.quantityUnit}
+              </p>
+            </div>
+            <div className={styles.activeHeaderActions}>
+              <button
+                type="button"
+                onClick={() => handleOpenDonorChat(activeTask)}
+                className={styles.chatActionBtn}
+              >
+                <MessageSquare size={14} /> Chat with Donor
+              </button>
+              {activeTask.donorPhone && (
+                <a
+                  href={`tel:${activeTask.donorPhone}`}
+                  className={styles.callActionBtn}
+                >
+                  <Phone size={14} /> Call Donor
+                </a>
+              )}
+            </div>
+          </div>
+
+          <div className={styles.activeMapContainer}>
+            <LiveTrackingMap
+              deliveryTaskId={activeTask.id}
+              taskStatus={activeTask.status}
+              pickupLat={activeTask.pickupLat}
+              pickupLng={activeTask.pickupLng}
+              pickupLabel={activeTask.pickupAddress || activeTask.donorName || 'Donor Pickup'}
+              dropoffLat={activeTask.dropoffLat}
+              dropoffLng={activeTask.dropoffLng}
+              dropoffLabel={
+                activeTask.ngoOrgName ||
+                activeTask.ngoName ||
+                activeTask.dropoffAddress ||
+                'Community Distribution'
+              }
+              viewerRole="rider"
+              riderCoordOverride={
+                riderCoords
+                  ? {
+                      latitude: riderCoords.latitude,
+                      longitude: riderCoords.longitude,
+                      recordedAt: riderCoords.timestamp,
+                    }
+                  : null
+              }
+              riderName={user?.name || 'ShareBite Rider'}
+              donorName={activeTask.donorName || 'Food Donor'}
+              donorPhone={activeTask.donorPhone}
+              assignedAt={activeTask.riderAssignedAt}
+              updatedAt={activeTask.updatedAt}
+              onOpenChat={() => handleOpenDonorChat(activeTask)}
+              showTrackingPanel={true}
+              height={340}
+            />
+          </div>
+
+          {/* Stepper Status Action + Verification Code Gate */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Quick Status Action Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {(() => {
+                const nextStep = getNextStatusAction(activeTask);
+                if (!nextStep) return null;
+                return (
+                  <button
+                    type="button"
+                    className={styles.nextStatusBtn}
+                    style={{ flex: 1, minWidth: 220, padding: '12px 18px', fontSize: 14 }}
+                    disabled={busyId === activeTask.id || isVerifying}
+                    onClick={() => handleUpdateActiveStatus(activeTask, nextStep.next)}
+                  >
+                    {busyId === activeTask.id || isVerifying ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <ShieldCheck size={16} />
+                    )}
+                    {nextStep.label}
+                  </button>
+                );
+              })()}
+              <button
+                type="button"
+                className={styles.liveTrackBtn}
+                onClick={() => setNavigationModalTask(activeTask)}
+                style={{ padding: '12px 18px', fontSize: 13 }}
+              >
+                <Navigation size={14} /> Full Screen Map
+              </button>
+            </div>
+
+            {/* Verification Code Box (Required before food can be marked collected) */}
+            {['rider_assigned', 'going_to_pickup', 'arrived_at_pickup'].includes(activeTask.status) && (
+              <div className={styles.verificationCard}>
+                <div className={styles.verificationHeader}>
+                  <ShieldCheck size={18} color="#ea580c" />
+                  <span>🔒 Donor Handover Verification (Required)</span>
+                </div>
+                <p className={styles.verificationPrompt}>
+                  Ask the donor for the 6-character Pickup Verification Code displayed on their dashboard screen to verify and collect the food.
+                </p>
+                <div className={styles.verificationRow}>
+                  <input
+                    id="donor-verification-input"
+                    type="text"
+                    maxLength={8}
+                    placeholder="ENTER 6-CHAR CODE"
+                    value={enteredPickupCode}
+                    onChange={(e) => {
+                      setEnteredPickupCode(e.target.value.toUpperCase());
+                      setCodeError('');
+                    }}
+                    className={styles.verificationInput}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyAndConfirmPickup(activeTask)}
+                    disabled={isVerifying || !enteredPickupCode.trim()}
+                    className={styles.verifyBtn}
+                  >
+                    {isVerifying ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                    Verify & Confirm Food Pickup
+                  </button>
+                </div>
+                {codeError && <div className={styles.verificationError}>{codeError}</div>}
+                {codeSuccess && <div className={styles.verificationSuccess}>{codeSuccess}</div>}
+              </div>
+            )}
+
+            {/* Collected / Delivering Status Callout */}
+            {['food_collected', 'in_transit'].includes(activeTask.status) && (
+              <div
+                style={{
+                  background: '#f0fdf4',
+                  border: '1.5px solid #86efac',
+                  borderRadius: 14,
+                  padding: '12px 18px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CheckCircle2 size={18} color="#16a34a" />
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: '#166534' }}>
+                    Food Handover Verified & Collected! Head to destination:{' '}
+                    {activeTask.ngoOrgName ||
+                      activeTask.ngoName ||
+                      activeTask.dropoffAddress ||
+                      'Community Distribution'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateActiveStatus(activeTask, 'completed')}
+                  disabled={busyId === activeTask.id}
+                  style={{
+                    background: '#16a34a',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 10,
+                    padding: '8px 16px',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✓ Mark Delivered
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ─── Middle Grid: Available Pickups + Active Delivery ────────────── */}
       <section className={styles.mainGrid}>
