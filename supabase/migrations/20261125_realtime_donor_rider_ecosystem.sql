@@ -125,7 +125,7 @@ create or replace function public.accept_donation(
 )
 returns jsonb
 security definer
-set search_path = public
+set search_path = public, extensions
 language plpgsql as $$
 declare
   v_uid               uuid := auth.uid();
@@ -178,8 +178,8 @@ begin
     raise exception 'Requested % servings but only % available', v_servings, v_food.available_servings;
   end if;
 
-  v_pickup_code := upper(substring(encode(gen_random_bytes(3), 'hex'), 1, 6));
-  v_drop_code   := upper(substring(encode(gen_random_bytes(3), 'hex'), 1, 6));
+  v_pickup_code := upper(substring(md5(random()::text || clock_timestamp()::text), 1, 6));
+  v_drop_code   := upper(substring(md5(random()::text || clock_timestamp()::text), 1, 6));
   v_collection_method := case
     when p_collection_method = 'direct_ngo_pickup' then 'direct_ngo_pickup'
     else 'ngo_delivery'
@@ -738,7 +738,7 @@ $$;
 create or replace function public.switch_user_role(p_target_role text)
 returns jsonb
 security definer
-set search_path = public
+set search_path = public, extensions
 language plpgsql as $$
 declare
   v_uid         uuid := auth.uid();

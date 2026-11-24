@@ -103,8 +103,8 @@ begin
     raise exception 'Requested % servings but only % available', v_servings, v_food.available_servings;
   end if;
 
-  v_pickup_code := upper(substring(encode(gen_random_bytes(3), 'hex'), 1, 6));
-  v_drop_code   := upper(substring(encode(gen_random_bytes(3), 'hex'), 1, 6));
+  v_pickup_code := upper(substring(md5(random()::text || clock_timestamp()::text), 1, 6));
+  v_drop_code   := upper(substring(md5(random()::text || clock_timestamp()::text), 1, 6));
   v_collection_method := case
     when p_collection_method = 'direct_ngo_pickup' then 'direct_ngo_pickup'
     else 'ngo_delivery'
@@ -537,8 +537,8 @@ begin
   select * into v_food from public.food_listings where id = v_claim.food_listing_id;
   select * into v_ngo  from public.profiles where id = v_claim.ngo_id;
 
-  v_pickup_code := coalesce(v_claim.pickup_code, upper(substring(encode(gen_random_bytes(3), 'hex'), 1, 6)));
-  v_drop_code   := upper(substring(encode(gen_random_bytes(3), 'hex'), 1, 6));
+  v_pickup_code := coalesce(v_claim.pickup_code, upper(substring(md5(random()::text || clock_timestamp()::text), 1, 6)));
+  v_drop_code   := upper(substring(md5(random()::text || clock_timestamp()::text), 1, 6));
 
   insert into public.delivery_tasks (
     food_listing_id, claim_id, reservation_id,
