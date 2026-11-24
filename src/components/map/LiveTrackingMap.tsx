@@ -4,6 +4,7 @@ import { divIcon } from 'leaflet';
 import { Clock, Navigation } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { LocationService, type RoadRouteResult } from '../../services/location';
+import { buildGoogleMapsEmbedUrl, buildGoogleMapsNavigationUrl } from '../../services/claims';
 import type { RiderLocationUpdate } from '../../types';
 import 'leaflet/dist/leaflet.css';
 import '../../styles/leaflet-fix.css';
@@ -63,6 +64,7 @@ export default function LiveTrackingMap({
 }: Props) {
   const [riderLoc, setRiderLoc] = useState<RiderLocationUpdate | null>(null);
   const [route, setRoute] = useState<RoadRouteResult | null>(null);
+  const [mapMode, setMapMode] = useState<'route' | 'google'>('route');
 
   const hasPickup = typeof pickupLat === 'number' && typeof pickupLng === 'number' && !isNaN(pickupLat) && !isNaN(pickupLng);
   const hasDropoff = typeof dropoffLat === 'number' && typeof dropoffLng === 'number' && !isNaN(dropoffLat) && !isNaN(dropoffLng);
@@ -141,6 +143,15 @@ export default function LiveTrackingMap({
 
   const navLat = targetLat ?? dropoffLat ?? pickupLat;
   const navLng = targetLng ?? dropoffLng ?? pickupLng;
+  const navLabel = headingToDropoff ? dropoffLabel : pickupLabel;
+  const gmapsNavUrl = buildGoogleMapsNavigationUrl(
+    navLat,
+    navLng,
+    navLabel,
+    riderLoc?.latitude,
+    riderLoc?.longitude
+  );
+  const gmapsEmbedUrl = buildGoogleMapsEmbedUrl(navLat, navLng, navLabel);
 
   return (
     <div style={{ marginTop: 12, marginBottom: 12 }}>
@@ -165,19 +176,66 @@ export default function LiveTrackingMap({
             </span>
           )}
         </div>
-        {navLat != null && navLng != null && (
-          <a
-            href={`https://www.google.com/maps/dir/?api=1&destination=${navLat},${navLng}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#ea580c', fontWeight: 600, textDecoration: 'none' }}
-          >
-            <Navigation size={12} /> Open in Google Maps
-          </a>
-        )}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {gmapsEmbedUrl && (
+            <div style={{ display: 'inline-flex', background: '#f1f5f9', borderRadius: 8, padding: 2 }}>
+              <button
+                type="button"
+                onClick={() => setMapMode('route')}
+                style={{
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '3px 8px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: mapMode === 'route' ? '#ffffff' : 'transparent',
+                  color: mapMode === 'route' ? '#0f172a' : '#64748b',
+                }}
+              >
+                Live Route
+              </button>
+              <button
+                type="button"
+                onClick={() => setMapMode('google')}
+                style={{
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '3px 8px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: mapMode === 'google' ? '#ffffff' : 'transparent',
+                  color: mapMode === 'google' ? '#ea580c' : '#64748b',
+                }}
+              >
+                Google Maps
+              </button>
+            </div>
+          )}
+          {gmapsNavUrl && (
+            <a
+              href={gmapsNavUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#ea580c', fontWeight: 600, textDecoration: 'none' }}
+            >
+              <Navigation size={12} /> Open in Google Maps
+            </a>
+          )}
+        </div>
       </div>
 
       <div style={{ height, width: '100%', borderRadius: 12, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
+        {mapMode === 'google' && gmapsEmbedUrl ? (
+          <iframe
+            title={`Google Maps - ${navLabel}`}
+            src={gmapsEmbedUrl}
+            style={{ width: '100%', height: '100%', border: 0 }}
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        ) : (
         <MapContainer center={points[0]} zoom={14} style={{ width: '100%', height: '100%' }} scrollWheelZoom={false}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -218,6 +276,7 @@ export default function LiveTrackingMap({
             />
           )}
         </MapContainer>
+        )}
       </div>
     </div>
   );

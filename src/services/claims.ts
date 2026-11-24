@@ -164,13 +164,36 @@ export interface RiderProfileRecord {
 export function buildGoogleMapsNavigationUrl(
   lat?: number | null,
   lng?: number | null,
+  address?: string | null,
+  originLat?: number | null,
+  originLng?: number | null
+): string | null {
+  const hasOrigin =
+    typeof originLat === 'number' &&
+    typeof originLng === 'number' &&
+    !Number.isNaN(originLat) &&
+    !Number.isNaN(originLng);
+  const originParam = hasOrigin ? `&origin=${originLat},${originLng}` : '';
+
+  if (typeof lat === 'number' && typeof lng === 'number' && !Number.isNaN(lat) && !Number.isNaN(lng)) {
+    return `https://www.google.com/maps/dir/?api=1${originParam}&destination=${lat},${lng}&travelmode=two-wheeler`;
+  }
+  if (address && address.trim().length > 0) {
+    return `https://www.google.com/maps/dir/?api=1${originParam}&destination=${encodeURIComponent(address.trim())}&travelmode=two-wheeler`;
+  }
+  return null;
+}
+
+export function buildGoogleMapsEmbedUrl(
+  lat?: number | null,
+  lng?: number | null,
   address?: string | null
 ): string | null {
   if (typeof lat === 'number' && typeof lng === 'number' && !Number.isNaN(lat) && !Number.isNaN(lng)) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=two-wheeler`;
+    return `https://maps.google.com/maps?q=${lat},${lng}&z=16&output=embed`;
   }
   if (address && address.trim().length > 0) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address.trim())}&travelmode=two-wheeler`;
+    return `https://maps.google.com/maps?q=${encodeURIComponent(address.trim())}&z=16&output=embed`;
   }
   return null;
 }
@@ -178,9 +201,11 @@ export function buildGoogleMapsNavigationUrl(
 export function openGoogleMapsNavigation(
   lat?: number | null,
   lng?: number | null,
-  address?: string | null
+  address?: string | null,
+  originLat?: number | null,
+  originLng?: number | null
 ): string | null {
-  const url = buildGoogleMapsNavigationUrl(lat, lng, address);
+  const url = buildGoogleMapsNavigationUrl(lat, lng, address, originLat, originLng);
   if (url && typeof window !== 'undefined') {
     try {
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -189,6 +214,32 @@ export function openGoogleMapsNavigation(
     }
   }
   return url;
+}
+
+const RIDER_STATUS_TAG_RE = /\[RIDER_TASK_STATUS:([a-z_]+)\]/i;
+
+function stripRiderStatusTag(notes?: string | null): string {
+  return (notes || '').replace(/\s*\[RIDER_TASK_STATUS:[a-z_]+\]\s*/gi, ' ').trim();
+}
+
+function withRiderStatusTag(notes: string | null | undefined, status: string): string {
+  const base = stripRiderStatusTag(notes);
+  return base ? `${base}\n[RIDER_TASK_STATUS:${status}]` : `[RIDER_TASK_STATUS:${status}]`;
+}
+
+function extractRiderStatusFromListing(fl: any): string {
+  const m = typeof fl?.packaging_notes === 'string' ? fl.packaging_notes.match(RIDER_STATUS_TAG_RE) : null;
+  if (m?.[1]) return m[1];
+  switch (fl?.status) {
+    case 'picked_up':
+      return 'food_collected';
+    case 'completed':
+      return 'completed';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return 'rider_assigned';
+  }
 }
 
 function mapClaim(row: any): NgoClaim {
@@ -419,6 +470,76 @@ export const ClaimsService = {
         status: data.status,
         collectionMethod: data.collection_method || collectionMethod,
       };
+    }
+
+    if (error && /Donors cannot accept their own food donation/i.test(error.message || '')) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user?.id) {
+        const { data: listing } = await supabase
+          .from('food_listings')
+          .select('*')
+          .eq('id', foodListingId)
+          .maybeSingle();
+
+        if (listing && listing.donor_id === user.id) {
+          const riderProf = await ClaimsService.getOrEnsureRiderProfile(
+            user.id,
+            user.user_metadata?.full_name,
+            user.phone
+          );
+          if (riderProf) {
+            await supabase
+              .from('riders')
+              .update({
+                is_online: true,
+                is_available: false,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', riderProf.id);
+
+            const updatedNotes = withRiderStatusTag(listing.packaging_notes, 'rider_assigned');
+            const { error: updListingErr } = await supabase
+              .from('food_listings')
+              .update({
+                status: 'reserved',
+                available_servings: 0,
+                assigned_rider_id: riderProf.id,
+                accepted_by_role: 'rider',
+                packaging_notes: updatedNotes,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', foodListingId);
+
+            if (!updListingErr) {
+              try {
+                await supabase.from('notifications').insert({
+                  user_id: user.id,
+                  type: 'rider_assigned',
+                  title: 'Donation Acceptance Confirmed!',
+                  message: `You accepted pickup at ${listing.pickup_address || 'donor location'}. Navigate now to collect the food.`,
+                  data: {
+                    food_listing_id: foodListingId,
+                    delivery_task_id: foodListingId,
+                  },
+                  related_food_id: foodListingId,
+                  action_url: '/rider/deliveries?tab=active',
+                });
+              } catch {}
+
+              return {
+                acceptedBy: 'rider',
+                deliveryTaskId: foodListingId,
+                pickupLat: listing.latitude,
+                pickupLng: listing.longitude,
+                pickupAddress: listing.pickup_address || listing.city,
+                status: 'rider_assigned',
+              };
+            }
+          }
+        }
+      }
     }
 
     if (error && error.code !== 'PGRST202') {
@@ -725,7 +846,7 @@ export const ClaimsService = {
     if (!isValidUUID(riderUserId)) return [];
     const { data: riderData } = await supabase
       .from('riders')
-      .select('id')
+      .select('id, name, phone')
       .eq('user_id', riderUserId)
       .maybeSingle();
 
@@ -737,8 +858,67 @@ export const ClaimsService = {
       .eq('rider_id', riderData.id)
       .order('created_at', { ascending: false });
 
-    if (error || !data) return [];
-    return data.map(mapDeliveryTask);
+    const tasks: DeliveryTask[] = !error && data ? data.map(mapDeliveryTask) : [];
+    const seenFoodIds = new Set(tasks.map((t) => t.foodListingId));
+
+    // Also include single-account or direct food_listings assigned to this rider without a delivery_tasks row
+    let { data: directListings, error: directErr } = await supabase
+      .from('food_listings')
+      .select('*, donor:profiles!food_listings_donor_id_fkey(id, full_name, organization_name, phone)')
+      .eq('assigned_rider_id', riderData.id)
+      .order('updated_at', { ascending: false });
+
+    if (directErr) {
+      const fb = await supabase
+        .from('food_listings')
+        .select('*')
+        .eq('assigned_rider_id', riderData.id)
+        .order('updated_at', { ascending: false });
+      directListings = fb.data;
+    }
+
+    if (directListings) {
+      for (const fl of directListings) {
+        if (seenFoodIds.has(fl.id)) continue;
+        const inferredStatus = extractRiderStatusFromListing(fl);
+        const cleanNotes = stripRiderStatusTag(fl.packaging_notes);
+        tasks.push({
+          id: fl.id,
+          foodListingId: fl.id,
+          riderId: riderData.id,
+          donorId: fl.donor_id,
+          assignmentType: 'rider_direct_pickup',
+          pickupAddress: fl.pickup_address || fl.city || 'Donor Location',
+          pickupLat: fl.latitude,
+          pickupLng: fl.longitude,
+          dropoffAddress: 'Community Distribution / Shelter',
+          foodTitle: fl.title,
+          foodDescription: fl.description,
+          servingsRequired: Number(fl.servings ?? fl.available_servings ?? 1),
+          quantityValue: Number(fl.quantity_value ?? fl.servings ?? 1),
+          quantityUnit: fl.quantity_unit || 'servings',
+          preparationTime: fl.preparation_date || fl.available_from || fl.created_at,
+          collectionDeadline: fl.available_until,
+          status: inferredStatus,
+          incidentReported: false,
+          instructions: cleanNotes || fl.description,
+          riderAssignedAt: fl.updated_at || fl.created_at,
+          createdAt: fl.created_at,
+          updatedAt: fl.updated_at,
+          foodType: fl.food_type,
+          foodCategory: fl.category,
+          foodImageUrl: fl.image_url,
+          donorName: fl.donor?.full_name || fl.donor?.organization_name || 'Verified Food Donor',
+          donorPhone: fl.donor?.phone,
+          riderName: riderData.name,
+          riderPhone: riderData.phone,
+          riderUserId,
+          isDirectFoodOpportunity: false,
+        });
+      }
+    }
+
+    return tasks;
   },
 
   async getDeliveryTaskById(taskId: string): Promise<DeliveryTask | null> {
@@ -817,8 +997,42 @@ export const ClaimsService = {
       p_task_id: taskId,
       p_reason: reason || null,
     });
-    if (error) throw new Error(error.message || 'Failed to reassign task');
-    return !!data;
+    if (!error) return !!data;
+
+    // Fallback for single-account direct food_listings assigned without a delivery_tasks row
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user?.id) {
+      const { data: fl } = await supabase
+        .from('food_listings')
+        .select('id, servings, packaging_notes, donor_id')
+        .eq('id', taskId)
+        .maybeSingle();
+
+      if (fl && fl.donor_id === user.id) {
+        await supabase
+          .from('food_listings')
+          .update({
+            status: 'available',
+            available_servings: fl.servings ?? 1,
+            assigned_rider_id: null,
+            accepted_by_role: null,
+            packaging_notes: stripRiderStatusTag(fl.packaging_notes) || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', taskId);
+
+        await supabase
+          .from('riders')
+          .update({ is_available: true, updated_at: new Date().toISOString() })
+          .eq('user_id', user.id);
+
+        return true;
+      }
+    }
+
+    throw new Error(error.message || 'Failed to reassign task');
   },
 
   async updateDeliveryTaskStatus(taskId: string, status: string, notes?: string): Promise<boolean> {
@@ -831,16 +1045,55 @@ export const ClaimsService = {
     });
 
     if (!error) return !!data;
-    if (error.code !== 'PGRST202') {
-      throw new Error(error.message || 'Failed to update status');
-    }
 
-    // Fallback only if update_donation_status RPC is not yet deployed
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) throw new Error('Authentication required');
 
+    // Check if taskId is a direct food_listings fallback (when single-account test bypassed RPC)
+    const { data: fallbackListing } = await supabase
+      .from('food_listings')
+      .select('id, donor_id, packaging_notes')
+      .eq('id', taskId)
+      .maybeSingle();
+
+    if (fallbackListing && fallbackListing.donor_id === user.id) {
+      const foodStatus =
+        status === 'food_collected' || status === 'in_transit'
+          ? 'picked_up'
+          : status === 'delivered' || status === 'completed'
+          ? 'completed'
+          : status === 'cancelled'
+          ? 'cancelled'
+          : 'reserved';
+
+      const { error: flErr } = await supabase
+        .from('food_listings')
+        .update({
+          status: foodStatus,
+          packaging_notes: withRiderStatusTag(fallbackListing.packaging_notes, status),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', taskId);
+
+      if (flErr) throw new Error(flErr.message);
+
+      if (status === 'completed' || status === 'delivered' || status === 'cancelled') {
+        await supabase
+          .from('riders')
+          .update({ is_available: true, updated_at: new Date().toISOString() })
+          .eq('user_id', user.id);
+      }
+
+      return true;
+    }
+
+    if (error.code !== 'PGRST202') {
+      throw new Error(error.message || 'Failed to update status');
+    }
+
+    // Fallback only if update_donation_status RPC is not yet deployed
     const { data: rider } = await supabase
       .from('riders')
       .select('id')

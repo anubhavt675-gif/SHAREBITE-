@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Truck, Package, MapPin, Clock, CheckCircle2, Star, Navigation,
-  MessageSquare, Loader2, ArrowRight, ShieldCheck, X
+  MessageSquare, Loader2, ArrowRight, ShieldCheck, X, Phone
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
@@ -10,6 +10,7 @@ import {
   ClaimsService,
   openGoogleMapsNavigation,
   buildGoogleMapsNavigationUrl,
+  buildGoogleMapsEmbedUrl,
   type DeliveryTask,
   type RiderProfileRecord,
 } from '../../services/claims';
@@ -73,6 +74,7 @@ export default function RiderDashboardPage() {
   const [gpsError, setGpsError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionBanner, setActionBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [navigationModalTask, setNavigationModalTask] = useState<DeliveryTask | null>(null);
 
   const fetchData = useCallback(async (isSilent = false) => {
     if (!userId) return;
@@ -249,7 +251,22 @@ export default function RiderDashboardPage() {
       }
 
       // Automatically open Google Maps Directions to Donor pickup coordinates
-      openGoogleMapsNavigation(pickupLat, pickupLng, pickupAddr);
+      openGoogleMapsNavigation(
+        pickupLat,
+        pickupLng,
+        pickupAddr,
+        riderCoordsRef.current?.latitude,
+        riderCoordsRef.current?.longitude
+      );
+
+      setNavigationModalTask({
+        ...task,
+        id: assignedTaskId || task.id,
+        pickupLat,
+        pickupLng,
+        pickupAddress: pickupAddr,
+        status: 'rider_assigned',
+      });
 
       setActionBanner({
         kind: 'ok',
@@ -268,6 +285,23 @@ export default function RiderDashboardPage() {
   };
 
   const handleUpdateActiveStatus = async (task: DeliveryTask, nextStatus: string) => {
+    if (nextStatus === 'going_to_pickup') {
+      openGoogleMapsNavigation(
+        task.pickupLat,
+        task.pickupLng,
+        task.pickupAddress,
+        riderCoordsRef.current?.latitude,
+        riderCoordsRef.current?.longitude
+      );
+    } else if (nextStatus === 'in_transit' && (task.dropoffLat != null || task.dropoffAddress)) {
+      openGoogleMapsNavigation(
+        task.dropoffLat,
+        task.dropoffLng,
+        task.dropoffAddress,
+        riderCoordsRef.current?.latitude,
+        riderCoordsRef.current?.longitude
+      );
+    }
     setBusyId(task.id);
     setActionBanner(null);
     try {
@@ -326,9 +360,27 @@ export default function RiderDashboardPage() {
 
   const activeNavUrl = activeTask
     ? ['food_collected', 'in_transit'].includes(activeTask.status)
-      ? buildGoogleMapsNavigationUrl(activeTask.dropoffLat, activeTask.dropoffLng, activeTask.dropoffAddress) ||
-        buildGoogleMapsNavigationUrl(activeTask.pickupLat, activeTask.pickupLng, activeTask.pickupAddress)
-      : buildGoogleMapsNavigationUrl(activeTask.pickupLat, activeTask.pickupLng, activeTask.pickupAddress)
+      ? buildGoogleMapsNavigationUrl(
+          activeTask.dropoffLat,
+          activeTask.dropoffLng,
+          activeTask.dropoffAddress,
+          riderCoords?.latitude,
+          riderCoords?.longitude
+        ) ||
+        buildGoogleMapsNavigationUrl(
+          activeTask.pickupLat,
+          activeTask.pickupLng,
+          activeTask.pickupAddress,
+          riderCoords?.latitude,
+          riderCoords?.longitude
+        )
+      : buildGoogleMapsNavigationUrl(
+          activeTask.pickupLat,
+          activeTask.pickupLng,
+          activeTask.pickupAddress,
+          riderCoords?.latitude,
+          riderCoords?.longitude
+        )
     : null;
 
   const isPickedUpDone = activeTask
@@ -343,6 +395,160 @@ export default function RiderDashboardPage() {
 
   return (
     <div className={styles.dashboard}>
+      {/* Instant Pickup Map & Google Maps Turn-by-Turn Modal after Accept */}
+      {navigationModalTask && (() => {
+        const navUrl = buildGoogleMapsNavigationUrl(
+          navigationModalTask.pickupLat,
+          navigationModalTask.pickupLng,
+          navigationModalTask.pickupAddress,
+          riderCoords?.latitude,
+          riderCoords?.longitude
+        );
+        const embedUrl = buildGoogleMapsEmbedUrl(
+          navigationModalTask.pickupLat,
+          navigationModalTask.pickupLng,
+          navigationModalTask.pickupAddress
+        );
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(15, 23, 42, 0.58)',
+              zIndex: 300,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16,
+            }}
+          >
+            <div
+              style={{
+                background: '#ffffff',
+                borderRadius: 20,
+                padding: 22,
+                width: '100%',
+                maxWidth: 540,
+                position: 'relative',
+                boxShadow: '0 24px 60px rgba(15, 23, 42, 0.25)',
+                maxHeight: '92vh',
+                overflowY: 'auto',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setNavigationModalTask(null)}
+                aria-label="Close pickup map"
+                style={{
+                  position: 'absolute',
+                  top: 14,
+                  right: 14,
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: 6,
+                  cursor: 'pointer',
+                }}
+              >
+                <X size={16} />
+              </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ background: '#DCFCE7', color: '#15803D', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>
+                  PICKUP ACCEPTED
+                </span>
+              </div>
+              <h3 style={{ margin: '4px 0 4px', fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
+                Navigate to {navigationModalTask.foodTitle || 'Food Pickup'}
+              </h3>
+              <p style={{ margin: '0 0 12px', fontSize: 13, color: '#475569' }}>
+                <MapPin size={13} style={{ verticalAlign: 'middle', color: '#ea580c' }} />{' '}
+                <strong>{navigationModalTask.pickupAddress || 'Donor Pickup Location'}</strong>
+                {navigationModalTask.donorName ? ` · Donor: ${navigationModalTask.donorName}` : ''}
+                {navigationModalTask.servingsRequired ? ` · ${navigationModalTask.servingsRequired} ${navigationModalTask.quantityUnit}` : ''}
+              </p>
+
+              {embedUrl && (
+                <div style={{ height: 240, width: '100%', borderRadius: 14, overflow: 'hidden', border: '1px solid #e2e8f0', marginBottom: 14 }}>
+                  <iframe
+                    title="Donor Pickup Location Google Map"
+                    src={embedUrl}
+                    style={{ width: '100%', height: '100%', border: 0 }}
+                    loading="eager"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {navUrl && (
+                  <a
+                    href={navUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      const t = navigationModalTask;
+                      setNavigationModalTask(null);
+                      if (t.status === 'rider_assigned') {
+                        ClaimsService.updateDeliveryTaskStatus(t.id, 'going_to_pickup').then(() => fetchData(true)).catch(() => {});
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      padding: '12px 18px',
+                      borderRadius: 12,
+                      background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                      color: '#ffffff',
+                      fontWeight: 800,
+                      fontSize: 14,
+                      textDecoration: 'none',
+                      boxShadow: '0 6px 18px rgba(234, 88, 12, 0.28)',
+                    }}
+                  >
+                    <Navigation size={16} /> Open Google Maps Navigation
+                  </a>
+                )}
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={styles.liveTrackBtn}
+                    style={{ flex: 1, justifyContent: 'center' }}
+                    onClick={() => {
+                      const t = navigationModalTask;
+                      setNavigationModalTask(null);
+                      handleOpenDonorChat(t);
+                    }}
+                  >
+                    <MessageSquare size={14} /> Chat with Donor
+                  </button>
+                  {navigationModalTask.donorPhone && (
+                    <a
+                      href={`tel:${navigationModalTask.donorPhone}`}
+                      className={styles.liveTrackBtn}
+                      style={{ flex: 1, justifyContent: 'center', textDecoration: 'none' }}
+                    >
+                      <Phone size={14} /> Call Donor
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.liveTrackBtn}
+                    style={{ flex: 1, justifyContent: 'center' }}
+                    onClick={() => setNavigationModalTask(null)}
+                  >
+                    Active Delivery
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Feedback & GPS Permissions Alerts */}
       {actionBanner && (
         <div className={actionBanner.kind === 'ok' ? styles.bannerOk : styles.bannerErr}>

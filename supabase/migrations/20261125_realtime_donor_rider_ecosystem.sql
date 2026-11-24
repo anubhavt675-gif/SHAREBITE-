@@ -165,7 +165,7 @@ begin
     raise exception 'Food donation not found';
   end if;
 
-  if v_food.donor_id = v_uid then
+  if v_food.donor_id = v_uid and v_profile.role::text not in ('rider', 'volunteer') then
     raise exception 'Donors cannot accept their own food donation';
   end if;
 
