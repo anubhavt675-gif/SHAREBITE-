@@ -17,6 +17,7 @@ import {
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import WeCareFoundationSection from '../../components/home/WeCareFoundationSection';
+import OutreachExperienceSection from '../../components/home/OutreachExperienceSection';
 import { ImpactService } from '../../services/impact';
 import type { CommunityImpact } from '../../types';
 import heroBoyExactImg from '../../assets/hero_boy_exact.png';
@@ -378,6 +379,11 @@ export default function LandingPage() {
 
         </div>
       </section>
+
+      {/* ============================================================
+          ON-GROUND FIELD VISIT EXPERIENCE (PHOTOS & VIDEOS)
+          ============================================================ */}
+      <OutreachExperienceSection />
 
       {/* Global Footer */}
       <Footer />

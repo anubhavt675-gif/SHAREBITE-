@@ -1,7 +1,8 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowRight, ExternalLink, HeartHandshake, Leaf, MapPin } from 'lucide-react';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
+import OutreachExperienceSection from '../../components/home/OutreachExperienceSection';
 import { PartnersService } from '../../services/partners';
 import { WE_CARE_FOUNDATION } from '../../config/outreachPartners';
 import type { Partner } from '../../types';
@@ -122,6 +123,9 @@ export default function PartnersPage() {
               </div>
             </a>
           </section>
+
+          {/* On-Ground Visit Photos & Videos Gallery */}
+          <OutreachExperienceSection compact />
 
           <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--color-text-primary)', marginBottom: 8 }}>
             Verified Platform Partners
