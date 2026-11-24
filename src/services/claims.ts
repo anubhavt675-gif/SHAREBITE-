@@ -657,6 +657,24 @@ export const ClaimsService = {
             }
           } catch {}
 
+          // Immediately create/ensure the private Donor <-> Rider conversation on acceptance
+          let fallbackConvId: string | undefined = undefined;
+          if (listing.donor_id && listing.donor_id !== user.id) {
+            try {
+              const createdConv = await ChatService.getOrCreateDirectConversation(
+                user.id,
+                listing.donor_id,
+                {
+                  type: 'delivery',
+                  relatedListingId: foodListingId,
+                  relatedTaskId: resolvedTaskId !== foodListingId ? resolvedTaskId : undefined,
+                  title: listing.title || 'Food Pickup',
+                }
+              );
+              fallbackConvId = createdConv.id;
+            } catch {}
+          }
+
           const riderName = riderProf?.name || user.user_metadata?.full_name || 'ShareBite Rider';
           try {
             await supabase.from('notifications').insert({
@@ -692,6 +710,7 @@ export const ClaimsService = {
           return {
             acceptedBy: 'rider',
             deliveryTaskId: resolvedTaskId,
+            conversationId: fallbackConvId,
             pickupLat: listing.latitude,
             pickupLng: listing.longitude,
             pickupAddress: listing.pickup_address || listing.city,

@@ -80,12 +80,17 @@ export class ChatService {
       throw new Error('Authentication required');
     }
 
+    const safeTaskId =
+      isValidUUID(options.relatedTaskId) && options.relatedTaskId !== options.relatedListingId
+        ? options.relatedTaskId
+        : undefined;
+
     if (options.relatedListingId && isValidUUID(options.relatedListingId)) {
       const { data: rpcConvId, error: rpcErr } = await supabase.rpc(
         'get_or_create_delivery_conversation',
         {
           p_food_listing_id: options.relatedListingId,
-          p_delivery_task_id: isValidUUID(options.relatedTaskId) ? options.relatedTaskId : null,
+          p_delivery_task_id: safeTaskId || null,
         }
       );
 
@@ -100,11 +105,7 @@ export class ChatService {
         }
       }
 
-      if (
-        rpcErr &&
-        rpcErr.code !== 'PGRST202' &&
-        /Unauthorized|No rider is currently assigned/i.test(rpcErr.message || '')
-      ) {
+      if (rpcErr && rpcErr.code !== 'PGRST202' && /Unauthorized/i.test(rpcErr.message || '')) {
         throw new Error(rpcErr.message);
       }
     }
@@ -116,7 +117,7 @@ export class ChatService {
     return this.getOrCreateDirectConversation(currentUserId, recipientUserId, {
       type: 'delivery',
       relatedListingId: options.relatedListingId,
-      relatedTaskId: options.relatedTaskId,
+      relatedTaskId: safeTaskId,
       title: options.title,
     });
   }
@@ -140,7 +141,22 @@ export class ChatService {
 
     const type = options?.type || 'direct';
     const relatedListingId = isValidUUID(options?.relatedListingId) ? options?.relatedListingId : null;
-    const relatedTaskId = isValidUUID(options?.relatedTaskId) ? options?.relatedTaskId : null;
+    let relatedTaskId =
+      isValidUUID(options?.relatedTaskId) && options?.relatedTaskId !== relatedListingId
+        ? options?.relatedTaskId
+        : null;
+
+    // Verify relatedTaskId actually exists in delivery_tasks to prevent FK violations
+    if (relatedTaskId) {
+      const { data: taskExists } = await supabase
+        .from('delivery_tasks')
+        .select('id')
+        .eq('id', relatedTaskId)
+        .maybeSingle();
+      if (!taskExists?.id) {
+        relatedTaskId = null;
+      }
+    }
 
     // 1. Check if a conversation with these participants already exists for this task/listing
     const { data: userConvs } = await supabase
@@ -181,9 +197,20 @@ export class ChatService {
       }
     }
 
-    // 2. Create new conversation (gracefully handles pre- and post-migration schema)
+    // 2. Create new conversation using client-generated UUID WITHOUT .select()
+    // so conv_participant_select RLS never blocks RETURNING * before participants are inserted!
     const nowIso = new Date().toISOString();
+    const newConvId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = (Math.random() * 16) | 0;
+            const v = c === 'x' ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+          });
+
     const basePayload: Record<string, any> = {
+      id: newConvId,
       type,
       related_listing_id: relatedListingId,
       related_task_id: relatedTaskId,
@@ -191,27 +218,46 @@ export class ChatService {
       last_message_at: nowIso,
     };
 
-    let { data: newConv, error: convErr } = await supabase
+    const { error: convErr } = await supabase.from('conversations').insert(basePayload);
+    if (convErr) {
+      throw new Error(convErr.message || 'Failed to create conversation');
+    }
+
+    // 3. Insert current user FIRST (satisfies user_id = auth.uid() RLS),
+    // then insert recipient SECOND (satisfies is_conversation_participant(conversation_id) RLS)
+    const { error: selfPartErr } = await supabase
+      .from('conversation_participants')
+      .insert({ conversation_id: newConvId, user_id: currentUserId });
+
+    if (selfPartErr) {
+      throw new Error(selfPartErr.message || 'Failed to register current participant');
+    }
+
+    if (recipientUserId !== currentUserId) {
+      const { error: peerPartErr } = await supabase
+        .from('conversation_participants')
+        .insert({ conversation_id: newConvId, user_id: recipientUserId });
+
+      if (peerPartErr) {
+        throw new Error(peerPartErr.message || 'Failed to register peer participant');
+      }
+    }
+
+    // 4. Now SELECT passes conv_participant_select RLS cleanly
+    const { data: fetchedConv } = await supabase
       .from('conversations')
-      .insert(basePayload)
-      .select()
-      .single();
+      .select('*')
+      .eq('id', newConvId)
+      .maybeSingle();
 
-    if (convErr || !newConv) {
-      throw new Error(convErr?.message || 'Failed to create conversation');
-    }
-
-    // 3. Add strictly the two authorized participants
-    const { error: partErr } = await supabase.from('conversation_participants').insert([
-      { conversation_id: newConv.id, user_id: currentUserId },
-      { conversation_id: newConv.id, user_id: recipientUserId },
-    ]);
-
-    if (partErr) {
-      throw new Error(partErr.message || 'Failed to register conversation participants');
-    }
-
-    return this.enrichConversation(newConv, currentUserId);
+    return this.enrichConversation(
+      fetchedConv || {
+        ...basePayload,
+        created_at: nowIso,
+        updated_at: nowIso,
+      },
+      currentUserId
+    );
   }
 
   /**
@@ -333,30 +379,199 @@ export class ChatService {
   }
 
   /**
+   * Ensure conversations exist for any already-accepted delivery tasks or reservations
+   * belonging to this donor or rider (recovers chats accepted via fallback paths).
+   */
+  private static async syncMissingAcceptedDeliveryConversations(
+    userId: string,
+    existingListingIds: Set<string>,
+    existingTaskIds: Set<string>
+  ): Promise<boolean> {
+    let createdAny = false;
+    try {
+      // 1. Check accepted reservations where user is the accepting rider
+      const { data: myRes } = await supabase
+        .from('reservations')
+        .select('id, food_listing_id, user_id, status')
+        .eq('user_id', userId)
+        .neq('status', 'cancelled')
+        .limit(10);
+
+      if (myRes && myRes.length > 0) {
+        const missingListingIds = myRes
+          .map((r: any) => r.food_listing_id)
+          .filter((lid: string) => isValidUUID(lid) && !existingListingIds.has(lid));
+
+        if (missingListingIds.length > 0) {
+          const { data: listings } = await supabase
+            .from('food_listings')
+            .select('id, title, donor_id')
+            .in('id', missingListingIds);
+
+          for (const fl of listings || []) {
+            if (fl.donor_id && fl.donor_id !== userId) {
+              try {
+                await this.getOrCreateDirectConversation(userId, fl.donor_id, {
+                  type: 'delivery',
+                  relatedListingId: fl.id,
+                  title: fl.title || 'Food Pickup',
+                });
+                existingListingIds.add(fl.id);
+                createdAny = true;
+              } catch {}
+            }
+          }
+        }
+      }
+
+      // 2. Check reservations on the user's own donated food listings (Donor side)
+      const { data: myDonated } = await supabase
+        .from('food_listings')
+        .select('id, title, donor_id')
+        .eq('donor_id', userId)
+        .in('status', ['reserved', 'partially_reserved', 'picked_up', 'completed'])
+        .limit(10);
+
+      if (myDonated && myDonated.length > 0) {
+        const missingDonorListingIds = myDonated
+          .map((l: any) => l.id)
+          .filter((lid: string) => isValidUUID(lid) && !existingListingIds.has(lid));
+
+        if (missingDonorListingIds.length > 0) {
+          const { data: peerRes } = await supabase
+            .from('reservations')
+            .select('food_listing_id, user_id, status')
+            .in('food_listing_id', missingDonorListingIds)
+            .neq('status', 'cancelled');
+
+          const listingMap = new Map(myDonated.map((l: any) => [l.id, l]));
+          for (const r of peerRes || []) {
+            const fl = listingMap.get(r.food_listing_id);
+            if (fl && r.user_id && r.user_id !== userId && !existingListingIds.has(fl.id)) {
+              try {
+                await this.getOrCreateDirectConversation(userId, r.user_id, {
+                  type: 'delivery',
+                  relatedListingId: fl.id,
+                  title: fl.title || 'Food Pickup',
+                });
+                existingListingIds.add(fl.id);
+                createdAny = true;
+              } catch {}
+            }
+          }
+        }
+      }
+
+      // 3. Check delivery_tasks assigned to this rider or donor
+      const { data: riderRow } = await supabase
+        .from('riders')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      const taskQueries: Promise<any>[] = [
+        supabase
+          .from('delivery_tasks')
+          .select('id, food_listing_id, donor_id, rider_id, food_title, status')
+          .eq('donor_id', userId)
+          .neq('status', 'cancelled')
+          .limit(10) as any,
+      ];
+      if (riderRow?.id) {
+        taskQueries.push(
+          supabase
+            .from('delivery_tasks')
+            .select('id, food_listing_id, donor_id, rider_id, food_title, status')
+            .eq('rider_id', riderRow.id)
+            .neq('status', 'cancelled')
+            .limit(10) as any
+        );
+      }
+
+      const taskResults = await Promise.all(taskQueries);
+      const tasks = taskResults.flatMap((res) => res?.data || []);
+      for (const dt of tasks) {
+        if (!dt?.id || existingTaskIds.has(dt.id) || (dt.food_listing_id && existingListingIds.has(dt.food_listing_id))) {
+          continue;
+        }
+        let peerUid: string | null = null;
+        if (dt.donor_id === userId && dt.rider_id) {
+          const { data: r } = await supabase
+            .from('riders')
+            .select('user_id')
+            .eq('id', dt.rider_id)
+            .maybeSingle();
+          peerUid = r?.user_id || dt.rider_id;
+        } else if (dt.donor_id && dt.donor_id !== userId) {
+          peerUid = dt.donor_id;
+        }
+
+        if (peerUid && isValidUUID(peerUid) && peerUid !== userId) {
+          try {
+            await this.getOrCreateDirectConversation(userId, peerUid, {
+              type: 'delivery',
+              relatedListingId: dt.food_listing_id || undefined,
+              relatedTaskId: dt.id,
+              title: dt.food_title || 'Food Pickup',
+            });
+            existingTaskIds.add(dt.id);
+            if (dt.food_listing_id) existingListingIds.add(dt.food_listing_id);
+            createdAny = true;
+          } catch {}
+        }
+      }
+    } catch {}
+    return createdAny;
+  }
+
+  /**
    * Fetch all conversations for an authenticated user (strictly filtered by participant membership)
    */
   static async getUserConversations(userId: string): Promise<Conversation[]> {
     if (!isValidUUID(userId)) return [];
 
-    const { data: participantRows, error } = await supabase
-      .from('conversation_participants')
-      .select('conversation_id')
-      .eq('user_id', userId);
+    const fetchParticipantConvs = async () => {
+      const { data: participantRows, error } = await supabase
+        .from('conversation_participants')
+        .select('conversation_id')
+        .eq('user_id', userId);
 
-    if (error || !participantRows || participantRows.length === 0) {
-      return [];
+      if (error || !participantRows || participantRows.length === 0) {
+        return [] as any[];
+      }
+
+      const convIds = Array.from(new Set(participantRows.map((r) => r.conversation_id).filter(isValidUUID)));
+      if (convIds.length === 0) return [] as any[];
+
+      const { data: convs, error: convsErr } = await supabase
+        .from('conversations')
+        .select('*')
+        .in('id', convIds)
+        .order('last_message_at', { ascending: false });
+
+      return convsErr || !convs ? [] : convs;
+    };
+
+    let convs = await fetchParticipantConvs();
+
+    // Sync any accepted delivery/reservation that hasn't materialized a chat thread yet
+    const existingListingIds = new Set<string>(
+      convs.map((c: any) => c.related_listing_id).filter(isValidUUID)
+    );
+    const existingTaskIds = new Set<string>(
+      convs.map((c: any) => c.related_task_id).filter(isValidUUID)
+    );
+
+    const created = await this.syncMissingAcceptedDeliveryConversations(
+      userId,
+      existingListingIds,
+      existingTaskIds
+    );
+    if (created) {
+      convs = await fetchParticipantConvs();
     }
 
-    const convIds = Array.from(new Set(participantRows.map((r) => r.conversation_id).filter(isValidUUID)));
-    if (convIds.length === 0) return [];
-
-    const { data: convs, error: convsErr } = await supabase
-      .from('conversations')
-      .select('*')
-      .in('id', convIds)
-      .order('last_message_at', { ascending: false });
-
-    if (convsErr || !convs) return [];
+    if (convs.length === 0) return [];
 
     return Promise.all(convs.map((c) => this.enrichConversation(c, userId)));
   }

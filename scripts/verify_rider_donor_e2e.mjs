@@ -672,6 +672,15 @@ async function attachAccountPage(page, db, actorProfile) {
     }
 
     if (table === 'conversation_participants') {
+      if (method === 'POST') {
+        const rows = Array.isArray(body) ? body : [body];
+        const inserted = rows.map((r) => {
+          const row = { id: db.nextUuid(), conversation_id: r.conversation_id, user_id: r.user_id, role: r.role || null };
+          db.participants.push(row);
+          return row;
+        });
+        return sendJson(req, 201, inserted);
+      }
       // Strict RLS: only return participant rows for conversations caller belongs to
       const myConvIds = new Set(db.participants.filter((x) => x.user_id === uid).map((x) => x.conversation_id));
       const allowed = db.participants
@@ -681,6 +690,24 @@ async function attachAccountPage(page, db, actorProfile) {
     }
 
     if (table === 'conversations') {
+      if (method === 'POST') {
+        const conv = {
+          id: body.id || db.nextUuid(),
+          type: body.type || 'delivery',
+          related_listing_id: body.related_listing_id || null,
+          related_task_id: body.related_task_id || null,
+          donor_id: body.donor_id || null,
+          rider_id: body.rider_id || null,
+          status: body.status || 'ACTIVE',
+          closed_at: body.closed_at || null,
+          title: body.title || null,
+          last_message_at: body.last_message_at || new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        db.conversations.unshift(conv);
+        return sendJson(req, 201, conv);
+      }
       const myConvIds = new Set(db.participants.filter((x) => x.user_id === uid).map((x) => x.conversation_id));
       const allowed = db.conversations.filter((c) => myConvIds.has(c.id));
       if (method === 'PATCH') {

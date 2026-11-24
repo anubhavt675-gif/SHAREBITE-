@@ -274,7 +274,8 @@ export default function RiderDashboardPage() {
       if (task.donorId) {
         ChatService.openDeliveryConversation(userId, task.donorId, {
           relatedListingId: task.foodListingId,
-          relatedTaskId: assignedTaskId,
+          relatedTaskId:
+            assignedTaskId && assignedTaskId !== task.foodListingId ? assignedTaskId : undefined,
           title: task.foodTitle || 'Food Pickup',
         }).catch(() => {});
       }
