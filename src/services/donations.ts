@@ -323,10 +323,11 @@ export const DonationService = {
       const isRpcSchemaMismatch =
         rpcErr &&
         (rpcErr.code === 'PGRST202' ||
+          rpcErr.code === '22P02' ||
           rpcErr.code === '42804' ||
           rpcErr.code === '42883' ||
           rpcErr.code === '42703' ||
-          /is of type|does not match|Could not find the function/i.test(rpcErr.message || ''));
+          /is of type|does not match|Could not find the function|invalid input value for enum/i.test(rpcErr.message || ''));
 
       if (rpcErr && !isRpcSchemaMismatch) {
         throw new Error(rpcErr.message || 'Failed to publish food donation');

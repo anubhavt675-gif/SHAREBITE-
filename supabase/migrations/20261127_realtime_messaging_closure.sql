@@ -29,6 +29,18 @@ $$;
 grant execute on function public.get_auth_user_role() to authenticated;
 
 -- ─── 1. Schema Extensions on Existing Messaging & Notifications Tables ───────
+do $$ begin alter type public.notification_type add value if not exists 'donation_created'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'new_donation'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'donation_claimed'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'rider_assigned'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'delivery_update'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'pickup_started'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'pickup_nearby'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'food_collected'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'food_delivered'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'delivery_completed'; exception when others then null; end $$;
+do $$ begin alter type public.notification_type add value if not exists 'new_message'; exception when others then null; end $$;
+
 alter table public.notifications
   add column if not exists related_food_id uuid references public.food_listings(id) on delete set null,
   add column if not exists related_claim_id uuid,
