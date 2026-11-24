@@ -433,24 +433,10 @@ begin
 end;
 $$;
 
--- 4-argument wrapper for legacy callers
-create or replace function public.accept_donation(
-  p_food_listing_id   uuid,
-  p_servings          integer default null,
-  p_pickup_time       timestamptz default null,
-  p_notes             text default null
-)
-returns jsonb
-security definer
-set search_path = public, extensions
-language plpgsql as $$
-begin
-  return public.accept_donation(p_food_listing_id, p_servings, p_pickup_time, p_notes, 'ngo_delivery');
-end;
-$$;
-
+-- Keep ONLY the single 5-argument accept_donation (all optional args have defaults)
+-- so PostgREST never hits PGRST203 ambiguous overload resolution.
+drop function if exists public.accept_donation(uuid, integer, timestamptz, text);
 grant execute on function public.accept_donation(uuid, integer, timestamptz, text, text) to authenticated;
-grant execute on function public.accept_donation(uuid, integer, timestamptz, text) to authenticated;
 
 
 -- ─── 2. update_donation_status RPC (Full direct and NGO lifecycle) ───────────

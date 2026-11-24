@@ -111,13 +111,25 @@
   justify-content: center;
   font-weight: 700;
   color: var(--color-primary);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .avatarImg {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: 50%;
+}
+
+.onlineDot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #16a34a;
+  border: 2px solid #ffffff;
 }
 
 .convMeta {
@@ -426,4 +438,324 @@
   justify-content: center;
   color: #94a3b8;
   gap: 12px;
+  padding: 24px;
+}
+
+/* Offline Banner */
+.offlineBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+/* Conversation List Donation & Status Pills */
+.convDonationRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.convDonationTitle {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #ea580c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.convStatusActive {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 1px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.convStatusClosed {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  background: #e2e8f0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+/* Upgraded Chat Header */
+.headerTextCol {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.headerTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.headerStatusActive {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #c2410c;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+
+.headerStatusClosed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+}
+
+.headerSubRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.headerDonationRef {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.headerAddr {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #64748b;
+}
+
+.presenceOnline {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.presenceOffline {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.deliveryShortcutBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #ea580c;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.deliveryShortcutBtn:hover {
+  background: #ffedd5;
+}
+
+.callBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: #f1ece4;
+  color: #44403c;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.callBtn:hover {
+  background: #e2dbce;
+}
+
+/* Pagination & Feed States */
+.loadMoreWrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.loadMoreBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.loadMoreBtn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.loadingFeed {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.emptyFeedNote {
+  align-self: center;
+  text-align: center;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  padding: 12px 18px;
+  border-radius: 14px;
+  font-size: 13px;
+  max-width: 440px;
+  margin: auto 0;
+}
+
+.charCounter {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Closed Read-Only Footer */
+.closedFooter {
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  padding: 14px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.closedBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 14px;
+  padding: 12px 16px;
+}
+
+.closedIconWrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #ffedd5;
+  color: #c2410c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.closedTextWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.closedTitle {
+  font-size: 14px;
+  font-weight: 800;
+  color: #9a3412;
+}
+
+.closedDesc {
+  margin: 0;
+  font-size: 12.5px;
+  color: #7c2d12;
+  line-height: 1.45;
+}
+
+.inputFormLocked {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0.6;
+}
+
+.inputFormLocked .msgInput {
+  cursor: not-allowed;
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+@media (max-width: 768px) {
+  .headerActions {
+    gap: 6px;
+  }
+  .deliveryShortcutBtn span {
+    display: none;
+  }
+  .chatHeader {
+    padding: 12px 14px;
+  }
+  .closedFooter {
+    padding: 12px 14px;
+  }
 }

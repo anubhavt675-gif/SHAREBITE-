@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutGrid, Search, Utensils, MapPin, ClipboardList,
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { normalizeRole } from '../../services/auth';
+import { ChatService } from '../../services/chat';
 import { ShareBiteLogo } from './Navbar';
 import UserAvatar from '../ui/UserAvatar';
 import styles from './Sidebar.module.css';
@@ -31,6 +32,35 @@ export default function Sidebar({ open, onClose }: Props) {
   const location = useLocation();
   const role = normalizeRole(user?.role);
   const isRider = role === 'rider';
+  const userId = user?.id;
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  useEffect(() => {
+    if (!userId) {
+      setUnreadChatCount(0);
+      return;
+    }
+    let active = true;
+    const refreshUnread = () => {
+      ChatService.getTotalUnreadCount(userId)
+        .then((c) => {
+          if (active) setUnreadChatCount(c);
+        })
+        .catch(() => {});
+    };
+
+    refreshUnread();
+    const sub = ChatService.subscribeToUserConversations(userId, refreshUnread);
+    window.addEventListener('sharebite:chat-unread-sync', refreshUnread);
+
+    return () => {
+      active = false;
+      sub.unsubscribe();
+      window.removeEventListener('sharebite:chat-unread-sync', refreshUnread);
+    };
+  }, [userId]);
+
+  const chatBadge = unreadChatCount > 0 ? String(unreadChatCount > 99 ? '99+' : unreadChatCount) : undefined;
 
   // Purpose-built navigation strictly segregated by trusted role
   // Donor, NGO, Community, and Admin menus remain 100% preserved.
@@ -66,6 +96,7 @@ export default function Sidebar({ open, onClose }: Props) {
             to: '/chat',
             icon: <MessageSquare size={18} />,
             label: 'Messages',
+            badge: chatBadge,
           },
           {
             to: '/notifications',
@@ -92,7 +123,7 @@ export default function Sidebar({ open, onClose }: Props) {
           { to: '/my-claims', icon: <ClipboardList size={18} />, label: 'Incoming Deliveries', badge: 'Active' },
           { to: '/requests', icon: <Utensils size={18} />, label: 'Distribution Log' },
           { to: '/map', icon: <MapPin size={18} />, label: 'Live Food Map' },
-          { to: '/chat', icon: <MessageSquare size={18} />, label: 'Coordination Chat' },
+          { to: '/chat', icon: <MessageSquare size={18} />, label: 'Coordination Chat', badge: chatBadge },
           { to: '/impact-dashboard', icon: <BarChart2 size={18} />, label: 'Relief Impact' },
           { to: '/verification', icon: <ShieldCheck size={18} />, label: 'NGO Verification' },
           { to: '/profile', icon: <User size={18} />, label: 'Organisation Profile' },
@@ -105,7 +136,7 @@ export default function Sidebar({ open, onClose }: Props) {
           { to: '/discover', icon: <Search size={18} />, label: 'Find Free Food' },
           { to: '/requests', icon: <ClipboardList size={18} />, label: 'My Food Requests' },
           { to: '/map', icon: <MapPin size={18} />, label: 'Distribution Centers' },
-          { to: '/chat', icon: <MessageSquare size={18} />, label: 'Messages' },
+          { to: '/chat', icon: <MessageSquare size={18} />, label: 'Messages', badge: chatBadge },
           { to: '/profile', icon: <User size={18} />, label: 'My Profile' },
           { to: '/settings', icon: <Settings size={18} />, label: 'Settings' },
         ];
@@ -128,13 +159,13 @@ export default function Sidebar({ open, onClose }: Props) {
           { to: '/donor-donations', icon: <Truck size={18} />, label: 'Track Deliveries & History' },
           { to: '/discover', icon: <Search size={18} />, label: 'Explore Network' },
           { to: '/ngos', icon: <Building2 size={18} />, label: 'Find NGOs Across India' },
-          { to: '/chat', icon: <MessageSquare size={18} />, label: 'Rider & NGO Chat' },
+          { to: '/chat', icon: <MessageSquare size={18} />, label: 'Rider & NGO Chat', badge: chatBadge },
           { to: '/impact-dashboard', icon: <BarChart2 size={18} />, label: 'Food & CO2 Impact' },
           { to: '/profile', icon: <User size={18} />, label: 'Donor Profile' },
           { to: '/settings', icon: <Settings size={18} />, label: 'Settings' },
         ];
     }
-  }, [role]);
+  }, [role, chatBadge]);
 
   const roleLabel = useMemo(() => {
     if (!role) return 'ShareBite Member';

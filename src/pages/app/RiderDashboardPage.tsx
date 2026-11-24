@@ -163,6 +163,32 @@ export default function RiderDashboardPage() {
       ? activeTask.id
       : undefined;
 
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  useEffect(() => {
+    if (!userId || !activeTask) {
+      setUnreadChatCount(0);
+      return;
+    }
+    let mounted = true;
+    const refreshUnread = () => {
+      ChatService.getUnreadCountForDelivery(userId, {
+        relatedTaskId: activeTask.id,
+        relatedListingId: activeTask.foodListingId,
+      })
+        .then((c) => {
+          if (mounted) setUnreadChatCount(c);
+        })
+        .catch(() => {});
+    };
+    refreshUnread();
+    const sub = ChatService.subscribeToUserConversations(userId, refreshUnread);
+    return () => {
+      mounted = false;
+      sub.unsubscribe();
+    };
+  }, [userId, activeTask?.id, activeTask?.foodListingId]);
+
   // Live GPS Tracking: continuously capture & broadcast rider coordinates while pickup is active, and stop on completion/cancellation
   useEffect(() => {
     if (!activeTaskId || !userId) return;
@@ -716,6 +742,21 @@ export default function RiderDashboardPage() {
                 className={styles.chatActionBtn}
               >
                 <MessageSquare size={14} /> Chat with Donor
+                {unreadChatCount > 0 && (
+                  <span
+                    style={{
+                      background: '#ea580c',
+                      color: '#ffffff',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      padding: '1px 7px',
+                      borderRadius: 999,
+                      marginLeft: 4,
+                    }}
+                  >
+                    {unreadChatCount}
+                  </span>
+                )}
               </button>
               {activeTask.donorPhone && (
                 <a

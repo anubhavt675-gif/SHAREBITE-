@@ -574,7 +574,7 @@ export class LocationService {
     onReconnect?: () => void
   ) {
     const channel = supabase
-      .channel(`rider-loc:${deliveryTaskId}:${Date.now()}`)
+      .channel(`rider-loc:${deliveryTaskId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`)
       .on(
         'postgres_changes',
         {

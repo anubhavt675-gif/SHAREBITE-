@@ -702,7 +702,7 @@ export const DonationService = {
     onUpdate?: (listing: FoodListing) => void,
     onDelete?: (listingId: string) => void
   ) {
-    const channelName = `listings_live_${Date.now()}`;
+    const channelName = `listings_live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const channel = supabase
       .channel(channelName)
       .on(

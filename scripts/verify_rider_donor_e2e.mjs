@@ -252,6 +252,9 @@ function applyFilters(rows, searchParams) {
     else if (raw.startsWith('gt.')) {
       const rhs = raw.slice(3);
       out = out.filter((r) => (!isNaN(Number(rhs)) ? Number(r[k]) > Number(rhs) : String(r[k]) > rhs));
+    } else if (raw.startsWith('lt.')) {
+      const rhs = raw.slice(3);
+      out = out.filter((r) => (!isNaN(Number(rhs)) ? Number(r[k]) < Number(rhs) : String(r[k]) < rhs));
     } else if (raw.startsWith('in.(') && raw.endsWith(')')) {
       const vals = raw.slice(4, -1).split(',').map((s) => s.replace(/^"|"$/g, '').trim());
       out = out.filter((r) => vals.includes(String(r[k])));
@@ -259,6 +262,20 @@ function applyFilters(rows, searchParams) {
       const vals = raw.slice(8, -1).split(',').map((s) => s.replace(/^"|"$/g, '').trim());
       out = out.filter((r) => !vals.includes(String(r[k])));
     }
+  }
+  const orderParam = searchParams.get('order');
+  if (orderParam) {
+    const firstOrder = orderParam.split(',')[0];
+    const [col, dir] = firstOrder.split('.');
+    out.sort((a, b) => {
+      const av = String(a[col] ?? '');
+      const bv = String(b[col] ?? '');
+      return dir === 'desc' ? bv.localeCompare(av) : av.localeCompare(bv);
+    });
+  }
+  const limitParam = Number(searchParams.get('limit'));
+  if (!isNaN(limitParam) && limitParam > 0) {
+    out = out.slice(0, limitParam);
   }
   return out;
 }
@@ -396,6 +413,10 @@ async function attachAccountPage(page, db, actorProfile) {
           type: 'delivery',
           related_listing_id: listing.id,
           related_task_id: taskId,
+          donor_id: listing.donor_id,
+          rider_id: uid,
+          status: 'ACTIVE',
+          closed_at: null,
           title: listing.title,
           last_message_at: new Date().toISOString(),
           created_at: new Date().toISOString(),
@@ -481,6 +502,26 @@ async function attachAccountPage(page, db, actorProfile) {
           rider.is_available = true;
           rider.total_deliveries += 1;
           rider.total_distance_km = Number((rider.total_distance_km + (task.estimated_km || 0)).toFixed(2));
+          // Automatically close linked delivery conversation on COMPLETED
+          for (const c of db.conversations) {
+            if (c.related_task_id === task.id || (c.related_listing_id === task.food_listing_id && c.type === 'delivery')) {
+              if (c.status !== 'CLOSED') {
+                c.status = 'CLOSED';
+                c.closed_at = new Date().toISOString();
+                c.updated_at = new Date().toISOString();
+                db.messages.push({
+                  id: db.nextUuid(),
+                  conversation_id: c.id,
+                  sender_id: uid,
+                  content: 'Delivery Completed — This conversation is now closed. You can still view your previous messages.',
+                  message_type: 'system',
+                  metadata: {},
+                  is_read: true,
+                  created_at: new Date().toISOString(),
+                });
+              }
+            }
+          }
         }
         db.statusHistory.push({ id: db.nextUuid(), delivery_task_id: task.id, new_status: next.toUpperCase() });
         db.notifications.unshift({
@@ -516,6 +557,24 @@ async function attachAccountPage(page, db, actorProfile) {
           created_at: new Date().toISOString(),
         });
         return sendJson(req, 200, true);
+      }
+
+      if (fn === 'close_conversation_for_delivery') {
+        let closed = 0;
+        for (const c of db.conversations) {
+          if (
+            (body.p_delivery_task_id && c.related_task_id === body.p_delivery_task_id) ||
+            (body.p_food_listing_id && c.related_listing_id === body.p_food_listing_id && c.type === 'delivery')
+          ) {
+            if (c.status !== 'CLOSED') {
+              c.status = 'CLOSED';
+              c.closed_at = new Date().toISOString();
+              c.updated_at = new Date().toISOString();
+              closed += 1;
+            }
+          }
+        }
+        return sendJson(req, 200, closed);
       }
 
       if (fn === 'update_rider_location') {
@@ -627,6 +686,9 @@ async function attachAccountPage(page, db, actorProfile) {
       if (method === 'PATCH') {
         const idEq = u.searchParams.get('id')?.replace('eq.', '');
         const target = allowed.find((c) => c.id === idEq);
+        if (target && target.status === 'CLOSED' && body.status && body.status !== 'CLOSED') {
+          return sendJson(req, 403, { message: 'CONVERSATION_CLOSED: Closed conversations cannot be reopened after delivery completion.' });
+        }
         if (target) Object.assign(target, body);
         return handleSingleOrList(req, target ? [target] : []);
       }
@@ -639,6 +701,10 @@ async function attachAccountPage(page, db, actorProfile) {
         if (!myConvIds.has(body.conversation_id)) {
           return sendJson(req, 403, { message: 'RLS violation: not a participant in conversation' });
         }
+        const conv = db.conversations.find((c) => c.id === body.conversation_id);
+        if (conv && conv.status === 'CLOSED' && (body.message_type || 'text') !== 'system') {
+          return sendJson(req, 403, { message: 'CONVERSATION_CLOSED: This conversation is closed because the delivery has been completed.' });
+        }
         const msg = {
           id: db.nextUuid(),
           conversation_id: body.conversation_id,
@@ -647,6 +713,7 @@ async function attachAccountPage(page, db, actorProfile) {
           message_type: body.message_type || 'text',
           metadata: body.metadata || {},
           is_read: false,
+          read_at: null,
           created_at: new Date().toISOString(),
           sender: db.profiles[uid],
         };
@@ -788,10 +855,16 @@ async function run() {
 
     // Step 2 & 3: Rider logs in -> Separate Rider Dashboard matching reference sections
     await seedSession(riderPage, db.profiles[IDS.riderA], '/rider-dashboard');
-    await riderPage.waitForFunction(
-      () => document.body.innerText.includes('Available Pickups'),
-      { timeout: 15000 }
-    );
+    try {
+      await riderPage.waitForFunction(
+        () => document.body.innerText.includes('Available Pickups'),
+        { timeout: 15000 }
+      );
+    } catch (err) {
+      const snap = await riderPage.evaluate(() => ({ url: location.href, text: document.body.innerText.slice(0, 600) }));
+      console.error('DEBUG Step 2 timeout:', snap, 'pageErrors:', pageErrors);
+      throw err;
+    }
     const riderUrl = new URL(riderPage.url()).pathname;
     const riderBody = await riderPage.evaluate(() => document.body.innerText);
     const hasAllRiderUi =
@@ -876,7 +949,15 @@ async function run() {
 
     // Step 5: Both Donor A and Donor B listings appear in BOTH Rider A and Rider B Available Pickups
     await riderPage.goto(`${baseUrl}/rider-dashboard`, { waitUntil: 'networkidle2', timeout: 30000 });
+    await riderPage.waitForFunction(
+      () => document.body.innerText.includes('Available Pickups') && !document.body.innerText.includes('Loading ShareBite...'),
+      { timeout: 15000 }
+    );
     await seedSession(riderBPage, db.profiles[IDS.riderB], '/rider-dashboard');
+    await riderBPage.waitForFunction(
+      () => document.body.innerText.includes('Available Pickups') && !document.body.innerText.includes('Loading ShareBite...'),
+      { timeout: 15000 }
+    );
     await sleep(700);
     if (screenshotPath) {
       await riderPage.screenshot({ path: screenshotPath, fullPage: false });
@@ -1056,6 +1137,9 @@ async function run() {
     const s2 = await clickNextStepOnDashboard('Mark Arrived at Pickup');
     const s3 = await clickNextStepOnDashboard('Confirm Food Collected');
 
+    // Verify conversation stays ACTIVE during arrived_at_pickup & food_collected (never closes prematurely)
+    const activeMidDelivery = db.conversations[0]?.status === 'ACTIVE' && db.conversations[0]?.closed_at === null;
+
     // Step 12: Check Donor sees real-time status ("Food Collected") on /donor-donations
     await donorPage.goto(`${baseUrl}/donor-donations`, { waitUntil: 'networkidle2', timeout: 30000 });
     await sleep(600);
@@ -1072,7 +1156,79 @@ async function run() {
       fail(`11 & 13. Status progression incomplete (${JSON.stringify({ s1, s2, s3, s4, s5, s6, final: db.tasks[0]?.status })})`);
     }
 
-    await donorPage.reload({ waitUntil: 'networkidle2', timeout: 30000 });
+    // Step 17-21 (Messaging Auto-Closure & Read-Only Preservation & Backend API Lock)
+    const convClosedInDb = db.conversations[0]?.status === 'CLOSED' && Boolean(db.conversations[0]?.closed_at);
+    await donorPage.goto(`${baseUrl}/chat/${convId}`, { waitUntil: 'networkidle2', timeout: 30000 });
+    await riderPage.goto(`${baseUrl}/chat/${convId}`, { waitUntil: 'networkidle2', timeout: 30000 });
+    await sleep(600);
+
+    const inspectClosedChatUi = (page) =>
+      page.evaluate(() => {
+        const txt = document.body.innerText;
+        const input = document.querySelector('input[aria-label="Conversation closed"], input[placeholder*="Conversation closed"]');
+        const sendBtn = document.querySelector('button[aria-label="Send message"]');
+        return {
+          hasCompletedTitle: txt.includes('Delivery Completed'),
+          hasClosedNotice: txt.includes('This conversation is closed because the delivery has been completed'),
+          hasHistoryMsg1: txt.includes('I am reaching your location.'),
+          hasHistoryMsg2: txt.includes('Come to Gate 2, boxes are warm and packed.'),
+          inputDisabled: Boolean(input && input.disabled),
+          sendDisabled: Boolean(sendBtn && sendBtn.disabled),
+        };
+      });
+
+    const donorClosedUi = await inspectClosedChatUi(donorPage);
+    const riderClosedUi = await inspectClosedChatUi(riderPage);
+
+    // Direct API attempts on CLOSED conversation MUST be rejected by backend (403)
+    const closedApiAttempts = await donorPage.evaluate(async (cid) => {
+      const rPost = await fetch('https://lzyuvgbhpkiqxscqxggq.supabase.co/rest/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: cid, content: 'Trying to send after completion' }),
+      });
+      const rReopen = await fetch(`https://lzyuvgbhpkiqxscqxggq.supabase.co/rest/v1/conversations?id=eq.${cid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'ACTIVE', closed_at: null }),
+      });
+      return { postStatus: rPost.status, reopenStatus: rReopen.status };
+    }, convId);
+
+    const riderClosedPost = await riderPage.evaluate(async (cid) => {
+      const rPost = await fetch('https://lzyuvgbhpkiqxscqxggq.supabase.co/rest/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: cid, content: 'Rider post after completion' }),
+      });
+      return rPost.status;
+    }, convId);
+
+    if (
+      activeMidDelivery &&
+      convClosedInDb &&
+      donorClosedUi.hasCompletedTitle &&
+      donorClosedUi.hasClosedNotice &&
+      donorClosedUi.hasHistoryMsg1 &&
+      donorClosedUi.hasHistoryMsg2 &&
+      donorClosedUi.inputDisabled &&
+      donorClosedUi.sendDisabled &&
+      riderClosedUi.hasCompletedTitle &&
+      riderClosedUi.hasClosedNotice &&
+      riderClosedUi.hasHistoryMsg1 &&
+      riderClosedUi.hasHistoryMsg2 &&
+      riderClosedUi.inputDisabled &&
+      riderClosedUi.sendDisabled &&
+      closedApiAttempts.postStatus === 403 &&
+      closedApiAttempts.reopenStatus === 403 &&
+      riderClosedPost === 403
+    ) {
+      pass('17-21 (Chat Closure & Security). Stayed ACTIVE through pickup, auto-closed on COMPLETED, read-only history preserved & direct API writes/reopen blocked (403)');
+    } else {
+      fail(`17-21 (Chat Closure). Check failed: ${JSON.stringify({ activeMidDelivery, convClosedInDb, donorClosedUi, riderClosedUi, closedApiAttempts, riderClosedPost })}`);
+    }
+
+    await donorPage.goto(`${baseUrl}/donor-donations`, { waitUntil: 'networkidle2', timeout: 30000 });
     await sleep(500);
     const donorFinalTrack = await donorPage.evaluate(() => document.body.innerText);
     const acceptedListing = db.listings.find((l) => l.id === donorAListingId);
@@ -1095,6 +1251,24 @@ async function run() {
       pass('16 (Dedup). Zero duplicate donations, delivery tasks, conversations, messages, or notifications');
     } else {
       fail('16 (Dedup). Duplicate entity count detected');
+    }
+
+    // Step 22: New donation acceptance creates a NEW ACTIVE conversation while keeping previous conversation CLOSED
+    await riderPage.goto(`${baseUrl}/rider-dashboard`, { waitUntil: 'networkidle2', timeout: 30000 });
+    await sleep(700);
+    await riderPage.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find(
+        (b) => (b.getAttribute('aria-label') || '').includes('Dal Makhani') || /^\s*accept\s*$/i.test(b.innerText)
+      );
+      btn?.click();
+    });
+    await sleep(1000);
+    const firstConv = db.conversations.find((c) => c.id === convId);
+    const secondConv = db.conversations.find((c) => c.id !== convId);
+    if (db.conversations.length === 2 && firstConv?.status === 'CLOSED' && secondConv?.status === 'ACTIVE') {
+      pass('22 (New Donation Chat). New accepted donation created a brand-new ACTIVE conversation while keeping completed chat CLOSED');
+    } else {
+      fail(`22 (New Donation Chat). Failed: ${JSON.stringify({ count: db.conversations.length, firstStatus: firstConv?.status, secondStatus: secondConv?.status })}`);
     }
 
     // Verify Earnings & My Deliveries pages show accurate completed metrics (₹0 volunteer, 1 delivery, 1.4 km)

@@ -279,11 +279,22 @@ export interface ApiResponse<T> {
   loading: boolean;
 }
 
+export type ConversationStatus = 'ACTIVE' | 'CLOSED';
+
 export interface Conversation {
   id: string;
   type: 'direct' | 'donation' | 'delivery';
   relatedListingId?: string;
   relatedTaskId?: string;
+  donorId?: string;
+  riderId?: string;
+  status: ConversationStatus;
+  closedAt?: string;
+  deliveryStatus?: string;
+  pickupAddress?: string;
+  donationServings?: number;
+  donationImageUrl?: string;
+  partnerIsOnline?: boolean;
   title?: string;
   lastMessageAt?: string;
   createdAt: string;
@@ -311,6 +322,7 @@ export interface ChatMessage {
   messageType: 'text' | 'image' | 'location' | 'system';
   metadata?: Record<string, any>;
   isRead: boolean;
+  readAt?: string;
   createdAt: string;
 }
 

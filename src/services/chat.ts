@@ -1,6 +1,10 @@
 import { supabase } from '../lib/supabase';
 import { isValidUUID } from '../lib/uuid';
-import type { Conversation, ChatMessage, User } from '../types';
+import type { Conversation, ConversationStatus, ChatMessage, User } from '../types';
+
+export const MAX_CHAT_MESSAGE_LENGTH = 2000;
+export const CLOSED_CHAT_NOTICE =
+  'This conversation is closed because the delivery has been completed.';
 
 function mapProfileToUser(p: any): User {
   return {
@@ -18,10 +22,50 @@ function mapProfileToUser(p: any): User {
   };
 }
 
+function mapMessageRow(m: any): ChatMessage {
+  return {
+    id: m.id,
+    conversationId: m.conversation_id,
+    senderId: m.sender_id,
+    content: m.content,
+    messageType: m.message_type || 'text',
+    metadata: m.metadata || {},
+    isRead: !!m.is_read,
+    readAt: m.read_at || undefined,
+    createdAt: m.created_at,
+    sender: m.sender ? mapProfileToUser(m.sender) : undefined,
+  };
+}
+
+function resolveConversationClosure(
+  conv: any,
+  linkedTask?: any,
+  linkedListing?: any
+): { status: ConversationStatus; closedAt?: string; deliveryStatus?: string } {
+  const taskStatus: string | undefined = linkedTask?.status;
+  const listingStatus: string | undefined = linkedListing?.status;
+  const deliveryStatus = taskStatus || listingStatus;
+
+  const isClosed =
+    String(conv.status || '').toUpperCase() === 'CLOSED' ||
+    Boolean(conv.closed_at) ||
+    taskStatus === 'completed' ||
+    (!taskStatus && conv.type === 'delivery' && listingStatus === 'completed');
+
+  return {
+    status: isClosed ? 'CLOSED' : 'ACTIVE',
+    closedAt: isClosed
+      ? conv.closed_at || linkedTask?.completed_at || linkedTask?.updated_at || linkedListing?.updated_at
+      : undefined,
+    deliveryStatus,
+  };
+}
+
 export class ChatService {
   /**
    * Securely get or create the dedicated Donor <-> Assigned Rider conversation
    * for a specific food donation / delivery task.
+   * Rejects opening a delivery chat before a rider is assigned.
    */
   static async openDeliveryConversation(
     currentUserId: string,
@@ -56,9 +100,17 @@ export class ChatService {
         }
       }
 
-      if (rpcErr && rpcErr.code !== 'PGRST202' && /Unauthorized/i.test(rpcErr.message || '')) {
+      if (
+        rpcErr &&
+        rpcErr.code !== 'PGRST202' &&
+        /Unauthorized|No rider is currently assigned/i.test(rpcErr.message || '')
+      ) {
         throw new Error(rpcErr.message);
       }
+    }
+
+    if (!isValidUUID(recipientUserId)) {
+      throw new Error('No rider is currently assigned to this donation. Chat unlocks after acceptance.');
     }
 
     return this.getOrCreateDirectConversation(currentUserId, recipientUserId, {
@@ -70,7 +122,7 @@ export class ChatService {
   }
 
   /**
-   * Find an existing conversation between participants or create a new one
+   * Find an existing conversation between participants or create a new one (idempotent — zero duplicates)
    */
   static async getOrCreateDirectConversation(
     currentUserId: string,
@@ -90,7 +142,7 @@ export class ChatService {
     const relatedListingId = isValidUUID(options?.relatedListingId) ? options?.relatedListingId : null;
     const relatedTaskId = isValidUUID(options?.relatedTaskId) ? options?.relatedTaskId : null;
 
-    // 1. Check if a conversation with these participants already exists
+    // 1. Check if a conversation with these participants already exists for this task/listing
     const { data: userConvs } = await supabase
       .from('conversation_participants')
       .select('conversation_id')
@@ -107,39 +159,41 @@ export class ChatService {
           .in('conversation_id', convIds);
 
         if (sharedConvs && sharedConvs.length > 0) {
-          for (const s of sharedConvs) {
-            const { data: conv } = await supabase
-              .from('conversations')
-              .select('*')
-              .eq('id', s.conversation_id)
-              .maybeSingle();
+          const sharedIds = sharedConvs.map((s) => s.conversation_id).filter(isValidUUID);
+          const { data: candidateConvs } = await supabase
+            .from('conversations')
+            .select('*')
+            .in('id', sharedIds)
+            .order('created_at', { ascending: false });
 
-            if (conv) {
-              if (relatedTaskId && conv.related_task_id === relatedTaskId) {
-                return this.enrichConversation(conv, currentUserId);
-              }
-              if (relatedListingId && conv.related_listing_id === relatedListingId) {
-                return this.enrichConversation(conv, currentUserId);
-              }
-              if (!relatedListingId && !relatedTaskId && conv.type === 'direct') {
-                return this.enrichConversation(conv, currentUserId);
-              }
+          for (const conv of candidateConvs || []) {
+            if (relatedTaskId && conv.related_task_id === relatedTaskId) {
+              return this.enrichConversation(conv, currentUserId);
+            }
+            if (relatedListingId && conv.related_listing_id === relatedListingId) {
+              return this.enrichConversation(conv, currentUserId);
+            }
+            if (!relatedListingId && !relatedTaskId && conv.type === 'direct') {
+              return this.enrichConversation(conv, currentUserId);
             }
           }
         }
       }
     }
 
-    // 2. Create new conversation
-    const { data: newConv, error: convErr } = await supabase
+    // 2. Create new conversation (gracefully handles pre- and post-migration schema)
+    const nowIso = new Date().toISOString();
+    const basePayload: Record<string, any> = {
+      type,
+      related_listing_id: relatedListingId,
+      related_task_id: relatedTaskId,
+      title: options?.title || null,
+      last_message_at: nowIso,
+    };
+
+    let { data: newConv, error: convErr } = await supabase
       .from('conversations')
-      .insert({
-        type,
-        related_listing_id: relatedListingId,
-        related_task_id: relatedTaskId,
-        title: options?.title || null,
-        last_message_at: new Date().toISOString(),
-      })
+      .insert(basePayload)
       .select()
       .single();
 
@@ -161,23 +215,55 @@ export class ChatService {
   }
 
   /**
-   * Enrich conversation record with participants, unread count for viewer & last message
+   * Enrich a single conversation with participants, delivery status, closure state,
+   * partner online status, unread count, and last message.
    */
   private static async enrichConversation(conv: any, viewerUserId?: string): Promise<Conversation> {
-    const { data: participants } = await supabase
-      .from('conversation_participants')
-      .select('*, profiles:user_id(id, full_name, organization_name, role, avatar_url, phone)')
-      .eq('conversation_id', conv.id);
+    const [partRes, lastMsgRes, taskRes, listingRes] = await Promise.all([
+      supabase
+        .from('conversation_participants')
+        .select('*, profiles:user_id(id, full_name, organization_name, role, avatar_url, phone)')
+        .eq('conversation_id', conv.id),
+      supabase
+        .from('messages')
+        .select('*, sender:sender_id(id, full_name, organization_name, avatar_url, role)')
+        .eq('conversation_id', conv.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      isValidUUID(conv.related_task_id)
+        ? supabase
+            .from('delivery_tasks')
+            .select('id, status, pickup_address, servings_required, food_title, donor_id, rider_id, completed_at, updated_at')
+            .eq('id', conv.related_task_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      isValidUUID(conv.related_listing_id)
+        ? supabase
+            .from('food_listings')
+            .select('id, title, status, pickup_address, servings, image_url, donor_id, assigned_rider_id, updated_at')
+            .eq('id', conv.related_listing_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
 
-    const { data: lastMsg } = await supabase
-      .from('messages')
-      .select('*, sender:sender_id(id, full_name, organization_name, avatar_url, role)')
-      .eq('conversation_id', conv.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    let linkedTask = taskRes.data;
+    const linkedListing = listingRes.data;
 
-    const mappedParticipants = (participants || []).map((p: any) => ({
+    // If related_task_id wasn't set on conversation, look up latest non-cancelled task for the listing
+    if (!linkedTask && isValidUUID(conv.related_listing_id)) {
+      const { data: fallbackTask } = await supabase
+        .from('delivery_tasks')
+        .select('id, status, pickup_address, servings_required, food_title, donor_id, rider_id, completed_at, updated_at')
+        .eq('food_listing_id', conv.related_listing_id)
+        .neq('status', 'cancelled')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (fallbackTask) linkedTask = fallbackTask;
+    }
+
+    const mappedParticipants = (partRes.data || []).map((p: any) => ({
       id: p.id,
       conversationId: p.conversation_id,
       userId: p.user_id,
@@ -185,6 +271,22 @@ export class ChatService {
       lastReadAt: p.last_read_at,
       user: p.profiles ? mapProfileToUser(p.profiles) : undefined,
     }));
+
+    // Check rider online status for the counterpart if counterpart is a rider
+    let partnerIsOnline: boolean | undefined = undefined;
+    const otherPart = viewerUserId
+      ? mappedParticipants.find((p) => p.userId !== viewerUserId)
+      : undefined;
+    if (otherPart && (otherPart.role === 'rider' || otherPart.user?.role === 'rider')) {
+      const { data: riderRow } = await supabase
+        .from('riders')
+        .select('is_online')
+        .eq('user_id', otherPart.userId)
+        .maybeSingle();
+      if (riderRow && typeof riderRow.is_online === 'boolean') {
+        partnerIsOnline = riderRow.is_online;
+      }
+    }
 
     let unreadQuery = supabase
       .from('messages')
@@ -198,34 +300,40 @@ export class ChatService {
 
     const { count: unreadCount } = await unreadQuery;
 
+    const { status, closedAt, deliveryStatus } = resolveConversationClosure(
+      conv,
+      linkedTask,
+      linkedListing
+    );
+
+    const lastMsg = lastMsgRes.data;
+
     return {
       id: conv.id,
       type: conv.type,
-      relatedListingId: conv.related_listing_id,
-      relatedTaskId: conv.related_task_id,
-      title: conv.title,
+      relatedListingId: conv.related_listing_id || undefined,
+      relatedTaskId: conv.related_task_id || linkedTask?.id || undefined,
+      donorId: conv.donor_id || linkedTask?.donor_id || linkedListing?.donor_id || undefined,
+      riderId: conv.rider_id || undefined,
+      status,
+      closedAt,
+      deliveryStatus,
+      pickupAddress: linkedTask?.pickup_address || linkedListing?.pickup_address || undefined,
+      donationServings: linkedTask?.servings_required || linkedListing?.servings || undefined,
+      donationImageUrl: linkedListing?.image_url || undefined,
+      partnerIsOnline,
+      title: conv.title || linkedTask?.food_title || linkedListing?.title || undefined,
       lastMessageAt: conv.last_message_at,
       createdAt: conv.created_at,
       updatedAt: conv.updated_at,
       participants: mappedParticipants,
       unreadCount: unreadCount || 0,
-      lastMessage: lastMsg
-        ? {
-            id: lastMsg.id,
-            conversationId: lastMsg.conversation_id,
-            senderId: lastMsg.sender_id,
-            content: lastMsg.content,
-            messageType: lastMsg.message_type,
-            metadata: lastMsg.metadata,
-            isRead: lastMsg.is_read,
-            createdAt: lastMsg.created_at,
-          }
-        : undefined,
+      lastMessage: lastMsg ? mapMessageRow(lastMsg) : undefined,
     };
   }
 
   /**
-   * Fetch all conversations for an authenticated user
+   * Fetch all conversations for an authenticated user (strictly filtered by participant membership)
    */
   static async getUserConversations(userId: string): Promise<Conversation[]> {
     if (!isValidUUID(userId)) return [];
@@ -239,7 +347,7 @@ export class ChatService {
       return [];
     }
 
-    const convIds = participantRows.map((r) => r.conversation_id).filter(isValidUUID);
+    const convIds = Array.from(new Set(participantRows.map((r) => r.conversation_id).filter(isValidUUID)));
     if (convIds.length === 0) return [];
 
     const { data: convs, error: convsErr } = await supabase
@@ -254,34 +362,222 @@ export class ChatService {
   }
 
   /**
-   * Get all messages in an authorized conversation
+   * Get total unread incoming messages across all authorized conversations for a user.
    */
-  static async getMessages(conversationId: string): Promise<ChatMessage[]> {
-    if (!isValidUUID(conversationId)) return [];
+  static async getTotalUnreadCount(userId: string): Promise<number> {
+    if (!isValidUUID(userId)) return 0;
 
-    const { data, error } = await supabase
+    const { data: participantRows, error } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', userId);
+
+    if (error || !participantRows || participantRows.length === 0) return 0;
+
+    const convIds = Array.from(new Set(participantRows.map((r) => r.conversation_id).filter(isValidUUID)));
+    if (convIds.length === 0) return 0;
+
+    const { count } = await supabase
       .from('messages')
-      .select('*, sender:sender_id(id, full_name, organization_name, avatar_url, role)')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
+      .select('*', { count: 'exact', head: true })
+      .in('conversation_id', convIds)
+      .neq('sender_id', userId)
+      .eq('is_read', false);
 
-    if (error || !data) return [];
-
-    return data.map((m: any) => ({
-      id: m.id,
-      conversationId: m.conversation_id,
-      senderId: m.sender_id,
-      content: m.content,
-      messageType: m.message_type || 'text',
-      metadata: m.metadata || {},
-      isRead: m.is_read,
-      createdAt: m.created_at,
-      sender: m.sender ? mapProfileToUser(m.sender) : undefined,
-    }));
+    return count || 0;
   }
 
   /**
-   * Send a new message & update conversation timestamp
+   * Get unread message count for a specific food listing / delivery task conversation.
+   */
+  static async getUnreadCountForDelivery(
+    userId: string,
+    options: { relatedTaskId?: string; relatedListingId?: string }
+  ): Promise<number> {
+    if (!isValidUUID(userId)) return 0;
+
+    let convId: string | null = null;
+    if (isValidUUID(options.relatedTaskId)) {
+      const { data } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('related_task_id', options.relatedTaskId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      convId = data?.id || null;
+    }
+
+    if (!convId && isValidUUID(options.relatedListingId)) {
+      const { data } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('related_listing_id', options.relatedListingId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      convId = data?.id || null;
+    }
+
+    if (!convId) return 0;
+
+    const { count } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('conversation_id', convId)
+      .neq('sender_id', userId)
+      .eq('is_read', false);
+
+    return count || 0;
+  }
+
+  /**
+   * Check whether a conversation is CLOSED (either via conversations.status or completed delivery task/listing).
+   */
+  static async isConversationClosed(conversationId: string): Promise<boolean> {
+    if (!isValidUUID(conversationId)) return true;
+
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('id', conversationId)
+      .maybeSingle();
+
+    if (!conv) return true;
+
+    if (String(conv.status || '').toUpperCase() === 'CLOSED' || Boolean(conv.closed_at)) {
+      return true;
+    }
+
+    if (isValidUUID(conv.related_task_id)) {
+      const { data: task } = await supabase
+        .from('delivery_tasks')
+        .select('status')
+        .eq('id', conv.related_task_id)
+        .maybeSingle();
+      if (task?.status === 'completed') return true;
+    } else if (isValidUUID(conv.related_listing_id) && conv.type === 'delivery') {
+      const { data: listing } = await supabase
+        .from('food_listings')
+        .select('status')
+        .eq('id', conv.related_listing_id)
+        .maybeSingle();
+      if (listing?.status === 'completed') return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Automatically close the conversation associated with a completed delivery.
+   * Works reliably both with and without the SQL migration applied.
+   */
+  static async closeConversationForDelivery(
+    deliveryTaskId?: string | null,
+    foodListingId?: string | null,
+    actorUserId?: string | null
+  ): Promise<void> {
+    const validTaskId = isValidUUID(deliveryTaskId) ? deliveryTaskId : null;
+    const validListingId = isValidUUID(foodListingId) ? foodListingId : null;
+    if (!validTaskId && !validListingId) return;
+
+    // 1. Try atomic backend RPC first
+    try {
+      const { error } = await supabase.rpc('close_conversation_for_delivery', {
+        p_delivery_task_id: validTaskId,
+        p_food_listing_id: validListingId,
+      });
+      if (!error) return;
+    } catch {}
+
+    // 2. Fallback: find linked conversation(s) and mark closed + post read-only system message
+    try {
+      const matchedIds = new Set<string>();
+      if (validTaskId) {
+        const { data } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('related_task_id', validTaskId);
+        (data || []).forEach((r: any) => r?.id && matchedIds.add(r.id));
+      }
+      if (validListingId) {
+        const { data } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('related_listing_id', validListingId)
+          .eq('type', 'delivery');
+        (data || []).forEach((r: any) => r?.id && matchedIds.add(r.id));
+      }
+
+      const nowIso = new Date().toISOString();
+      for (const convId of matchedIds) {
+        // Attempt status/closed_at update (ignored cleanly if columns not yet migrated)
+        try {
+          await supabase
+            .from('conversations')
+            .update({ status: 'CLOSED', closed_at: nowIso, updated_at: nowIso } as any)
+            .eq('id', convId);
+        } catch {}
+
+        // Post single system closure message if not already logged
+        if (isValidUUID(actorUserId)) {
+          const { data: existingSys } = await supabase
+            .from('messages')
+            .select('id')
+            .eq('conversation_id', convId)
+            .eq('message_type', 'system')
+            .ilike('content', '%conversation is now closed%')
+            .limit(1);
+
+          if (!existingSys || existingSys.length === 0) {
+            await supabase.from('messages').insert({
+              conversation_id: convId,
+              sender_id: actorUserId,
+              content:
+                'Delivery Completed — This conversation is now closed. You can still view your previous messages.',
+              message_type: 'system',
+              is_read: true,
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+
+  /**
+   * Get messages in an authorized conversation with optional cursor pagination
+   * for older message history.
+   */
+  static async getMessages(
+    conversationId: string,
+    options?: { limit?: number; before?: string }
+  ): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
+    if (!isValidUUID(conversationId)) return { messages: [], hasMore: false };
+
+    const limit = Math.min(Math.max(options?.limit ?? 100, 10), 200);
+    let query = supabase
+      .from('messages')
+      .select('*, sender:sender_id(id, full_name, organization_name, avatar_url, role)')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(limit + 1);
+
+    if (options?.before) {
+      query = query.lt('created_at', options.before);
+    }
+
+    const { data, error } = await query;
+    if (error || !data) return { messages: [], hasMore: false };
+
+    const hasMore = data.length > limit;
+    const slice = hasMore ? data.slice(0, limit) : data;
+    const chronological = slice.reverse().map(mapMessageRow);
+
+    return { messages: chronological, hasMore };
+  }
+
+  /**
+   * Send a new message with strict validation, closure enforcement, and timestamp update.
    */
   static async sendMessage(params: {
     conversationId: string;
@@ -294,12 +590,28 @@ export class ChatService {
       throw new Error('Invalid conversation or sender ID');
     }
 
+    const trimmed = (params.content || '').trim();
+    if (!trimmed) {
+      throw new Error('Message cannot be empty.');
+    }
+    if (trimmed.length > MAX_CHAT_MESSAGE_LENGTH) {
+      throw new Error(`Message cannot exceed ${MAX_CHAT_MESSAGE_LENGTH} characters.`);
+    }
+
+    // Enforce closure check before attempting insert (backed by Postgres RLS & trigger)
+    if ((params.messageType || 'text') !== 'system') {
+      const closed = await this.isConversationClosed(params.conversationId);
+      if (closed) {
+        throw new Error(CLOSED_CHAT_NOTICE);
+      }
+    }
+
     const { data, error } = await supabase
       .from('messages')
       .insert({
         conversation_id: params.conversationId,
         sender_id: params.senderId,
-        content: params.content,
+        content: trimmed,
         message_type: params.messageType || 'text',
         metadata: params.metadata || {},
       })
@@ -307,6 +619,9 @@ export class ChatService {
       .single();
 
     if (error || !data) {
+      if (/CONVERSATION_CLOSED|row-level security|new row violates/i.test(error?.message || '')) {
+        throw new Error(CLOSED_CHAT_NOTICE);
+      }
       throw new Error(error?.message || 'Failed to send message');
     }
 
@@ -318,54 +633,63 @@ export class ChatService {
         .eq('id', params.conversationId);
     } catch {}
 
-    return {
-      id: data.id,
-      conversationId: data.conversation_id,
-      senderId: data.sender_id,
-      content: data.content,
-      messageType: data.message_type,
-      metadata: data.metadata,
-      isRead: data.is_read,
-      createdAt: data.created_at,
-      sender: data.sender ? mapProfileToUser(data.sender) : undefined,
-    };
+    return mapMessageRow(data);
   }
 
   /**
-   * Mark incoming messages in a conversation as read
+   * Mark incoming messages in a conversation as read (records read_at when column exists)
    */
   static async markMessagesAsRead(conversationId: string, currentUserId: string): Promise<void> {
     if (!isValidUUID(conversationId) || !isValidUUID(currentUserId)) return;
+    const nowIso = new Date().toISOString();
     try {
-      await supabase
+      const { error } = await supabase
         .from('messages')
-        .update({ is_read: true })
+        .update({ is_read: true, read_at: nowIso } as any)
         .eq('conversation_id', conversationId)
         .neq('sender_id', currentUserId)
         .eq('is_read', false);
 
+      if (error && /read_at/i.test(error.message || '')) {
+        await supabase
+          .from('messages')
+          .update({ is_read: true })
+          .eq('conversation_id', conversationId)
+          .neq('sender_id', currentUserId)
+          .eq('is_read', false);
+      }
+
       await supabase
         .from('conversation_participants')
-        .update({ last_read_at: new Date().toISOString() })
+        .update({ last_read_at: nowIso })
         .eq('conversation_id', conversationId)
         .eq('user_id', currentUserId);
     } catch {}
   }
 
   /**
-   * Subscribe to new incoming messages and read-status updates for a conversation
+   * Subscribe to incoming messages, read receipts, and real-time conversation/delivery closure
+   * for a single active conversation. Cleans up completely on unmount.
    */
   static subscribeToMessages(
     conversationId: string,
     onMessage: (msg: ChatMessage) => void,
-    onMessageUpdated?: (msg: { id: string; isRead: boolean }) => void
+    onMessageUpdated?: (msg: { id: string; isRead: boolean; readAt?: string }) => void,
+    options?: {
+      relatedTaskId?: string;
+      onConversationStatusChanged?: (update: {
+        status: ConversationStatus;
+        closedAt?: string;
+        deliveryStatus?: string;
+      }) => void;
+    }
   ) {
     if (!isValidUUID(conversationId)) {
       return { unsubscribe: () => {} };
     }
 
-    const channel = supabase
-      .channel(`chat:${conversationId}:${Date.now()}`)
+    let channel = supabase
+      .channel(`chat:${conversationId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`)
       .on(
         'postgres_changes',
         {
@@ -387,9 +711,10 @@ export class ChatService {
             conversationId: row.conversation_id,
             senderId: row.sender_id,
             content: row.content,
-            messageType: row.message_type,
-            metadata: row.metadata,
-            isRead: row.is_read,
+            messageType: row.message_type || 'text',
+            metadata: row.metadata || {},
+            isRead: !!row.is_read,
+            readAt: row.read_at || undefined,
             createdAt: row.created_at,
             sender: sender ? mapProfileToUser(sender) : undefined,
           });
@@ -406,11 +731,62 @@ export class ChatService {
         (payload) => {
           const row = payload.new as any;
           if (onMessageUpdated && row?.id) {
-            onMessageUpdated({ id: row.id, isRead: !!row.is_read });
+            onMessageUpdated({
+              id: row.id,
+              isRead: !!row.is_read,
+              readAt: row.read_at || undefined,
+            });
           }
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'conversations',
+          filter: `id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const row = payload.new as any;
+          if (options?.onConversationStatusChanged && row) {
+            const isClosed =
+              String(row.status || '').toUpperCase() === 'CLOSED' || Boolean(row.closed_at);
+            if (isClosed) {
+              options.onConversationStatusChanged({
+                status: 'CLOSED',
+                closedAt: row.closed_at || row.updated_at || new Date().toISOString(),
+                deliveryStatus: 'completed',
+              });
+            }
+          }
+        }
+      );
+
+    if (isValidUUID(options?.relatedTaskId)) {
+      channel = channel.on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'delivery_tasks',
+          filter: `id=eq.${options!.relatedTaskId}`,
+        },
+        (payload) => {
+          const row = payload.new as any;
+          if (options?.onConversationStatusChanged && row?.status) {
+            const isCompleted = row.status === 'completed';
+            options.onConversationStatusChanged({
+              status: isCompleted ? 'CLOSED' : 'ACTIVE',
+              closedAt: isCompleted ? row.completed_at || row.updated_at || new Date().toISOString() : undefined,
+              deliveryStatus: row.status,
+            });
+          }
+        }
+      );
+    }
+
+    channel.subscribe();
 
     return {
       unsubscribe: () => {
@@ -420,7 +796,7 @@ export class ChatService {
   }
 
   /**
-   * Subscribe to conversation updates so sidebar snippets & unread badges refresh
+   * Subscribe to conversation list, unread badges, and delivery status changes in real time.
    */
   static subscribeToUserConversations(userId: string, onRefresh: () => void) {
     if (!isValidUUID(userId)) {
@@ -430,12 +806,14 @@ export class ChatService {
     let timer: any = null;
     const debounced = () => {
       clearTimeout(timer);
-      timer = setTimeout(onRefresh, 400);
+      timer = setTimeout(onRefresh, 350);
     };
 
     const channel = supabase
-      .channel(`conv_list:${userId}:${Date.now()}`)
+      .channel(`conv_list:${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, debounced)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, debounced)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'delivery_tasks' }, debounced)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'conversation_participants', filter: `user_id=eq.${userId}` },

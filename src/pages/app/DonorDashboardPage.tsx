@@ -34,6 +34,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
   const [activeTasks, setActiveTasks] = useState<DonorLiveTask[]>([]);
   const [nearbyNgos, setNearbyNgos] = useState<NearbyNGO[]>([]);
   const [impact, setImpact] = useState<ImpactStats | null>(null);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const userLocationRef = useRef(user?.location);
@@ -121,8 +122,17 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
       fetchDonorDataRef.current(true);
     });
 
+    const refreshUnread = () => {
+      ChatService.getTotalUnreadCount(userId)
+        .then(setUnreadChatCount)
+        .catch(() => {});
+    };
+    refreshUnread();
+    const chatSub = ChatService.subscribeToUserConversations(userId, refreshUnread);
+
     return () => {
       sub.unsubscribe();
+      chatSub.unsubscribe();
     };
   }, [userId]);
 
@@ -285,6 +295,21 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
               }}
             >
               <MessageSquare size={14} /> Chat with Rider
+              {unreadChatCount > 0 && (
+                <span
+                  style={{
+                    background: '#ffffff',
+                    color: '#15803d',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    padding: '1px 7px',
+                    borderRadius: 999,
+                    marginLeft: 2,
+                  }}
+                >
+                  {unreadChatCount}
+                </span>
+              )}
             </button>
             {activeTasks[0].riderPhone && (
               <a

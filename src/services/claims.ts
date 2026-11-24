@@ -4,6 +4,7 @@
 import { supabase } from '../lib/supabase';
 import { isValidUUID } from '../lib/uuid';
 import { LocationService } from './location';
+import { ChatService } from './chat';
 
 export interface NgoClaim {
   id: string;
@@ -1401,7 +1402,16 @@ export const ClaimsService = {
       p_notes: notes || null,
     });
 
-    if (!error) return !!data;
+    if (!error) {
+      if (status === 'completed') {
+        const {
+          data: { user: authUser },
+        } = await supabase.auth.getUser();
+        // Ensure conversation closes even if DB trigger migration hasn't been applied yet
+        await ChatService.closeConversationForDelivery(taskId, null, authUser?.id).catch(() => {});
+      }
+      return !!data;
+    }
 
     const {
       data: { user },
@@ -1521,6 +1531,10 @@ export const ClaimsService = {
           .eq('user_id', user.id);
       }
 
+      if (status === 'completed') {
+        await ChatService.closeConversationForDelivery(null, taskId, user.id).catch(() => {});
+      }
+
       return true;
     }
 
@@ -1569,6 +1583,10 @@ export const ClaimsService = {
             .from('riders')
             .update({ is_available: true, updated_at: new Date().toISOString() })
             .eq('user_id', user.id);
+        }
+
+        if (status === 'completed') {
+          await ChatService.closeConversationForDelivery(taskId, dtRow.food_listing_id, user.id).catch(() => {});
         }
 
         return true;
@@ -1827,7 +1845,7 @@ export const ClaimsService = {
       return { unsubscribe: () => {} };
     }
 
-    const channelName = `delivery_task_${taskId}_${Date.now()}`;
+    const channelName = `delivery_task_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const channel = supabase
       .channel(channelName)
       .on(
@@ -1865,7 +1883,7 @@ export const ClaimsService = {
       }, 450);
     };
 
-    const channelName = `ngo_claims_${ngoId}_${Date.now()}`;
+    const channelName = `ngo_claims_${ngoId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const channel = supabase
       .channel(channelName)
       .on(
@@ -1917,7 +1935,7 @@ export const ClaimsService = {
       }, 300);
     };
 
-    const channelName = `tasks_avail_${Date.now()}`;
+    const channelName = `tasks_avail_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const channel = supabase
       .channel(channelName)
       .on(
@@ -1970,7 +1988,7 @@ export const ClaimsService = {
       }, 450);
     };
 
-    const channelName = `donor_listings_${donorId}_${Date.now()}`;
+    const channelName = `donor_listings_${donorId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const channel = supabase
       .channel(channelName)
       .on(

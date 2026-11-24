@@ -90,7 +90,7 @@ export const NotificationsService = {
     if (!isValidUUID(userId)) {
       return { unsubscribe: () => {} };
     }
-    const channelName = `notifs_${userId}_${Date.now()}`;
+    const channelName = `notifs_${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const channel = supabase
       .channel(channelName)
       .on(

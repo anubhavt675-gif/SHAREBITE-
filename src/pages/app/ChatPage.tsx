@@ -1,29 +1,58 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Send, MessageSquare, Phone, Check, CheckCheck, ArrowLeft, ShieldCheck } from 'lucide-react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import {
+  Send,
+  MessageSquare,
+  Phone,
+  Check,
+  CheckCheck,
+  ArrowLeft,
+  ShieldCheck,
+  Lock,
+  Loader2,
+  MapPin,
+  WifiOff,
+  ChevronUp,
+  Truck,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { normalizeRole } from '../../services/auth';
-import { ChatService } from '../../services/chat';
+import {
+  ChatService,
+  MAX_CHAT_MESSAGE_LENGTH,
+  CLOSED_CHAT_NOTICE,
+} from '../../services/chat';
 import type { Conversation, ChatMessage } from '../../types';
 import styles from './ChatPage.module.css';
 
 const RIDER_QUICK_MESSAGES = [
+  'Hello, I have accepted your food donation.',
   'I am reaching your location.',
-  'Please confirm pickup location.',
-  'I have arrived.',
-  'Please share pickup instructions.',
-  'Food has been collected.',
-  'I am facing a delay.',
+  'I am on my way.',
+  'Please share the pickup location details.',
+  'I have reached your location.',
+  'Food collected successfully.',
 ];
 
 const DONOR_QUICK_MESSAGES = [
+  'Hello, where are you right now?',
+  'How much time will you take to reach?',
+  'I am waiting at the pickup location.',
+  'Please call me when you arrive.',
   'Food is packed and ready for pickup.',
-  'Please share your ETA.',
-  'Pickup location confirmed — come to main entrance.',
-  'Please confirm pickup location.',
-  'I am reaching your location.',
-  'Thank you for rescuing this food!',
 ];
+
+const DELIVERY_STATUS_LABELS: Record<string, string> = {
+  rider_assigned: 'Active Delivery · Rider Assigned',
+  going_to_pickup: 'Active Delivery · On the Way',
+  arrived_at_pickup: 'Active Delivery · Arrived at Pickup',
+  food_collected: 'Active Delivery · Food Collected',
+  in_transit: 'Active Delivery · In Transit',
+  delivered: 'Active Delivery · Delivered',
+  completed: 'Delivery Completed',
+  reserved: 'Active Delivery',
+  picked_up: 'Active Delivery · Food Collected',
+};
 
 export default function ChatPage() {
   const { conversationId } = useParams();
@@ -33,17 +62,27 @@ export default function ChatPage() {
   const userRole = normalizeRole(user?.role);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loadingConvs, setLoadingConvs] = useState(true);
   const [activeConvId, setActiveConvId] = useState<string | null>(conversationId || null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
   const [mobileShowThread, setMobileShowThread] = useState(Boolean(conversationId));
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  );
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sendingRef = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
 
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (silent = false) => {
     if (!userId) return;
+    if (!silent) setLoadingConvs(true);
     try {
       const dbConvs = await ChatService.getUserConversations(userId);
       setConversations(dbConvs);
@@ -57,54 +96,123 @@ export default function ChatPage() {
         });
       }
     } catch {
-      setConversations([]);
-      setActiveConvId(null);
+      if (!silent) {
+        setConversations([]);
+        setActiveConvId(null);
+      }
+    } finally {
+      if (!silent) setLoadingConvs(false);
     }
   }, [userId, conversationId]);
 
   useEffect(() => {
-    loadConversations();
+    loadConversations(false);
     if (!userId) return;
-    const sub = ChatService.subscribeToUserConversations(userId, loadConversations);
+    const sub = ChatService.subscribeToUserConversations(userId, () => {
+      loadConversations(true);
+    });
     return () => {
       sub.unsubscribe();
     };
   }, [userId, loadConversations]);
 
-  // Fetch messages & subscribe to realtime incoming messages + read receipts
+  // Monitor browser online/offline transitions and re-sync on reconnect
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOffline(false);
+      loadConversations(true);
+    };
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, [loadConversations]);
+
+  const activeConv = conversations.find((c) => c.id === activeConvId);
+  const activeTaskId = activeConv?.relatedTaskId;
+  const isClosed = activeConv?.status === 'CLOSED';
+
+  // Fetch messages & subscribe to realtime incoming messages + read receipts + closure updates
   useEffect(() => {
     if (!activeConvId || !userId) {
       return;
     }
 
     let active = true;
-    ChatService.getMessages(activeConvId).then((msgs) => {
-      if (!active) return;
-      setMessages(msgs);
-      ChatService.markMessagesAsRead(activeConvId, userId).then(() => {
-        setConversations((prev) =>
-          prev.map((c) => (c.id === activeConvId ? { ...c, unreadCount: 0 } : c))
-        );
+    setLoadingMessages(true);
+    setSendError('');
+    shouldAutoScrollRef.current = true;
+
+    ChatService.getMessages(activeConvId, { limit: 100 })
+      .then(({ messages: msgs, hasMore }) => {
+        if (!active) return;
+        setMessages(msgs);
+        setHasMoreHistory(hasMore);
+        setLoadingMessages(false);
+        ChatService.markMessagesAsRead(activeConvId, userId).then(() => {
+          if (!active) return;
+          setConversations((prev) =>
+            prev.map((c) => (c.id === activeConvId ? { ...c, unreadCount: 0 } : c))
+          );
+          window.dispatchEvent(new CustomEvent('sharebite:chat-unread-sync'));
+        });
+      })
+      .catch(() => {
+        if (active) setLoadingMessages(false);
       });
-    });
 
     const sub = ChatService.subscribeToMessages(
       activeConvId,
       (newMsg) => {
         if (!active) return;
+        shouldAutoScrollRef.current = true;
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMsg.id)) return prev;
           return [...prev, newMsg];
         });
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === activeConvId
+              ? { ...c, lastMessage: newMsg, lastMessageAt: newMsg.createdAt }
+              : c
+          )
+        );
         if (newMsg.senderId !== userId) {
-          ChatService.markMessagesAsRead(activeConvId, userId);
+          ChatService.markMessagesAsRead(activeConvId, userId).then(() => {
+            window.dispatchEvent(new CustomEvent('sharebite:chat-unread-sync'));
+          });
         }
       },
       (updated) => {
         if (!active) return;
         setMessages((prev) =>
-          prev.map((m) => (m.id === updated.id ? { ...m, isRead: updated.isRead } : m))
+          prev.map((m) =>
+            m.id === updated.id
+              ? { ...m, isRead: updated.isRead, readAt: updated.readAt || m.readAt }
+              : m
+          )
         );
+      },
+      {
+        relatedTaskId: activeTaskId,
+        onConversationStatusChanged: (update) => {
+          if (!active) return;
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === activeConvId
+                ? {
+                    ...c,
+                    status: update.status,
+                    closedAt: update.closedAt || c.closedAt,
+                    deliveryStatus: update.deliveryStatus || c.deliveryStatus,
+                  }
+                : c
+            )
+          );
+        },
       }
     );
 
@@ -112,23 +220,59 @@ export default function ChatPage() {
       active = false;
       sub.unsubscribe();
     };
-  }, [activeConvId, userId]);
+  }, [activeConvId, activeTaskId, userId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (shouldAutoScrollRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
-  const activeConv = conversations.find((c) => c.id === activeConvId);
+  const handleLoadOlderMessages = async () => {
+    if (!activeConvId || loadingOlder || !hasMoreHistory || messages.length === 0) return;
+    setLoadingOlder(true);
+    shouldAutoScrollRef.current = false;
+    try {
+      const oldestTs = messages[0].createdAt;
+      const { messages: older, hasMore } = await ChatService.getMessages(activeConvId, {
+        limit: 50,
+        before: oldestTs,
+      });
+      setHasMoreHistory(hasMore);
+      if (older.length > 0) {
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          const uniqueOlder = older.filter((m) => !existingIds.has(m.id));
+          return [...uniqueOlder, ...prev];
+        });
+      }
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
   const otherParticipant = activeConv?.participants?.find(
     (p) => p.userId !== userId
   )?.user;
 
   const dispatchMessage = async (rawText: string) => {
     const text = rawText.trim();
-    if (!text || !activeConvId || !userId || sending) return;
+    if (!text || !activeConvId || !userId || sendingRef.current || isOffline) return;
 
+    if (isClosed) {
+      setSendError(CLOSED_CHAT_NOTICE);
+      return;
+    }
+
+    if (text.length > MAX_CHAT_MESSAGE_LENGTH) {
+      setSendError(`Message cannot exceed ${MAX_CHAT_MESSAGE_LENGTH} characters.`);
+      return;
+    }
+
+    sendingRef.current = true;
     setSendError('');
     setSending(true);
+    shouldAutoScrollRef.current = true;
 
     const optId = `opt-${Date.now()}`;
     const optimisticMsg: ChatMessage = {
@@ -163,48 +307,83 @@ export default function ChatPage() {
         )
       );
     } catch (err: any) {
-      setSendError(err?.message || 'Could not send message.');
+      const msg = err?.message || 'Could not send message.';
+      setSendError(msg);
       setMessages((prev) => prev.filter((m) => m.id !== optId));
+      // If backend rejected due to completion/closure, sync conversation state immediately
+      if (/closed|completed/i.test(msg)) {
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === activeConvId
+              ? { ...c, status: 'CLOSED', closedAt: new Date().toISOString(), deliveryStatus: 'completed' }
+              : c
+          )
+        );
+      }
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
 
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || isClosed || sendingRef.current || isOffline) return;
     const msg = inputText;
     setInputText('');
     await dispatchMessage(msg);
   };
 
   const quickOptions = userRole === 'donor' ? DONOR_QUICK_MESSAGES : RIDER_QUICK_MESSAGES;
+  const activeDeliveryRoute = userRole === 'rider' ? '/rider-dashboard' : '/donor-dashboard';
+  const activeStatusLabel = activeConv
+    ? activeConv.status === 'CLOSED'
+      ? 'Delivery Completed'
+      : DELIVERY_STATUS_LABELS[activeConv.deliveryStatus || ''] || 'Active Delivery'
+    : '';
 
   return (
     <div className={styles.chatContainer}>
+      {isOffline && (
+        <div className={styles.offlineBanner} role="alert">
+          <WifiOff size={15} />
+          <span>You are currently offline. Live messages will reconnect automatically once your internet is back.</span>
+        </div>
+      )}
+
       <div className={styles.chatWrapper}>
         {/* Left Sidebar: Conversations */}
         <div className={`${styles.sidebar} ${mobileShowThread ? styles.hideOnMobile : ''}`}>
           <div className={styles.sidebarHeader}>
             <div>
               <h2 className={styles.sidebarTitle}>Pickup & Delivery Chat</h2>
-              <p className={styles.sidebarSub}>Direct private channel between Donor & assigned Rider</p>
+              <p className={styles.sidebarSub}>Private channel between Donor & assigned Rider</p>
             </div>
           </div>
           <div className={styles.convList}>
-            {conversations.length === 0 ? (
+            {loadingConvs ? (
+              <div className={styles.emptyConvList}>
+                <Loader2 size={24} className="animate-spin" style={{ color: '#ea580c' }} />
+                <p>Loading conversations...</p>
+              </div>
+            ) : conversations.length === 0 ? (
               <div className={styles.emptyConvList}>
                 <MessageSquare size={28} />
-                <p>No active pickup conversations yet.</p>
-                <span>When a rider accepts a donation, your private coordination chat appears here automatically.</span>
+                <p>No pickup conversations yet</p>
+                <span>
+                  {userRole === 'rider'
+                    ? 'Accept an available food pickup to unlock direct private chat with the donor.'
+                    : 'Once a rider accepts your food donation, your private coordination chat appears here automatically.'}
+                </span>
               </div>
             ) : (
               conversations.map((c) => {
                 const other = c.participants?.find((p) => p.userId !== userId)?.user;
                 const partnerName = other?.name || 'ShareBite Partner';
-                const title = c.title ? `${c.title} · ${partnerName}` : partnerName;
+                const donationName = c.title || 'Food Donation';
                 const lastText = c.lastMessage?.content || 'Pickup channel ready';
                 const isSelected = c.id === activeConvId;
+                const convClosed = c.status === 'CLOSED';
 
                 return (
                   <div
@@ -222,15 +401,34 @@ export default function ChatPage() {
                       ) : (
                         <span>{(partnerName || 'P').charAt(0).toUpperCase()}</span>
                       )}
+                      {c.partnerIsOnline && !convClosed && (
+                        <span className={styles.onlineDot} title="Online" />
+                      )}
                     </div>
                     <div className={styles.convMeta}>
                       <div className={styles.convTopRow}>
-                        <span className={styles.convName}>{title}</span>
+                        <span className={styles.convName}>{partnerName}</span>
                         <span className={styles.convTime}>
                           {new Date(c.lastMessageAt || c.createdAt).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit',
                           })}
+                        </span>
+                      </div>
+                      <div className={styles.convDonationRow}>
+                        <span className={styles.convDonationTitle}>{donationName}</span>
+                        <span
+                          className={
+                            convClosed ? styles.convStatusClosed : styles.convStatusActive
+                          }
+                        >
+                          {convClosed ? (
+                            <>
+                              <Lock size={9} /> Closed
+                            </>
+                          ) : (
+                            'Active'
+                          )}
                         </span>
                       </div>
                       <div className={styles.convBottomRow}>
@@ -266,131 +464,262 @@ export default function ChatPage() {
                     {otherParticipant?.avatar ? (
                       <img
                         src={otherParticipant.avatar}
-                        alt="Contact"
+                        alt={otherParticipant.name || 'Contact'}
                         className={styles.avatarImg}
                       />
                     ) : (
-                      <span>{otherParticipant?.name?.charAt(0) || 'P'}</span>
+                      <span>{otherParticipant?.name?.charAt(0).toUpperCase() || 'P'}</span>
+                    )}
+                    {activeConv.partnerIsOnline && !isClosed && (
+                      <span className={styles.onlineDot} title="Online" />
                     )}
                   </div>
-                  <div>
-                    <h3 className={styles.headerName}>
-                      {otherParticipant?.name || 'Assigned Partner'}
-                      {activeConv.title ? ` — ${activeConv.title}` : ''}
-                    </h3>
-                    <span className={styles.headerRole}>
-                      <ShieldCheck size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4, color: '#16a34a' }} />
-                      {otherParticipant?.role ? `${otherParticipant.role} · Encrypted Pickup Chat` : 'Verified Pickup Participant'}
-                    </span>
+                  <div className={styles.headerTextCol}>
+                    <div className={styles.headerTitleRow}>
+                      <h3 className={styles.headerName}>
+                        {otherParticipant?.name || 'Assigned Partner'}
+                      </h3>
+                      <span
+                        className={
+                          isClosed ? styles.headerStatusClosed : styles.headerStatusActive
+                        }
+                      >
+                        {isClosed ? <Lock size={11} /> : <span className={styles.liveDot} />}
+                        {activeStatusLabel}
+                      </span>
+                    </div>
+                    <div className={styles.headerSubRow}>
+                      <span className={styles.headerDonationRef}>
+                        <ShieldCheck
+                          size={12}
+                          style={{ color: '#16a34a', flexShrink: 0 }}
+                        />
+                        <strong>{activeConv.title || 'Food Donation'}</strong>
+                        {activeConv.donationServings
+                          ? ` · ${activeConv.donationServings} servings`
+                          : ''}
+                        {activeConv.pickupAddress ? (
+                          <span className={styles.headerAddr}>
+                            <MapPin size={11} /> {activeConv.pickupAddress}
+                          </span>
+                        ) : null}
+                      </span>
+                      {typeof activeConv.partnerIsOnline === 'boolean' && !isClosed && (
+                        <span
+                          className={
+                            activeConv.partnerIsOnline
+                              ? styles.presenceOnline
+                              : styles.presenceOffline
+                          }
+                        >
+                          · {activeConv.partnerIsOnline ? 'Online' : 'Offline'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {otherParticipant?.phone && (
-                  <a
-                    href={`tel:${otherParticipant.phone}`}
-                    className={styles.quickReplyBtn}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}
-                  >
-                    <Phone size={14} /> Call
-                  </a>
-                )}
+                <div className={styles.headerActions}>
+                  {!isClosed && (
+                    <Link
+                      to={activeDeliveryRoute}
+                      className={styles.deliveryShortcutBtn}
+                      title="Return to Active Delivery & Live Map"
+                    >
+                      <Truck size={14} />
+                      <span>Active Delivery</span>
+                    </Link>
+                  )}
+                  {otherParticipant?.phone && !isClosed && (
+                    <a
+                      href={`tel:${otherParticipant.phone}`}
+                      className={styles.callBtn}
+                    >
+                      <Phone size={14} /> Call
+                    </a>
+                  )}
+                </div>
               </div>
 
               {/* Messages feed */}
               <div className={styles.messagesFeed}>
-                {messages.map((m) => {
-                  if (m.messageType === 'system') {
+                {hasMoreHistory && (
+                  <div className={styles.loadMoreWrap}>
+                    <button
+                      type="button"
+                      className={styles.loadMoreBtn}
+                      onClick={handleLoadOlderMessages}
+                      disabled={loadingOlder}
+                    >
+                      {loadingOlder ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <ChevronUp size={13} />
+                      )}
+                      {loadingOlder ? 'Loading earlier messages...' : 'Load earlier messages'}
+                    </button>
+                  </div>
+                )}
+
+                {loadingMessages ? (
+                  <div className={styles.loadingFeed}>
+                    <Loader2 size={24} className="animate-spin" style={{ color: '#ea580c' }} />
+                    <span>Loading conversation history...</span>
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className={styles.emptyFeedNote}>
+                    Private chat unlocked for <strong>{activeConv.title || 'this delivery'}</strong>.
+                    Send a message below to coordinate pickup.
+                  </div>
+                ) : (
+                  messages.map((m) => {
+                    if (m.messageType === 'system') {
+                      return (
+                        <div key={m.id} className={styles.systemMsg}>
+                          {m.content}
+                        </div>
+                      );
+                    }
+
+                    const isMine = m.senderId === userId;
+                    const senderLabel = isMine
+                      ? 'You'
+                      : m.sender?.name || otherParticipant?.name || 'Partner';
+
                     return (
-                      <div key={m.id} className={styles.systemMsg}>
-                        {m.content}
+                      <div
+                        key={m.id}
+                        className={`${styles.msgRow} ${isMine ? styles.msgRowMine : styles.msgRowOther}`}
+                      >
+                        <span className={styles.senderTag}>{senderLabel}</span>
+                        <div
+                          className={`${styles.msgBubble} ${
+                            isMine ? styles.msgBubbleMine : styles.msgBubbleOther
+                          }`}
+                        >
+                          {m.content}
+                        </div>
+                        <span className={styles.msgTime}>
+                          {new Date(m.createdAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                          {isMine && (
+                            <span
+                              className={styles.readReceipt}
+                              title={m.isRead ? 'Read' : 'Delivered'}
+                            >
+                              {m.isRead ? (
+                                <>
+                                  <CheckCheck size={12} style={{ color: '#16a34a' }} /> Read
+                                </>
+                              ) : (
+                                <>
+                                  <Check size={12} /> Sent
+                                </>
+                              )}
+                            </span>
+                          )}
+                        </span>
                       </div>
                     );
-                  }
-
-                  const isMine = m.senderId === userId;
-                  const senderLabel = isMine
-                    ? 'You'
-                    : m.sender?.name || otherParticipant?.name || 'Partner';
-
-                  return (
-                    <div
-                      key={m.id}
-                      className={`${styles.msgRow} ${isMine ? styles.msgRowMine : styles.msgRowOther}`}
-                    >
-                      <span className={styles.senderTag}>{senderLabel}</span>
-                      <div
-                        className={`${styles.msgBubble} ${
-                          isMine ? styles.msgBubbleMine : styles.msgBubbleOther
-                        }`}
-                      >
-                        {m.content}
-                      </div>
-                      <span className={styles.msgTime}>
-                        {new Date(m.createdAt).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                        {isMine && (
-                          <span className={styles.readReceipt} title={m.isRead ? 'Read' : 'Sent'}>
-                            {m.isRead ? (
-                              <>
-                                <CheckCheck size={12} style={{ color: '#16a34a' }} /> Read
-                              </>
-                            ) : (
-                              <>
-                                <Check size={12} /> Sent
-                              </>
-                            )}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
+                  })
+                )}
                 <div ref={messagesEndRef} />
               </div>
 
               {sendError && <div className={styles.errorBanner}>{sendError}</div>}
 
-              {/* Quick Messages Bar */}
-              <div className={styles.quickReplies} aria-label="Quick messages">
-                {quickOptions.map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    className={styles.quickReplyBtn}
-                    disabled={sending}
-                    onClick={() => dispatchMessage(q)}
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
+              {/* Closed Conversation Read-Only Lock Banner vs Active Quick Replies + Input */}
+              {isClosed ? (
+                <div className={styles.closedFooter} role="status" aria-live="polite">
+                  <div className={styles.closedBanner}>
+                    <div className={styles.closedIconWrap}>
+                      <Lock size={18} />
+                    </div>
+                    <div className={styles.closedTextWrap}>
+                      <div className={styles.closedTitle}>Delivery Completed</div>
+                      <p className={styles.closedDesc}>
+                        This conversation is closed because the delivery has been completed. You can
+                        still view your previous messages.
+                      </p>
+                    </div>
+                  </div>
+                  <div className={styles.inputFormLocked}>
+                    <input
+                      type="text"
+                      className={styles.msgInput}
+                      placeholder="Conversation closed — read-only message history"
+                      value=""
+                      disabled
+                      readOnly
+                      aria-label="Conversation closed"
+                    />
+                    <button
+                      type="button"
+                      className={styles.sendBtn}
+                      disabled
+                      aria-label="Send message"
+                    >
+                      <Send size={18} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Quick Messages Bar */}
+                  <div className={styles.quickReplies} aria-label="Quick messages">
+                    {quickOptions.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        className={styles.quickReplyBtn}
+                        disabled={sending || isOffline}
+                        onClick={() => dispatchMessage(q)}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
 
-              {/* Input Form */}
-              <form className={styles.inputForm} onSubmit={handleSend}>
-                <input
-                  type="text"
-                  className={styles.msgInput}
-                  placeholder="Type a message to coordinate pickup..."
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  className={styles.sendBtn}
-                  disabled={!inputText.trim() || sending}
-                  aria-label="Send message"
-                >
-                  <Send size={18} />
-                </button>
-              </form>
+                  {/* Input Form */}
+                  <form className={styles.inputForm} onSubmit={handleSend}>
+                    <input
+                      type="text"
+                      className={styles.msgInput}
+                      placeholder="Type a message to coordinate pickup..."
+                      value={inputText}
+                      maxLength={MAX_CHAT_MESSAGE_LENGTH}
+                      disabled={sending || isOffline}
+                      onChange={(e) => setInputText(e.target.value)}
+                    />
+                    {inputText.length > MAX_CHAT_MESSAGE_LENGTH - 200 && (
+                      <span className={styles.charCounter}>
+                        {inputText.length}/{MAX_CHAT_MESSAGE_LENGTH}
+                      </span>
+                    )}
+                    <button
+                      type="submit"
+                      className={styles.sendBtn}
+                      disabled={!inputText.trim() || sending || isOffline}
+                      aria-label="Send message"
+                    >
+                      {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                    </button>
+                  </form>
+                </>
+              )}
             </>
           ) : (
             <div className={styles.emptyState}>
               <MessageSquare size={48} />
-              <p style={{ margin: 0, fontWeight: 600, color: '#475569' }}>Select a pickup conversation</p>
-              <span style={{ fontSize: 13 }}>Only the Donor and the assigned Rider can view or message in a delivery thread.</span>
+              <p style={{ margin: 0, fontWeight: 600, color: '#475569' }}>
+                Select a pickup conversation
+              </p>
+              <span style={{ fontSize: 13, textAlign: 'center', maxWidth: 360 }}>
+                Only the original Donor and the assigned Rider can view or exchange messages in a
+                delivery thread.
+              </span>
             </div>
           )}
         </div>
