@@ -21,7 +21,7 @@ import riderHeroBannerImg from '../../assets/rider_scooter_hero.jpg';
 import styles from './RiderDashboardPage.module.css';
 
 const STATUS_BADGES: Record<string, string> = {
-  rider_assigned: 'Accepted',
+  rider_assigned: 'Order Accepted',
   going_to_pickup: 'On the Way to Donor',
   arrived_at_pickup: 'Arrived at Pickup',
   food_collected: 'Picked Up',
@@ -270,7 +270,7 @@ export default function RiderDashboardPage() {
 
       setActionBanner({
         kind: 'ok',
-        text: `Pickup accepted! Google Maps directions opened for ${pickupAddr || 'donor location'}.`,
+        text: `✓ Order Accepted! Google Maps & Directions opened for ${pickupAddr || 'donor location'}. Donor has been notified that you are coming to pick up the order.`,
       });
       await fetchData(true);
     } catch (e: any) {
@@ -407,7 +407,9 @@ export default function RiderDashboardPage() {
         const embedUrl = buildGoogleMapsEmbedUrl(
           navigationModalTask.pickupLat,
           navigationModalTask.pickupLng,
-          navigationModalTask.pickupAddress
+          navigationModalTask.pickupAddress,
+          riderCoords?.latitude,
+          riderCoords?.longitude
         );
         return (
           <div
@@ -454,13 +456,16 @@ export default function RiderDashboardPage() {
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <span style={{ background: '#DCFCE7', color: '#15803D', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>
-                  PICKUP ACCEPTED
+                <span style={{ background: '#DCFCE7', color: '#15803D', fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 999 }}>
+                  ✓ ORDER ACCEPTED
                 </span>
               </div>
               <h3 style={{ margin: '4px 0 4px', fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
-                Navigate to {navigationModalTask.foodTitle || 'Food Pickup'}
+                Order Accepted — Navigate to Pickup
               </h3>
+              <p style={{ margin: '0 0 6px', fontSize: 12.5, color: '#15803d', fontWeight: 600 }}>
+                Donor has been notified that you are coming to pick up this order.
+              </p>
               <p style={{ margin: '0 0 12px', fontSize: 13, color: '#475569' }}>
                 <MapPin size={13} style={{ verticalAlign: 'middle', color: '#ea580c' }} />{' '}
                 <strong>{navigationModalTask.pickupAddress || 'Donor Pickup Location'}</strong>
@@ -508,7 +513,7 @@ export default function RiderDashboardPage() {
                       boxShadow: '0 6px 18px rgba(234, 88, 12, 0.28)',
                     }}
                   >
-                    <Navigation size={16} /> Open Google Maps Navigation
+                    <Navigation size={16} /> Open Google Maps &amp; Directions
                   </a>
                 )}
 

@@ -20,7 +20,7 @@ import styles from './RiderDeliveriesPage.module.css';
 
 const STATUS_LABELS: Record<string, string> = {
   awaiting_rider: 'Available',
-  rider_assigned: 'Accepted',
+  rider_assigned: 'Order Accepted',
   going_to_pickup: 'On the Way to Donor',
   arrived_at_pickup: 'Arrived at Pickup',
   food_collected: 'Food Collected',
@@ -178,7 +178,7 @@ export default function RiderDeliveriesPage() {
 
       setFeedback({
         type: 'ok',
-        text: `Accepted "${task.foodTitle || 'Food Pickup'}"! Google Maps navigation opened to donor pickup location.`,
+        text: `✓ Order Accepted! Google Maps & Directions opened for "${task.foodTitle || 'Food Pickup'}". Donor has been notified that you are on the way.`,
       });
       await fetchAll(true);
       selectTab('active');
@@ -320,7 +320,9 @@ export default function RiderDeliveriesPage() {
         const embedUrl = buildGoogleMapsEmbedUrl(
           navigationModalTask.pickupLat,
           navigationModalTask.pickupLng,
-          navigationModalTask.pickupAddress
+          navigationModalTask.pickupAddress,
+          riderCoords?.latitude,
+          riderCoords?.longitude
         );
         return (
           <div className={styles.modalBackdrop}>
@@ -334,13 +336,16 @@ export default function RiderDeliveriesPage() {
                 <X size={16} />
               </button>
               <div style={{ marginBottom: 4 }}>
-                <span style={{ background: '#DCFCE7', color: '#15803D', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>
-                  PICKUP ACCEPTED
+                <span style={{ background: '#DCFCE7', color: '#15803D', fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 999 }}>
+                  ✓ ORDER ACCEPTED
                 </span>
               </div>
               <h3 className={styles.modalTitle} style={{ marginTop: 6 }}>
-                Navigate to {navigationModalTask.foodTitle || 'Food Pickup'}
+                Order Accepted — Navigate to Pickup
               </h3>
+              <p style={{ margin: '0 0 6px', fontSize: 12.5, color: '#15803d', fontWeight: 600 }}>
+                Donor has been notified that you are coming to pick up this order.
+              </p>
               <p className={styles.modalDesc}>
                 <MapPin size={13} style={{ verticalAlign: 'middle', color: '#ea580c' }} />{' '}
                 <strong>{navigationModalTask.pickupAddress || 'Donor Pickup Location'}</strong>
@@ -375,7 +380,7 @@ export default function RiderDeliveriesPage() {
                       }
                     }}
                   >
-                    <Navigation size={16} /> Open Google Maps Navigation
+                    <Navigation size={16} /> Open Google Maps &amp; Directions
                   </a>
                 )}
 

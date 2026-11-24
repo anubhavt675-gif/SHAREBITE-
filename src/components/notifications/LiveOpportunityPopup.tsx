@@ -26,6 +26,7 @@ export default function LiveOpportunityPopup() {
     if (!userId || !canonicalRole) return;
     const isNGO = canonicalRole === 'ngo';
     const isRider = canonicalRole === 'rider';
+    const isDonor = canonicalRole === 'donor';
 
     const sub = NotificationsService.subscribeToNotifications(userId, (notif) => {
       // Trigger browser notification if user granted permission
@@ -37,7 +38,13 @@ export default function LiveOpportunityPopup() {
         (isNGO && (notif.type === 'food_nearby' || notif.type === 'new_donation')) ||
         (isRider && notif.type === 'pickup_nearby');
 
-      if (isOpportunity) {
+      const isDonorAlert =
+        isDonor &&
+        ['rider_assigned', 'donation_claimed', 'delivery_update', 'food_collected', 'food_delivered'].includes(
+          notif.type
+        );
+
+      if (isOpportunity || isDonorAlert) {
         setQueue((prev) => {
           if (prev.some((p) => p.id === notif.id)) return prev;
           return [notif, ...prev].slice(0, 3);
@@ -103,7 +110,13 @@ export default function LiveOpportunityPopup() {
 
   const current = queue[0];
   const d = current.data || {};
-  const isRider = ['rider', 'volunteer'].includes(user?.role || '');
+  const roleNow = normalizeRole(user?.role);
+  const isRider = roleNow === 'rider';
+  const isDonorNotif =
+    roleNow === 'donor' &&
+    ['rider_assigned', 'donation_claimed', 'delivery_update', 'food_collected', 'food_delivered'].includes(
+      current.type
+    );
   const deadlineText = d.available_until
     ? new Date(d.available_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
@@ -117,19 +130,34 @@ export default function LiveOpportunityPopup() {
         zIndex: 2000,
         width: 'min(370px, calc(100vw - 32px))',
         background: '#ffffff',
-        border: '1.5px solid #fdba74',
+        border: isDonorNotif ? '1.5px solid #22c55e' : '1.5px solid #fdba74',
         borderRadius: 14,
         boxShadow: '0 16px 36px rgba(0, 0, 0, 0.16)',
         padding: 16,
         fontFamily: 'inherit',
       }}
       role="dialog"
-      aria-label="Live Food Opportunity"
+      aria-label={isDonorNotif ? 'Order Accepted Rider Update' : 'Live Food Opportunity'}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#ea580c', fontWeight: 700, fontSize: 13 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            color: isDonorNotif ? '#15803d' : '#ea580c',
+            fontWeight: 700,
+            fontSize: 13,
+          }}
+        >
           <Bell size={16} />
-          <span>{isRider ? 'NEW FOOD PICKUP AVAILABLE!' : 'NEW FOOD AVAILABLE!'}</span>
+          <span>
+            {isDonorNotif
+              ? '🛵 ORDER ACCEPTED — RIDER UPDATE'
+              : isRider
+              ? 'NEW FOOD PICKUP AVAILABLE!'
+              : 'NEW FOOD AVAILABLE!'}
+          </span>
         </div>
         <button
           onClick={() => dismiss(current.id)}
@@ -150,8 +178,13 @@ export default function LiveOpportunityPopup() {
         )}
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: 15, color: '#111827', marginBottom: 4 }}>
-            {d.title || current.title}
+            {isDonorNotif ? current.title : d.title || current.title}
           </div>
+          {isDonorNotif && current.body && (
+            <div style={{ fontSize: 12.5, color: '#374151', lineHeight: 1.45, marginBottom: 4 }}>
+              {current.body}
+            </div>
+          )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: '#4b5563' }}>
             {d.servings && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -194,50 +227,92 @@ export default function LiveOpportunityPopup() {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={() => {
-            const target = d.food_listing_id ? `/donations/${d.food_listing_id}` : current.actionUrl || '/discover';
-            dismiss(current.id);
-            navigate(target);
-          }}
-          style={{
-            flex: 1,
-            padding: '8px 12px',
-            borderRadius: 8,
-            border: '1px solid #d1d5db',
-            background: '#ffffff',
-            color: '#374151',
-            fontWeight: 600,
-            fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          {isRider ? 'View Pickup' : 'View Details'}
-        </button>
-        <button
-          onClick={() => handleAccept(current)}
-          disabled={acceptingId === current.id}
-          style={{
-            flex: 1,
-            padding: '8px 12px',
-            borderRadius: 8,
-            border: 'none',
-            background: '#ea580c',
-            color: '#ffffff',
-            fontWeight: 600,
-            fontSize: 13,
-            cursor: acceptingId === current.id ? 'wait' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-          }}
-        >
-          {acceptingId === current.id && <Loader2 size={14} className="animate-spin" />}
-          {isRider ? 'Accept Pickup' : 'Accept Food'}
-        </button>
-      </div>
+      {isDonorNotif ? (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => dismiss(current.id)}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid #d1d5db',
+              background: '#ffffff',
+              color: '#374151',
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Dismiss
+          </button>
+          <button
+            onClick={() => {
+              const target = current.actionUrl || '/donor-dashboard';
+              NotificationsService.markAsRead(current.id).catch(() => {});
+              dismiss(current.id);
+              navigate(target);
+            }}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: 'none',
+              background: '#16a34a',
+              color: '#ffffff',
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Track Rider Live
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => {
+              const target = d.food_listing_id ? `/donations/${d.food_listing_id}` : current.actionUrl || '/discover';
+              dismiss(current.id);
+              navigate(target);
+            }}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid #d1d5db',
+              background: '#ffffff',
+              color: '#374151',
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            {isRider ? 'View Pickup' : 'View Details'}
+          </button>
+          <button
+            onClick={() => handleAccept(current)}
+            disabled={acceptingId === current.id}
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: 'none',
+              background: '#ea580c',
+              color: '#ffffff',
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: acceptingId === current.id ? 'wait' : 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
+          >
+            {acceptingId === current.id && <Loader2 size={14} className="animate-spin" />}
+            {isRider ? 'Accept Pickup' : 'Accept Food'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

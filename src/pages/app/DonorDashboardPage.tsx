@@ -190,6 +190,95 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
         </div>
       </div>
 
+      {/* ── Live Order Accepted & Rider Coming Notification Banner ── */}
+      {activeTasks.length > 0 && (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #f0fdf4 0%, #fff7ed 100%)',
+            border: '1.5px solid #22c55e',
+            borderRadius: 16,
+            padding: '16px 20px',
+            marginBottom: 22,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 14,
+            boxShadow: '0 6px 20px rgba(22, 163, 74, 0.1)',
+          }}
+          role="status"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 240 }}>
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                background: '#dcfce7',
+                color: '#15803d',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Bike size={22} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: '#14532d', marginBottom: 2 }}>
+                🛵 Order Accepted! Rider is Coming to Pick Up Your Order
+              </div>
+              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.4 }}>
+                <strong>{activeTasks[0].riderName || 'Assigned Rider'}</strong> has accepted{' '}
+                <strong>{activeTasks[0].foodTitle}</strong> ({activeTasks[0].servingsRequired} servings) and is
+                heading to {activeTasks[0].pickupAddress || 'your pickup location'}.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => handleOpenChat(activeTasks[0])}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '9px 14px',
+                borderRadius: 10,
+                border: '1px solid #16a34a',
+                background: '#16a34a',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              <MessageSquare size={14} /> Chat with Rider
+            </button>
+            {activeTasks[0].riderPhone && (
+              <a
+                href={`tel:${activeTasks[0].riderPhone}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '9px 14px',
+                  borderRadius: 10,
+                  border: '1px solid #bbf7d0',
+                  background: '#ffffff',
+                  color: '#15803d',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  textDecoration: 'none',
+                }}
+              >
+                <Phone size={14} /> Call Rider
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── 2. Impact Metrics Strip ── */}
       <div className={styles.statsGrid}>
         <div className={styles.statCard}>

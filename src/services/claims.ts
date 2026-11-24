@@ -187,9 +187,25 @@ export function buildGoogleMapsNavigationUrl(
 export function buildGoogleMapsEmbedUrl(
   lat?: number | null,
   lng?: number | null,
-  address?: string | null
+  address?: string | null,
+  originLat?: number | null,
+  originLng?: number | null
 ): string | null {
-  if (typeof lat === 'number' && typeof lng === 'number' && !Number.isNaN(lat) && !Number.isNaN(lng)) {
+  const hasOrigin =
+    typeof originLat === 'number' &&
+    typeof originLng === 'number' &&
+    !Number.isNaN(originLat) &&
+    !Number.isNaN(originLng);
+  const hasDest =
+    typeof lat === 'number' && typeof lng === 'number' && !Number.isNaN(lat) && !Number.isNaN(lng);
+
+  if (hasOrigin && hasDest) {
+    return `https://maps.google.com/maps?saddr=${originLat},${originLng}&daddr=${lat},${lng}&dirflg=d&output=embed`;
+  }
+  if (hasOrigin && address && address.trim().length > 0) {
+    return `https://maps.google.com/maps?saddr=${originLat},${originLng}&daddr=${encodeURIComponent(address.trim())}&dirflg=d&output=embed`;
+  }
+  if (hasDest) {
     return `https://maps.google.com/maps?q=${lat},${lng}&z=16&output=embed`;
   }
   if (address && address.trim().length > 0) {
@@ -517,8 +533,8 @@ export const ClaimsService = {
                 await supabase.from('notifications').insert({
                   user_id: user.id,
                   type: 'rider_assigned',
-                  title: 'Donation Acceptance Confirmed!',
-                  message: `You accepted pickup at ${listing.pickup_address || 'donor location'}. Navigate now to collect the food.`,
+                  title: 'Rider Accepted Your Pickup!',
+                  message: `Order Accepted! Rider ${riderProf.name || 'ShareBite Rider'} is coming to pick up "${listing.title || 'your food donation'}" from ${listing.pickup_address || 'your pickup location'}.`,
                   data: {
                     food_listing_id: foodListingId,
                     delivery_task_id: foodListingId,
@@ -1079,6 +1095,23 @@ export const ClaimsService = {
 
       if (flErr) throw new Error(flErr.message);
 
+      if (status === 'going_to_pickup') {
+        try {
+          await supabase.from('notifications').insert({
+            user_id: user.id,
+            type: 'delivery_update',
+            title: 'Rider is On the Way to Pick Up Your Order!',
+            message: 'Rider is on the way to collect your order. Please keep the food ready for pickup.',
+            data: {
+              food_listing_id: taskId,
+              delivery_task_id: taskId,
+            },
+            related_food_id: taskId,
+            action_url: '/donor-dashboard',
+          });
+        } catch {}
+      }
+
       if (status === 'completed' || status === 'delivered' || status === 'cancelled') {
         await supabase
           .from('riders')
@@ -1226,16 +1259,56 @@ export const ClaimsService = {
       .eq('donor_id', donorId)
       .order('created_at', { ascending: false });
 
-    if (!error && data) return data;
+    let rows: any[] = !error && data ? data : [];
 
-    // Fallback: direct query to food_listings without fabricating dummy values
-    const { data: listings } = await supabase
-      .from('food_listings')
-      .select('*')
-      .eq('donor_id', donorId)
-      .order('created_at', { ascending: false });
+    if (rows.length === 0) {
+      // Fallback: direct query to food_listings without fabricating dummy values
+      const { data: listings } = await supabase
+        .from('food_listings')
+        .select('*')
+        .eq('donor_id', donorId)
+        .order('created_at', { ascending: false });
+      rows = listings || [];
+    }
 
-    return listings || [];
+    // Enrich any single-account / direct food_listings assigned to a rider without a delivery_tasks row
+    const needsEnrich = rows.some((r) => !r.delivery_task_id);
+    if (needsEnrich) {
+      const { data: assignedListings } = await supabase
+        .from('food_listings')
+        .select('id, assigned_rider_id, accepted_by_role, packaging_notes, status')
+        .eq('donor_id', donorId)
+        .not('assigned_rider_id', 'is', null);
+
+      if (assignedListings && assignedListings.length > 0) {
+        const riderIds = [...new Set(assignedListings.map((l: any) => l.assigned_rider_id).filter(Boolean))];
+        const { data: riderRows } = await supabase
+          .from('riders')
+          .select('id, user_id, name, phone')
+          .in('id', riderIds);
+        const riderMap = new Map((riderRows || []).map((r: any) => [r.id, r]));
+        const listingMap = new Map(assignedListings.map((l: any) => [l.id, l]));
+
+        rows = rows.map((row) => {
+          if (row.delivery_task_id) return row;
+          const fl = listingMap.get(row.id);
+          if (!fl || !fl.assigned_rider_id) return row;
+          const rider = riderMap.get(fl.assigned_rider_id);
+          return {
+            ...row,
+            delivery_task_id: row.id,
+            delivery_status: extractRiderStatusFromListing(fl),
+            assignment_type: 'rider_direct_pickup',
+            rider_id: fl.assigned_rider_id,
+            rider_user_id: rider?.user_id,
+            rider_name: rider?.name || 'Assigned Rider',
+            rider_phone: rider?.phone || '',
+          };
+        });
+      }
+    }
+
+    return rows;
   },
 
   // ── Real-time Subscriptions ──────────────────────────────────────────────
