@@ -1,0 +1,314 @@
+/* ============================================================================
+   We Care Foundation — Homepage Outreach Spotlight Banner
+   Matches ShareBite warm cream, burnt orange, and sage green design language
+   ============================================================================ */
+
+.sectionWrap {
+  max-width: 1360px;
+  margin: 4px auto 18px auto;
+  padding: 0 32px;
+  position: relative;
+  z-index: 3;
+}
+
+.bannerLink {
+  display: grid;
+  grid-template-columns: 30% 45% 25%;
+  align-items: stretch;
+  width: 100%;
+  min-height: 164px;
+  background: linear-gradient(90deg, #fff4e6 0%, #fdf1e2 56%, #fff8ef 100%);
+  border: 1.5px solid rgba(217, 119, 54, 0.36);
+  border-radius: 23px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  box-shadow: 0 10px 28px rgba(191, 91, 39, 0.08);
+  transition: border-color 200ms ease, box-shadow 200ms ease, background-color 200ms ease;
+}
+
+.bannerLink:hover {
+  border-color: rgba(191, 91, 39, 0.68);
+  box-shadow: 0 14px 36px rgba(191, 91, 39, 0.14);
+}
+
+.bannerLink:focus-visible {
+  outline: 3px solid #bf5b27;
+  outline-offset: 3px;
+}
+
+/* ── LEFT SECTION: FOUNDATION PHOTOGRAPH WITH CURVED ORANGE ACCENT ── */
+.visualCol {
+  position: relative;
+  min-height: 164px;
+  overflow: hidden;
+  background: #f4e6d4;
+}
+
+.visualPhoto {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 34%;
+  display: block;
+}
+
+/* Curved right edge mask + subtle burnt-orange accent ribbon */
+.curveOverlay {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  bottom: -1px;
+  width: 56px;
+  height: calc(100% + 2px);
+  pointer-events: none;
+  display: block;
+}
+
+/* ── CENTER SECTION: FOUNDATION INFORMATION ── */
+.contentCol {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px 28px 20px 22px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.eyebrowPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: #f6e1c8;
+  border: 1px solid rgba(191, 91, 39, 0.22);
+  color: #8c3f17;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.headingRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.heading {
+  margin: 0;
+  font-family: 'DM Sans', 'Inter', sans-serif;
+  font-size: 29px;
+  font-weight: 800;
+  color: #183254;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+}
+
+.burstAccent {
+  flex-shrink: 0;
+  transform: translateY(-4px);
+}
+
+.description {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #54493e;
+  max-width: 540px;
+}
+
+.ctaRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #bf5b27;
+  transition: color 200ms ease;
+}
+
+.bannerLink:hover .ctaRow {
+  color: #9e4517;
+}
+
+.ctaArrow {
+  transition: transform 200ms ease;
+}
+
+.bannerLink:hover .ctaArrow {
+  transform: translateX(3px);
+}
+
+/* ── RIGHT SECTION: OFFICIAL LOGO & OUTREACH BADGE ── */
+.logoCol {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 24px;
+  gap: 11px;
+}
+
+.logoCol::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 1px;
+  background: rgba(191, 91, 39, 0.16);
+}
+
+.logoWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(226, 212, 194, 0.7);
+  border-radius: 14px;
+  padding: 8px 16px;
+  max-width: 220px;
+  width: 100%;
+  height: 76px;
+}
+
+.logoImg {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.outreachBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 9999px;
+  background: #e5f1df;
+  border: 1px solid #cce2c3;
+  color: #355e2b;
+  font-family: 'DM Sans', 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.externalCorner {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  color: #b46a3b;
+  opacity: 0.65;
+  transition: opacity 200ms ease, color 200ms ease;
+}
+
+.bannerLink:hover .externalCorner {
+  opacity: 1;
+  color: #bf5b27;
+}
+
+/* ── TABLET RESPONSIVENESS ── */
+@media (max-width: 1120px) {
+  .bannerLink {
+    grid-template-columns: 32% 42% 26%;
+  }
+
+  .heading {
+    font-size: 24px;
+  }
+
+  .contentCol {
+    padding: 18px 18px 18px 14px;
+  }
+
+  .logoCol {
+    padding: 16px 16px;
+  }
+}
+
+@media (max-width: 900px) {
+  .sectionWrap {
+    padding: 0 20px;
+  }
+
+  .bannerLink {
+    grid-template-columns: 38% 62%;
+  }
+
+  .logoCol {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 14px 22px;
+    border-top: 1px solid rgba(191, 91, 39, 0.14);
+  }
+
+  .logoCol::before {
+    display: none;
+  }
+
+  .logoWrap {
+    max-width: 185px;
+    height: 60px;
+  }
+}
+
+/* ── MOBILE RESPONSIVENESS ── */
+@media (max-width: 640px) {
+  .sectionWrap {
+    padding: 0 16px;
+    margin: 8px auto 20px auto;
+  }
+
+  .bannerLink {
+    grid-template-columns: 1fr;
+    border-radius: 20px;
+  }
+
+  .visualCol {
+    height: 185px;
+    min-height: 185px;
+  }
+
+  .curveOverlay {
+    display: none;
+  }
+
+  .contentCol {
+    padding: 18px 18px 14px;
+  }
+
+  .heading {
+    font-size: 22px;
+  }
+
+  .description {
+    font-size: 13px;
+  }
+
+  .logoCol {
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 18px 18px;
+    gap: 10px;
+  }
+
+  .logoWrap {
+    max-width: 210px;
+    height: 66px;
+  }
+}

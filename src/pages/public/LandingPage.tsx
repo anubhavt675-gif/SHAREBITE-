@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
+import WeCareFoundationSection from '../../components/home/WeCareFoundationSection';
 import { ImpactService } from '../../services/impact';
 import type { CommunityImpact } from '../../types';
 import heroBoyExactImg from '../../assets/hero_boy_exact.png';
@@ -205,6 +206,11 @@ export default function LandingPage() {
 
         </div>
       </section>
+
+      {/* ============================================================
+          WE CARE FOUNDATION — NGO OUTREACH SPOTLIGHT BANNER
+          ============================================================ */}
+      <WeCareFoundationSection />
 
       {/* ============================================================
           FLOATING WHITE PILL IMPACT BANNER
