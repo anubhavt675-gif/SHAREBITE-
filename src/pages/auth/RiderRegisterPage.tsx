@@ -6,7 +6,6 @@ import {
   Bike, Heart, Leaf,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { getRoleDashboardPath } from '../../services/auth';
 import riderPhoto from '../../assets/rider_delivery_photo.jpg';
 import leafTopLeft from '../../assets/leaf_top_left.png';
 import leafBottomLeft from '../../assets/leaf_bottom_left.png';
@@ -86,9 +85,8 @@ export default function RiderRegisterPage({ initialMode }: { initialMode?: 'regi
     setSwitchingRole(true);
     setError(null);
     try {
-      const updated = await switchRole('rider');
-      const targetPath = getRoleDashboardPath(updated.role);
-      if (targetPath) navigate(targetPath, { replace: true });
+      await switchRole('rider');
+      navigate('/rider-dashboard', { replace: true });
     } catch (err: any) {
       setError(err?.message || 'Failed to switch role to Rider.');
     } finally {
@@ -107,9 +105,8 @@ export default function RiderRegisterPage({ initialMode }: { initialMode?: 'regi
       }
       setLoading(true);
       try {
-        const loggedInUser = await login(email.trim(), password, 'rider');
-        const targetPath = getRoleDashboardPath(loggedInUser.role);
-        if (targetPath) navigate(targetPath, { replace: true });
+        await login(email.trim(), password, 'rider');
+        navigate('/rider-dashboard', { replace: true });
       } catch (err: any) {
         const msg = err?.message || 'Login failed. Please check your credentials.';
         setError(msg.replace(/^ROLE_MISMATCH:\s*/, ''));
@@ -149,16 +146,14 @@ export default function RiderRegisterPage({ initialMode }: { initialMode?: 'regi
       });
 
       if (res.sessionExists) {
-        const targetPath = getRoleDashboardPath(res.user.role);
-        if (targetPath) navigate(targetPath, { replace: true });
+        navigate('/rider-dashboard', { replace: true });
         return;
       }
 
       // Try automatic login
       try {
-        const loggedInUser = await login(email.trim(), password, 'rider');
-        const targetPath = getRoleDashboardPath(loggedInUser.role);
-        if (targetPath) navigate(targetPath, { replace: true });
+        await login(email.trim(), password, 'rider');
+        navigate('/rider-dashboard', { replace: true });
         return;
       } catch {
         setSuccess(true);
@@ -174,6 +169,9 @@ export default function RiderRegisterPage({ initialMode }: { initialMode?: 'regi
     setError(null);
     setLoading(true);
     try {
+      try {
+        localStorage.setItem('sharebite_active_role_override', 'rider');
+      } catch {}
       await signInWithGoogle('rider');
     } catch (err: any) {
       setError(err.message || 'Google sign-in failed. Please try again.');

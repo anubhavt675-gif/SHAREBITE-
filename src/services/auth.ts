@@ -4,6 +4,7 @@ import type { CanonicalRole, User, UserRole } from '../types';
 
 const LEGACY_MOCK_STORAGE_KEY = 'sharebite_mock_session_user';
 const OAUTH_ROLE_KEY = 'sharebite_oauth_role';
+export const ACTIVE_ROLE_OVERRIDE_KEY = 'sharebite_active_role_override';
 const COMMUNITY_IMPACT_CACHE_KEY = 'sharebite_community_impact';
 const PROFILE_FETCH_TIMEOUT_MS = 10000;
 
@@ -135,12 +136,22 @@ function mapProfileToUser(profile: Record<string, any>): User {
     (typeof profile.organization_name === 'string' && profile.organization_name.trim()) ||
     fallbackName;
 
+  let effectiveRole = profile.role as UserRole;
+  try {
+    const override = localStorage.getItem(ACTIVE_ROLE_OVERRIDE_KEY);
+    if (override && (override === 'rider' || override === 'donor' || override === 'ngo')) {
+      effectiveRole = override as UserRole;
+    }
+  } catch {
+    // Ignore storage errors
+  }
+
   return {
     id: profile.id,
     name: resolvedName,
     email,
     phone: profile.phone || '',
-    role: profile.role as UserRole,
+    role: effectiveRole,
     avatar: profile.avatar_url || undefined,
     bio: profile.bio || undefined,
     organizationName: profile.organization_name || undefined,
@@ -314,6 +325,12 @@ export const AuthService = {
       const actualCanonical = normalizeRole(loadedUser.role)!;
       const expectedCanonical = expectedRole ? normalizeRole(expectedRole) : null;
 
+      if (expectedCanonical) {
+        try {
+          localStorage.setItem(ACTIVE_ROLE_OVERRIDE_KEY, expectedCanonical);
+        } catch {}
+      }
+
       // Admins have dedicated platform oversight access and can sign in through any portal.
       if (expectedCanonical && actualCanonical !== 'admin' && actualCanonical !== expectedCanonical) {
         // If a donor attempts to log in as rider, or vice-versa, seamlessly activate the expected role
@@ -327,6 +344,7 @@ export const AuthService = {
           } catch (switchErr) {
             console.warn('Auto role switch failed during login:', switchErr);
           }
+          return { ...loadedUser, role: expectedCanonical as UserRole };
         }
 
         await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
@@ -334,6 +352,10 @@ export const AuthService = {
         throw new Error(
           `ROLE_MISMATCH: Your account is registered as a "${label}". Please log in via the ${label} portal at ${portal}.`
         );
+      }
+
+      if (expectedCanonical && (expectedCanonical === 'rider' || expectedCanonical === 'donor')) {
+        return { ...loadedUser, role: expectedCanonical as UserRole };
       }
 
       return loadedUser;
@@ -542,6 +564,12 @@ export const AuthService = {
     const existingResult = await this.fetchAuthoritativeProfile(activeUser.id);
     const parsedIntended = normalizeRole(rawIntendedRole);
 
+    if (parsedIntended && (parsedIntended === 'rider' || parsedIntended === 'donor')) {
+      try {
+        localStorage.setItem(ACTIVE_ROLE_OVERRIDE_KEY, parsedIntended);
+      } catch {}
+    }
+
     if (existingResult.status === 'ok') {
       // If user signed in via Google on Rider page (or Donor page) with explicit intended role,
       // seamlessly switch/activate that role so they enter the correct dashboard.
@@ -557,6 +585,7 @@ export const AuthService = {
         } catch (switchErr) {
           console.warn('OAuth role switch warning:', switchErr);
         }
+        return { ...existingResult.user, role: parsedIntended as UserRole };
       }
       return existingResult.user;
     }
@@ -621,6 +650,11 @@ export const AuthService = {
   async logout(): Promise<void> {
     clearLegacyAuthCaches();
     try {
+      localStorage.removeItem(ACTIVE_ROLE_OVERRIDE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+    try {
       await supabase.auth.signOut({ scope: 'local' });
     } catch {
       try {
@@ -672,6 +706,13 @@ export const AuthService = {
 
     const userId = session.user.id;
 
+    // Immediately persist user's chosen active role
+    try {
+      localStorage.setItem(ACTIVE_ROLE_OVERRIDE_KEY, canonical);
+    } catch {
+      // Ignore storage errors
+    }
+
     // 1. Try secure RPC function first
     const { data: rpcData, error: rpcError } = await supabase.rpc('switch_user_role', {
       p_target_role: canonical,
@@ -716,11 +757,11 @@ export const AuthService = {
     // Re-fetch authoritative profile
     const refetched = await this.fetchAuthoritativeProfile(userId);
     if (refetched.status === 'ok') {
-      return refetched.user;
+      return { ...refetched.user, role: canonical as UserRole };
     }
 
     if (rpcData && typeof rpcData === 'object') {
-      return mapProfileToUser(rpcData);
+      return { ...mapProfileToUser(rpcData), role: canonical as UserRole };
     }
 
     throw new Error('Failed to verify profile after role switch.');
