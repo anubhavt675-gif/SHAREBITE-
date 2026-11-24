@@ -1,5 +1,6 @@
 import React from 'react';
-import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Home, Sparkles } from 'lucide-react';
+import { isChunkLoadError } from '../../lib/lazyWithRetry';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -23,6 +24,20 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     console.error('ShareBite ErrorBoundary caught an error:', error, info.componentStack);
+
+    // If chunk loading failed because a new deployment replaced assets, auto-reload once
+    if (isChunkLoadError(error)) {
+      let lastReload = 0;
+      try {
+        lastReload = Number(sessionStorage.getItem('sharebite_chunk_reload_ts') || '0');
+      } catch {}
+      if (Date.now() - lastReload > 15000) {
+        try {
+          sessionStorage.setItem('sharebite_chunk_reload_ts', Date.now().toString());
+        } catch {}
+        window.location.reload();
+      }
+    }
   }
 
   private handleRetry = () => {
@@ -30,6 +45,9 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   };
 
   private handleReload = () => {
+    try {
+      sessionStorage.removeItem('sharebite_chunk_reload_ts');
+    } catch {}
     window.location.reload();
   };
 
@@ -40,6 +58,8 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   render() {
     if (this.state.hasError) {
+      const isChunk = isChunkLoadError(this.state.error);
+
       return (
         <div
           role="alert"
@@ -60,7 +80,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               width: '100%',
               background: '#FFFFFF',
               borderRadius: 16,
-              border: '1px solid #FDE68A',
+              border: isChunk ? '1.5px solid #FDBA74' : '1px solid #FDE68A',
               boxShadow: '0 10px 30px rgba(28, 25, 23, 0.08)',
               padding: '32px 28px',
               textAlign: 'center',
@@ -71,25 +91,27 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                 width: 56,
                 height: 56,
                 borderRadius: '50%',
-                background: '#FEF2F2',
-                color: '#DC2626',
+                background: isChunk ? '#FFF7ED' : '#FEF2F2',
+                color: isChunk ? '#EA580C' : '#DC2626',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 marginBottom: 16,
               }}
             >
-              <AlertTriangle size={28} />
+              {isChunk ? <Sparkles size={28} /> : <AlertTriangle size={28} />}
             </div>
 
             <h1 style={{ margin: '0 0 8px 0', fontSize: '1.35rem', fontWeight: 700 }}>
-              {this.props.fallbackTitle || 'Something went wrong'}
+              {isChunk ? 'New Update Available' : this.props.fallbackTitle || 'Something went wrong'}
             </h1>
             <p style={{ margin: '0 0 18px 0', fontSize: '0.95rem', color: '#57534E', lineHeight: 1.5 }}>
-              ShareBite hit an unexpected error while rendering this view. Your account data is safe.
+              {isChunk
+                ? 'A fresh update of ShareBite was just deployed. Please reload the page to load the latest features.'
+                : 'ShareBite hit an unexpected error while rendering this view. Your account data is safe.'}
             </p>
 
-            {this.state.error?.message && (
+            {this.state.error?.message && !isChunk && (
               <div
                 style={{
                   background: '#FAFAF9',
@@ -109,44 +131,48 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
-                onClick={this.handleRetry}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '10px 18px',
-                  borderRadius: 10,
-                  border: 'none',
-                  background: '#EA580C',
-                  color: '#FFFFFF',
-                  fontWeight: 600,
-                  fontSize: '0.92rem',
-                  cursor: 'pointer',
-                }}
-              >
-                <RefreshCw size={16} />
-                Try Again
-              </button>
-
-              <button
-                type="button"
                 onClick={this.handleReload}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 8,
-                  padding: '10px 18px',
+                  padding: '10px 22px',
                   borderRadius: 10,
-                  border: '1px solid #E7E5E4',
-                  background: '#FFFFFF',
-                  color: '#1C1917',
-                  fontWeight: 600,
+                  border: 'none',
+                  background: '#EA580C',
+                  color: '#FFFFFF',
+                  fontWeight: 700,
                   fontSize: '0.92rem',
                   cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(234, 88, 12, 0.25)',
                 }}
               >
-                Reload Page
+                <RefreshCw size={16} />
+                {isChunk ? 'Update & Reload Page' : 'Reload Page'}
               </button>
+
+              {!isChunk && (
+                <button
+                  type="button"
+                  onClick={this.handleRetry}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '10px 18px',
+                    borderRadius: 10,
+                    border: '1px solid #E7E5E4',
+                    background: '#FFFFFF',
+                    color: '#1C1917',
+                    fontWeight: 600,
+                    fontSize: '0.92rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <RefreshCw size={16} />
+                  Try Again
+                </button>
+              )}
 
               <button
                 type="button"
