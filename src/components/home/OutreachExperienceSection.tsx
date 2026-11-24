@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Camera,
   ChevronLeft,
@@ -14,10 +14,61 @@ import {
   OUTREACH_PHOTOS,
   OUTREACH_VIDEOS,
   WE_CARE_FOUNDATION,
+  type OutreachVideoItem,
 } from '../../config/outreachPartners';
 import styles from './OutreachExperienceSection.module.css';
 
 type FilterTab = 'all' | 'photos' | 'videos';
+
+function AutoPlayVisitVideo({ vid }: { vid: OutreachVideoItem }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = true;
+    el.defaultMuted = true;
+
+    const tryPlay = () => {
+      if (el.paused) {
+        el.play().catch(() => {});
+      }
+    };
+
+    tryPlay();
+
+    if (typeof IntersectionObserver !== 'undefined') {
+      const obs = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              tryPlay();
+            }
+          }
+        },
+        { threshold: 0.2 }
+      );
+      obs.observe(el);
+      return () => obs.disconnect();
+    }
+  }, [vid.src]);
+
+  return (
+    <video
+      ref={videoRef}
+      className={styles.videoEl}
+      src={vid.src}
+      poster={vid.poster}
+      autoPlay
+      loop
+      muted
+      playsInline
+      controls
+      preload="auto"
+      aria-label={vid.title}
+    />
+  );
+}
 
 export default function OutreachExperienceSection({ compact = false }: { compact?: boolean }) {
   const [tab, setTab] = useState<FilterTab>('all');
@@ -111,15 +162,7 @@ export default function OutreachExperienceSection({ compact = false }: { compact
               {OUTREACH_VIDEOS.map((vid) => (
                 <article key={vid.id} className={styles.videoCard}>
                   <div className={styles.videoPlayerWrap}>
-                    <video
-                      className={styles.videoEl}
-                      src={vid.src}
-                      poster={vid.poster}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      aria-label={vid.title}
-                    />
+                    <AutoPlayVisitVideo vid={vid} />
                     <span className={styles.videoBadge}>
                       <Play size={11} fill="currentColor" aria-hidden="true" /> Field Visit Video
                     </span>
