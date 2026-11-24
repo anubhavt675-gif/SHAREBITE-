@@ -417,6 +417,7 @@ create trigger trg_delivery_task_lifecycle_events
 
 -- 8A. Get or create authorized private conversation (DONOR_RIDER, RIDER_NGO, or DONOR_NGO)
 drop function if exists public.get_or_create_delivery_conversation(uuid, uuid);
+drop function if exists public.get_or_create_delivery_conversation(uuid, uuid, text);
 create or replace function public.get_or_create_delivery_conversation(
   p_food_listing_id   uuid,
   p_delivery_task_id  uuid default null,
@@ -533,6 +534,7 @@ revoke all on function public.get_or_create_delivery_conversation(uuid, uuid, te
 grant execute on function public.get_or_create_delivery_conversation(uuid, uuid, text) to authenticated;
 
 -- 8B. Mode A: NGO Confirms Incoming Capacity -> Unlocks Rider<->NGO Chat & Notifies Rider/Donor
+drop function if exists public.ngo_confirm_incoming_capacity(uuid);
 create or replace function public.ngo_confirm_incoming_capacity(p_claim_id uuid)
 returns jsonb
 security definer
@@ -619,6 +621,7 @@ revoke all on function public.ngo_confirm_incoming_capacity(uuid) from public;
 grant execute on function public.ngo_confirm_incoming_capacity(uuid) to authenticated;
 
 -- 8C. Mode A: NGO Declines Incoming Assignment -> Auto-Reassigns Next Eligible NGO (No Fake NGO)
+drop function if exists public.ngo_decline_incoming_assignment(uuid, text);
 create or replace function public.ngo_decline_incoming_assignment(
   p_claim_id uuid,
   p_reason   text default null
@@ -792,6 +795,7 @@ revoke all on function public.ngo_decline_incoming_assignment(uuid, text) from p
 grant execute on function public.ngo_decline_incoming_assignment(uuid, text) to authenticated;
 
 -- 8D. Mode B: Complete Direct NGO Collection (Records Receipt + Closes Donor-NGO Chat + Activity Log)
+drop function if exists public.ngo_complete_direct_collection(uuid, numeric, text, boolean, text);
 create or replace function public.ngo_complete_direct_collection(
   p_claim_id          uuid,
   p_quantity_received numeric default null,
@@ -934,6 +938,7 @@ revoke all on function public.ngo_complete_direct_collection(uuid, numeric, text
 grant execute on function public.ngo_complete_direct_collection(uuid, numeric, text, boolean, text) to authenticated;
 
 -- 8E. Explicit Close Delivery Conversations RPC (Idempotent)
+drop function if exists public.close_delivery_conversations(uuid, uuid);
 create or replace function public.close_delivery_conversations(
   p_delivery_task_id uuid default null,
   p_food_listing_id  uuid default null
