@@ -1,15 +1,22 @@
 .chatContainer {
-  max-width: 1320px;
+  width: 100%;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 24px;
-  height: calc(100vh - 90px);
+  padding: 0;
+  height: calc(100dvh - 140px);
+  min-height: 460px;
+  max-height: 760px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .chatWrapper {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: 290px minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
   background: #ffffff;
   border: 1px solid var(--color-border);
   border-radius: 20px;
@@ -17,6 +24,7 @@
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05);
   flex: 1;
   min-height: 0;
+  box-sizing: border-box;
 }
 
 /* Sidebar Conversations List */
@@ -26,6 +34,8 @@
   flex-direction: column;
   background: #faf8f5;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .sidebarHeader {
@@ -194,21 +204,29 @@
   flex-direction: column;
   background: #fdfcf9;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .chatHeader {
-  padding: 16px 24px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--color-border);
   background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .headerUserInfo {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  flex: 1;
 }
 
 .headerName {
@@ -253,12 +271,14 @@
 }
 
 .msgBubble {
-  padding: 12px 16px;
+  padding: 11px 15px;
   border-radius: 18px;
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.45;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .msgBubbleMine {
@@ -320,13 +340,14 @@
   color: #334155;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .chatContainer {
-    padding: 10px;
-    height: calc(100vh - 80px);
+    padding: 0;
+    height: calc(100dvh - 125px);
+    min-height: 420px;
   }
   .chatWrapper {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .hideOnMobile {
     display: none !important;
@@ -350,26 +371,33 @@
   font-size: 11px;
   font-weight: 600;
   margin: 8px 0;
+  text-align: center;
+  max-width: 92%;
 }
 
-/* Quick Replies */
+/* Quick Replies — wrapped cleanly inside container so page never slides horizontally */
 .quickReplies {
   display: flex;
-  gap: 8px;
-  padding: 8px 24px;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 18px;
+  border-top: 1px solid #f1ece4;
+  background: #fffcf8;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .quickReplyBtn {
   background: #f1ece4;
   border: none;
   border-radius: 9999px;
-  padding: 6px 14px;
-  font-size: 12px;
+  padding: 5px 12px;
+  font-size: 11.5px;
   color: #44403c;
   cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.15s ease;
+  white-space: normal;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .quickReplyBtn:hover {

@@ -1,11 +1,17 @@
 .shell {
   display: flex;
   min-height: 100vh;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
   background: var(--color-bg);
 }
 
 .main {
   flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
   padding-top: var(--navbar-height);
   min-height: 100vh;
   transition: padding-left var(--transition-slow);
@@ -22,6 +28,8 @@
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 @media (max-width: 768px) {
