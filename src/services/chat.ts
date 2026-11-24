@@ -73,6 +73,7 @@ export class ChatService {
     options: {
       relatedListingId?: string;
       relatedTaskId?: string;
+      conversationType?: 'DONOR_RIDER' | 'RIDER_NGO' | 'DONOR_NGO';
       title?: string;
     }
   ): Promise<Conversation> {
@@ -86,13 +87,28 @@ export class ChatService {
         : undefined;
 
     if (options.relatedListingId && isValidUUID(options.relatedListingId)) {
-      const { data: rpcConvId, error: rpcErr } = await supabase.rpc(
+      const rpcParams: Record<string, any> = {
+        p_food_listing_id: options.relatedListingId,
+        p_delivery_task_id: safeTaskId || null,
+      };
+      if (options.conversationType) {
+        rpcParams.p_conversation_type = options.conversationType;
+      }
+
+      let { data: rpcConvId, error: rpcErr } = await supabase.rpc(
         'get_or_create_delivery_conversation',
-        {
+        rpcParams
+      );
+
+      // Backward compatibility with 2-arg signature if 3-arg migration not yet applied
+      if (rpcErr && rpcErr.code === 'PGRST202' && options.conversationType) {
+        const retry = await supabase.rpc('get_or_create_delivery_conversation', {
           p_food_listing_id: options.relatedListingId,
           p_delivery_task_id: safeTaskId || null,
-        }
-      );
+        });
+        rpcConvId = retry.data;
+        rpcErr = retry.error;
+      }
 
       if (!rpcErr && rpcConvId && isValidUUID(rpcConvId)) {
         const { data: conv } = await supabase
@@ -800,6 +816,7 @@ export class ChatService {
     content: string;
     messageType?: 'text' | 'image' | 'location' | 'system';
     metadata?: Record<string, any>;
+    clientMessageId?: string;
   }): Promise<ChatMessage> {
     if (!isValidUUID(params.conversationId) || !isValidUUID(params.senderId)) {
       throw new Error('Invalid conversation or sender ID');
@@ -821,17 +838,49 @@ export class ChatService {
       }
     }
 
-    const { data, error } = await supabase
+    const clientMsgId =
+      params.clientMessageId ||
+      (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
+
+    const basePayload: Record<string, any> = {
+      conversation_id: params.conversationId,
+      sender_id: params.senderId,
+      content: trimmed,
+      message_type: params.messageType || 'text',
+      metadata: params.metadata || {},
+      client_message_id: clientMsgId,
+    };
+
+    let { data, error } = await supabase
       .from('messages')
-      .insert({
-        conversation_id: params.conversationId,
-        sender_id: params.senderId,
-        content: trimmed,
-        message_type: params.messageType || 'text',
-        metadata: params.metadata || {},
-      })
+      .insert(basePayload)
       .select('*, sender:sender_id(id, full_name, organization_name, avatar_url, role)')
       .single();
+
+    // Graceful fallback if client_message_id column hasn't been added yet
+    if (error && /client_message_id/i.test(error.message || '')) {
+      delete basePayload.client_message_id;
+      const retry = await supabase
+        .from('messages')
+        .insert(basePayload)
+        .select('*, sender:sender_id(id, full_name, organization_name, avatar_url, role)')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    // Idempotent duplicate recovery: if client_message_id already exists, return existing row
+    if (error && error.code === '23505') {
+      const { data: existing } = await supabase
+        .from('messages')
+        .select('*, sender:sender_id(id, full_name, organization_name, avatar_url, role)')
+        .eq('conversation_id', params.conversationId)
+        .eq('client_message_id', clientMsgId)
+        .maybeSingle();
+      if (existing) return mapMessageRow(existing);
+    }
 
     if (error || !data) {
       if (/CONVERSATION_CLOSED|row-level security|new row violates/i.test(error?.message || '')) {

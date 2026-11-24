@@ -414,7 +414,26 @@ export default function RiderDashboardPage() {
       const conv = await ChatService.openDeliveryConversation(userId, task.donorId, {
         relatedListingId: task.foodListingId,
         relatedTaskId: task.id,
+        conversationType: 'DONOR_RIDER',
         title: task.foodTitle || 'Pickup Chat',
+      });
+      navigate(`/chat/${conv.id}`);
+    } catch {
+      navigate('/chat');
+    }
+  };
+
+  const handleOpenNgoChat = async (task: DeliveryTask) => {
+    if (!userId || !task.ngoId) {
+      navigate('/chat');
+      return;
+    }
+    try {
+      const conv = await ChatService.openDeliveryConversation(userId, task.ngoId, {
+        relatedListingId: task.foodListingId,
+        relatedTaskId: task.id,
+        conversationType: 'RIDER_NGO',
+        title: `${task.foodTitle || 'Delivery'} · ${task.ngoOrgName || task.ngoName || 'NGO'}`,
       });
       navigate(`/chat/${conv.id}`);
     } catch {
@@ -759,6 +778,17 @@ export default function RiderDashboardPage() {
                   </span>
                 )}
               </button>
+              {activeTask.ngoId && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenNgoChat(activeTask)}
+                  className={styles.chatActionBtn}
+                  style={{ borderColor: '#bbf7d0', color: '#15803d', background: '#f0fdf4' }}
+                  data-testid="rider-chat-ngo-btn"
+                >
+                  <MessageSquare size={14} /> Chat with NGO
+                </button>
+              )}
               {activeTask.donorPhone && (
                 <a
                   href={`tel:${activeTask.donorPhone}`}

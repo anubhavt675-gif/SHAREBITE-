@@ -379,12 +379,20 @@ export class NGOOperationsService {
     return ClaimsService.acceptDonation(foodListingId, servings, undefined, notes, collectionMethod);
   }
 
-  static async confirmIncomingCapacity(claimId: string): Promise<boolean> {
+  static async confirmIncomingCapacity(claimId: string): Promise<{ confirmed: boolean; conversationId?: string }> {
     if (!isValidUUID(claimId)) throw new Error('Invalid claim ID');
     const { data, error } = await supabase.rpc('ngo_confirm_incoming_capacity', {
       p_claim_id: claimId,
     });
-    if (!error) return !!data;
+    if (!error) {
+      if (data && typeof data === 'object') {
+        return {
+          confirmed: Boolean((data as any).confirmed ?? true),
+          conversationId: (data as any).conversation_id || undefined,
+        };
+      }
+      return { confirmed: Boolean(data) };
+    }
 
     // Fallback direct update if migration not yet applied
     const { error: updErr } = await supabase
@@ -398,7 +406,31 @@ export class NGOOperationsService {
     if (updErr && !/column/i.test(updErr.message || '')) {
       throw new Error(updErr.message);
     }
-    return true;
+    return { confirmed: true };
+  }
+
+  static async declineIncomingAssignment(
+    claimId: string,
+    reason?: string
+  ): Promise<{ declined: boolean; reassigned: boolean; nextNgoName?: string }> {
+    if (!isValidUUID(claimId)) throw new Error('Invalid claim ID');
+    const { data, error } = await supabase.rpc('ngo_decline_incoming_assignment', {
+      p_claim_id: claimId,
+      p_reason: reason || 'Capacity currently unavailable',
+    });
+    if (!error && data && typeof data === 'object') {
+      return {
+        declined: Boolean((data as any).declined ?? true),
+        reassigned: Boolean((data as any).reassigned),
+        nextNgoName: (data as any).next_ngo_name || undefined,
+      };
+    }
+    if (error && error.code !== 'PGRST202') {
+      throw new Error(error.message || 'Could not decline incoming assignment');
+    }
+    // Fallback if new RPC not yet applied
+    await ClaimsService.cancelClaim(claimId, reason || 'Declined by NGO');
+    return { declined: true, reassigned: false };
   }
 
   /**

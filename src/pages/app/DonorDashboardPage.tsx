@@ -11,6 +11,7 @@ import { ImpactService } from '../../services/impact';
 import { ClaimsService, type DeliveryTask } from '../../services/claims';
 import { ChatService } from '../../services/chat';
 import { NGOService } from '../../services/ngo';
+import { NGOOperationsService, type NGOFoodRequest } from '../../services/ngoOperations';
 import LiveTrackingMap from '../../components/map/LiveTrackingMap';
 import { formatDistanceToNow } from 'date-fns';
 import type { FoodListing, ImpactStats, NearbyNGO } from '../../types';
@@ -33,6 +34,7 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
   const [listings, setListings] = useState<FoodListing[]>([]);
   const [activeTasks, setActiveTasks] = useState<DonorLiveTask[]>([]);
   const [nearbyNgos, setNearbyNgos] = useState<NearbyNGO[]>([]);
+  const [openNgoRequests, setOpenNgoRequests] = useState<NGOFoodRequest[]>([]);
   const [impact, setImpact] = useState<ImpactStats | null>(null);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -49,14 +51,16 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
     else setRefreshing(true);
 
     try {
-      const [listingsData, impactData, donorDashboardRows] = await Promise.all([
+      const [listingsData, impactData, donorDashboardRows, openReqs] = await Promise.all([
         DonationService.getMyListings(userId),
         ImpactService.getUserImpact(userId, 'donor'),
         ClaimsService.getDonorDashboardListings(userId),
+        NGOOperationsService.getOpenFoodRequests().catch(() => [] as NGOFoodRequest[]),
       ]);
 
       setListings(listingsData);
       setImpact(impactData);
+      setOpenNgoRequests(openReqs);
 
       // Extract active delivery tasks with real coordinates, codes & rider details
       const liveTasks: DonorLiveTask[] = [];
@@ -635,6 +639,52 @@ export default function DonorDashboardPage(_props: DonorDashboardProps) {
           </div>
         )}
       </section>
+
+      {/* ── Active NGO Food Requests (Real Supabase Data) ── */}
+      {openNgoRequests.length > 0 && (
+        <section style={{ marginBottom: 32 }} data-testid="donor-ngo-requests-section">
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>
+              <Users size={20} color="#ea580c" /> Active NGO Food Requests ({openNgoRequests.length})
+            </h2>
+            <Link to="/donations/new" style={{ color: '#ea580c', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}>
+              Donate to Fulfill &rarr;
+            </Link>
+          </div>
+          <div className={styles.donationsGrid}>
+            {openNgoRequests.slice(0, 3).map((req) => (
+              <div key={req.id} className={styles.donationCard}>
+                <div className={styles.cardBody}>
+                  <h3 className={styles.cardTitle}>{req.title}</h3>
+                  <div className={styles.cardMeta}>
+                    <span className={styles.metaItem}>
+                      <Utensils size={14} /> {req.requiredQuantity} {req.quantityUnit} · {req.foodType}
+                    </span>
+                    {req.ngoName && (
+                      <span className={styles.metaItem}>
+                        <ShieldCheck size={14} color="#16a34a" /> {req.ngoName}
+                      </span>
+                    )}
+                    {req.city && (
+                      <span className={styles.metaItem}>
+                        <MapPin size={14} /> {req.city}
+                      </span>
+                    )}
+                  </div>
+                  <div className={styles.cardFooter}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: req.urgency === 'urgent' || req.urgency === 'high' ? '#dc2626' : '#ea580c', textTransform: 'uppercase' }}>
+                      {req.urgency} priority
+                    </span>
+                    <Link to="/donations/new" className={styles.viewDetailsLink}>
+                      Fulfill Request <ArrowRight size={13} />
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── Nearby Verified NGOs Strip (Real Supabase data) ── */}
       {nearbyNgos.length > 0 && (

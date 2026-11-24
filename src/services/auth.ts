@@ -188,18 +188,18 @@ function mapProfileToUser(profile: Record<string, any>): User {
     location:
       profile.latitude != null && profile.longitude != null
         ? {
-            latitude: Number(profile.latitude),
-            longitude: Number(profile.longitude),
-            address: profile.address || '',
-            city: profile.city || '',
-          }
+          latitude: Number(profile.latitude),
+          longitude: Number(profile.longitude),
+          address: profile.address || '',
+          city: profile.city || '',
+        }
         : profile.address
           ? {
-              latitude: 0,
-              longitude: 0,
-              address: profile.address,
-              city: profile.city || '',
-            }
+            latitude: 0,
+            longitude: 0,
+            address: profile.address,
+            city: profile.city || '',
+          }
           : undefined,
     isVerified: Boolean(profile.is_verified),
     verificationStatus: profile.verification_status || (profile.is_verified ? 'verified' : 'pending'),
@@ -340,7 +340,7 @@ export const AuthService = {
       }
 
       if (profileResult.status === 'invalid_role') {
-        await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => { });
         throw new Error(
           'INVALID_ROLE: Your account does not have a valid role assigned. Please contact support.'
         );
@@ -377,7 +377,7 @@ export const AuthService = {
         }
 
         clearRoleOverride();
-        await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => { });
         const { label, portal } = getReadableRoleAndPortal(actualCanonical);
         throw new Error(
           `ROLE_MISMATCH: Your account is registered as a "${label}". Please log in via the ${label} portal at ${portal}.`

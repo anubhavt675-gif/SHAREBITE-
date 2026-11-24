@@ -304,6 +304,7 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
   const [cancelling, setCancelling] = useState(false);
   const [capacityConfirmed, setCapacityConfirmed] = useState(false);
   const [confirmingCapacity, setConfirmingCapacity] = useState(false);
+  const [declining, setDeclining] = useState(false);
   const [error, setError] = useState('');
 
   const handleOpenChat = async () => {
@@ -376,6 +377,22 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
       setError(e?.message || 'Failed to confirm capacity');
     } finally {
       setConfirmingCapacity(false);
+    }
+  };
+
+  const handleDeclineIncoming = async () => {
+    if (!window.confirm('Decline this incoming delivery? ShareBite will automatically look for another nearby eligible NGO.')) {
+      return;
+    }
+    setError('');
+    setDeclining(true);
+    try {
+      await NGOOperationsService.declineIncomingAssignment(claim.id, 'NGO capacity currently unavailable');
+      onRefresh();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to decline incoming delivery');
+    } finally {
+      setDeclining(false);
     }
   };
 
@@ -481,6 +498,7 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
           dropoffLat={claim.dropoffLat}
           dropoffLng={claim.dropoffLng}
           dropoffLabel={claim.ngoName || 'Your NGO'}
+          viewerRole="ngo"
           height={200}
         />
       )}
@@ -524,10 +542,28 @@ function ClaimCard({ claim, userId, onRefresh }: { claim: NgoClaim; userId?: str
         )}
 
         {canConfirmCapacity && (
-          <button className={`${styles.btn} ${styles.btnOutline}`} onClick={handleConfirmCapacity} disabled={confirmingCapacity}>
-            {confirmingCapacity ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-            Confirm Capacity
-          </button>
+          <>
+            <button
+              className={`${styles.btn} ${styles.btnOutline}`}
+              onClick={handleConfirmCapacity}
+              disabled={confirmingCapacity || declining}
+              data-testid="confirm-capacity-btn"
+            >
+              {confirmingCapacity ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+              Confirm Capacity
+            </button>
+            {claim.deliveryTaskId && !['delivered', 'completed'].includes(claim.deliveryStatus || '') && (
+              <button
+                className={`${styles.btn} ${styles.btnDanger}`}
+                onClick={handleDeclineIncoming}
+                disabled={declining || confirmingCapacity}
+                data-testid="decline-incoming-btn"
+              >
+                {declining ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
+                Decline
+              </button>
+            )}
+          </>
         )}
 
         {capacityConfirmed && !isDirectPickup && (

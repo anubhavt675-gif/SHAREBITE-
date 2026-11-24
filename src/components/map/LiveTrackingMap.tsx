@@ -18,7 +18,7 @@ export interface LiveTrackingMapProps {
   dropoffLng?: number | null;
   dropoffLabel?: string;
   height?: number;
-  viewerRole?: 'donor' | 'rider';
+  viewerRole?: 'donor' | 'rider' | 'ngo';
   riderCoordOverride?: { latitude: number; longitude: number; recordedAt?: string } | null;
   riderName?: string;
   riderPhone?: string;
@@ -247,15 +247,32 @@ export default function LiveTrackingMap({
   const rawRiderLng = riderLoc?.longitude ?? riderCoordOverride?.longitude ?? null;
   const rawRecordedAt = riderLoc?.recordedAt ?? riderCoordOverride?.recordedAt ?? null;
 
+  // Privacy guard: Donors do not receive continuous live rider GPS after food pickup handover
+  const hideLiveGpsForDonorPostPickup =
+    viewerRole === 'donor' && ['food_collected', 'in_transit', 'delivered', 'completed'].includes(taskStatus);
+  const effectiveRiderLat = hideLiveGpsForDonorPostPickup ? null : rawRiderLat;
+  const effectiveRiderLng = hideLiveGpsForDonorPostPickup ? null : rawRiderLng;
+
+  // Stale GPS check (> 60s old during an active delivery)
+  const isGpsStale = useMemo(() => {
+    if (!rawRecordedAt || ['completed', 'cancelled', 'delivered'].includes(taskStatus)) return false;
+    const ageMs = Date.now() - new Date(rawRecordedAt).getTime();
+    return Number.isFinite(ageMs) && ageMs > 60_000;
+  }, [rawRecordedAt, taskStatus]);
+
   // Smooth marker coordinate interpolation between GPS updates
   const [animRiderPos, setAnimRiderPos] = useState<[number, number] | null>(
-    rawRiderLat != null && rawRiderLng != null ? [rawRiderLat, rawRiderLng] : null
+    effectiveRiderLat != null && effectiveRiderLng != null ? [effectiveRiderLat, effectiveRiderLng] : null
   );
   const prevRiderPosRef = useRef<[number, number] | null>(null);
 
   useEffect(() => {
-    if (rawRiderLat == null || rawRiderLng == null) return;
-    const nextPos: [number, number] = [rawRiderLat, rawRiderLng];
+    if (effectiveRiderLat == null || effectiveRiderLng == null) {
+      setAnimRiderPos(null);
+      prevRiderPosRef.current = null;
+      return;
+    }
+    const nextPos: [number, number] = [effectiveRiderLat, effectiveRiderLng];
     const startPos = prevRiderPosRef.current;
     prevRiderPosRef.current = nextPos;
 
@@ -283,16 +300,16 @@ export default function LiveTrackingMap({
     return () => {
       if (frameId) cancelAnimationFrame(frameId);
     };
-  }, [rawRiderLat, rawRiderLng]);
+  }, [effectiveRiderLat, effectiveRiderLng]);
 
   const headingToDropoff = ['food_collected', 'in_transit', 'delivered'].includes(taskStatus);
   const targetLat = headingToDropoff && hasDropoff ? dropoffLat! : hasPickup ? pickupLat! : null;
   const targetLng = headingToDropoff && hasDropoff ? dropoffLng! : hasPickup ? pickupLng! : null;
 
-  const originPosLat = rawRiderLat ?? (hasPickup ? pickupLat! : null);
-  const originPosLng = rawRiderLng ?? (hasPickup ? pickupLng! : null);
-  const destLat = rawRiderLat != null ? targetLat : hasDropoff ? dropoffLat! : null;
-  const destLng = rawRiderLng != null ? targetLng : hasDropoff ? dropoffLng! : null;
+  const originPosLat = effectiveRiderLat ?? (hasPickup ? pickupLat! : null);
+  const originPosLng = effectiveRiderLng ?? (hasPickup ? pickupLng! : null);
+  const destLat = effectiveRiderLat != null ? targetLat : hasDropoff ? dropoffLat! : null;
+  const destLng = effectiveRiderLng != null ? targetLng : hasDropoff ? dropoffLng! : null;
   const canComputeRoute =
     originPosLat != null && originPosLng != null && destLat != null && destLng != null;
 
@@ -541,8 +558,14 @@ export default function LiveTrackingMap({
             color: '#1e293b',
           }}
         >
-          <Radio size={14} color="#ea580c" />
-          <span>{liveTimestampLabel}</span>
+          <Radio size={14} color={isGpsStale ? '#d97706' : '#ea580c'} />
+          <span>
+            {hideLiveGpsForDonorPostPickup
+              ? 'Food Collected · In Transit to NGO'
+              : isGpsStale
+              ? 'GPS Signal Stale (>1 min)'
+              : liveTimestampLabel}
+          </span>
         </div>
 
         {/* Top-Right Custom Zoom & Recenter Controls */}
