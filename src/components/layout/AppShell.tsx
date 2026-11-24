@@ -170,6 +170,25 @@ function RiderTopHeader({ onToggleSidebar }: { onToggleSidebar: () => void }) {
               </button>
               <button
                 type="button"
+                className={styles.riderDropItem}
+                style={{ color: '#EA580C', fontWeight: 600 }}
+                disabled={switchingRole}
+                onClick={async () => {
+                  setMenuOpen(false);
+                  setSwitchingRole(true);
+                  try {
+                    const switched = await switchRole('ngo');
+                    const dest = getSafeDashboardPath(switched.role);
+                    navigate(dest);
+                  } finally {
+                    setSwitchingRole(false);
+                  }
+                }}
+              >
+                🏢 Switch to NGO Portal
+              </button>
+              <button
+                type="button"
                 className={`${styles.riderDropItem} ${styles.riderDropDanger}`}
                 onClick={async () => {
                   setMenuOpen(false);

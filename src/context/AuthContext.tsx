@@ -249,7 +249,10 @@ export function AuthProvider({ children, onSessionReset }: AuthProviderProps) {
         return;
       }
 
-      if (event === 'SIGNED_IN' && AuthService.isLoginInFlight()) {
+      if (
+        (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') &&
+        (AuthService.isLoginInFlight() || window.location.pathname === '/auth/callback')
+      ) {
         return;
       }
 

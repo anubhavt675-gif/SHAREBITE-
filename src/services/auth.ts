@@ -23,7 +23,6 @@ export type ProfileLoadResult =
 export function clearLegacyAuthCaches(): void {
   try {
     localStorage.removeItem(LEGACY_MOCK_STORAGE_KEY);
-    localStorage.removeItem(OAUTH_ROLE_KEY);
   } catch {
     // Ignore storage access errors in restricted contexts
   }
@@ -550,6 +549,7 @@ export const AuthService = {
 
     try {
       localStorage.setItem(OAUTH_ROLE_KEY, effectiveRole);
+      sessionStorage.setItem(OAUTH_ROLE_KEY, effectiveRole);
     } catch {
       // Ignore storage failures
     }
@@ -557,7 +557,7 @@ export const AuthService = {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?intended_role=${encodeURIComponent(effectiveRole)}`,
         queryParams: {
           access_type: 'offline',
           prompt: 'consent',
@@ -571,120 +571,137 @@ export const AuthService = {
   },
 
   async handleOAuthCallback(): Promise<User> {
-    let activeUser: any = null;
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (sessionData.session?.user) {
-      activeUser = sessionData.session.user;
-    }
-
-    if (!activeUser) {
-      const { data: userData } = await supabase.auth.getUser();
-      if (userData.user) activeUser = userData.user;
-    }
-
-    if (!activeUser) {
-      throw new Error('Authentication session was not found. Please sign in with your email & password.');
-    }
-
-    let rawIntendedRole: string | null = null;
+    isVerifyingLogin = true;
     try {
-      rawIntendedRole = localStorage.getItem(OAUTH_ROLE_KEY);
-      localStorage.removeItem(OAUTH_ROLE_KEY);
-    } catch {
-      rawIntendedRole = null;
-    }
+      let activeUser: any = null;
 
-    // 1. Clear stale override before loading authoritative DB profile
-    clearRoleOverride();
-    const existingResult = await this.fetchAuthoritativeProfile(activeUser.id);
-    const parsedIntended = normalizeRole(rawIntendedRole);
-
-    if (parsedIntended && (parsedIntended === 'rider' || parsedIntended === 'donor' || parsedIntended === 'ngo')) {
-      setScopedRoleOverride(activeUser.id, parsedIntended);
-    }
-
-    if (existingResult.status === 'ok') {
-      // If user signed in via Google on NGO, Rider, or Donor page with explicit intended role,
-      // seamlessly switch/activate that role so they enter the exact portal they signed into.
-      if (
-        parsedIntended &&
-        parsedIntended !== 'admin' &&
-        parsedIntended !== normalizeRole(existingResult.user.role) &&
-        (parsedIntended === 'rider' || parsedIntended === 'donor' || parsedIntended === 'ngo')
-      ) {
-        try {
-          const switchedUser = await this.switchRole(parsedIntended);
-          return switchedUser;
-        } catch (switchErr) {
-          console.warn('OAuth role switch warning:', switchErr);
-        }
-        setScopedRoleOverride(activeUser.id, parsedIntended);
-        return { ...existingResult.user, role: parsedIntended as UserRole };
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.user) {
+        activeUser = sessionData.session.user;
       }
-      return existingResult.user;
+
+      if (!activeUser) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user) activeUser = userData.user;
+      }
+
+      if (!activeUser) {
+        throw new Error('Authentication session was not found. Please sign in with your email & password.');
+      }
+
+      let rawIntendedRole: string | null = null;
+      try {
+        const urlRole = new URLSearchParams(window.location.search).get('intended_role');
+        rawIntendedRole =
+          urlRole ||
+          localStorage.getItem(OAUTH_ROLE_KEY) ||
+          sessionStorage.getItem(OAUTH_ROLE_KEY);
+        localStorage.removeItem(OAUTH_ROLE_KEY);
+        sessionStorage.removeItem(OAUTH_ROLE_KEY);
+      } catch {
+        rawIntendedRole = null;
+      }
+
+      // 1. Clear stale override before loading authoritative DB profile
+      clearRoleOverride();
+      const existingResult = await this.fetchAuthoritativeProfile(activeUser.id);
+      const parsedIntended = normalizeRole(rawIntendedRole);
+
+      if (parsedIntended && (parsedIntended === 'rider' || parsedIntended === 'donor' || parsedIntended === 'ngo')) {
+        setScopedRoleOverride(activeUser.id, parsedIntended);
+      }
+
+      if (existingResult.status === 'ok') {
+        // If user signed in via Google on NGO, Rider, or Donor page with explicit intended role,
+        // seamlessly switch/activate that role so they enter the exact portal they signed into.
+        if (
+          parsedIntended &&
+          parsedIntended !== 'admin' &&
+          parsedIntended !== normalizeRole(existingResult.user.role) &&
+          (parsedIntended === 'rider' || parsedIntended === 'donor' || parsedIntended === 'ngo')
+        ) {
+          try {
+            const switchedUser = await this.switchRole(parsedIntended);
+            return switchedUser;
+          } catch (switchErr) {
+            console.warn('OAuth role switch warning:', switchErr);
+          }
+          setScopedRoleOverride(activeUser.id, parsedIntended);
+          return { ...existingResult.user, role: parsedIntended as UserRole };
+        }
+        return existingResult.user;
+      }
+      if (existingResult.status === 'error') {
+        throw new Error(existingResult.message);
+      }
+      if (existingResult.status === 'invalid_role') {
+        throw new Error('Your account has an invalid role configuration. Please contact support.');
+      }
+
+      // 2. Profile does not exist yet: create initial profile with validated intended role (never admin).
+      const initialRole: CanonicalRole =
+        parsedIntended && parsedIntended !== 'admin' ? parsedIntended : 'donor';
+
+      const meta = activeUser.user_metadata || {};
+      const fullName = meta.full_name || meta.name || activeUser.email?.split('@')[0] || 'ShareBite Member';
+
+      const { error: upsertError } = await supabase.from('profiles').upsert(
+        {
+          id: activeUser.id,
+          full_name: fullName,
+          email: activeUser.email || '',
+          phone: meta.phone || '',
+          avatar_url: meta.avatar_url || meta.picture || null,
+          role: initialRole,
+          is_verified: false,
+          verification_status: 'pending',
+        },
+        { onConflict: 'id' }
+      );
+
+      if (upsertError) {
+        throw new Error(upsertError.message || 'Could not initialize your ShareBite profile.');
+      }
+
+      if (initialRole === 'rider') {
+        await supabase
+          .from('riders')
+          .upsert(
+            {
+              user_id: activeUser.id,
+              name: fullName,
+              is_online: false,
+              is_available: true,
+              id_verified: false,
+            },
+            { onConflict: 'user_id' }
+          )
+          .then(({ error: riderErr }) => {
+            if (riderErr) console.warn('OAuth rider init warning:', riderErr.message);
+          });
+      }
+
+      const createdResult = await this.fetchAuthoritativeProfile(activeUser.id);
+      if (createdResult.status === 'ok') {
+        setScopedRoleOverride(activeUser.id, initialRole);
+        return { ...createdResult.user, role: initialRole as UserRole };
+      }
+
+      throw new Error('Unable to verify your newly created profile. Please try again.');
+    } finally {
+      isVerifyingLogin = false;
     }
-    if (existingResult.status === 'error') {
-      throw new Error(existingResult.message);
-    }
-    if (existingResult.status === 'invalid_role') {
-      throw new Error('Your account has an invalid role configuration. Please contact support.');
-    }
-
-    // 2. Profile does not exist yet: create initial profile with validated intended role (never admin).
-    const initialRole: CanonicalRole =
-      parsedIntended && parsedIntended !== 'admin' ? parsedIntended : 'donor';
-
-    const meta = activeUser.user_metadata || {};
-    const fullName = meta.full_name || meta.name || activeUser.email?.split('@')[0] || 'ShareBite Member';
-
-    const { error: upsertError } = await supabase.from('profiles').upsert(
-      {
-        id: activeUser.id,
-        full_name: fullName,
-        email: activeUser.email || '',
-        phone: meta.phone || '',
-        avatar_url: meta.avatar_url || meta.picture || null,
-        role: initialRole,
-        is_verified: false,
-        verification_status: 'pending',
-      },
-      { onConflict: 'id' }
-    );
-
-    if (upsertError) {
-      throw new Error(upsertError.message || 'Could not initialize your ShareBite profile.');
-    }
-
-    if (initialRole === 'rider') {
-      await supabase
-        .from('riders')
-        .upsert(
-          {
-            user_id: activeUser.id,
-            name: fullName,
-            is_online: false,
-            is_available: true,
-            id_verified: false,
-          },
-          { onConflict: 'user_id' }
-        )
-        .then(({ error: riderErr }) => {
-          if (riderErr) console.warn('OAuth rider init warning:', riderErr.message);
-        });
-    }
-
-    const createdResult = await this.fetchAuthoritativeProfile(activeUser.id);
-    if (createdResult.status === 'ok') {
-      return createdResult.user;
-    }
-
-    throw new Error('Unable to verify your newly created profile. Please try again.');
   },
 
   async logout(): Promise<void> {
     clearLegacyAuthCaches();
     clearRoleOverride();
+    try {
+      localStorage.removeItem(OAUTH_ROLE_KEY);
+      sessionStorage.removeItem(OAUTH_ROLE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
     try {
       await supabase.auth.signOut({ scope: 'local' });
     } catch {
