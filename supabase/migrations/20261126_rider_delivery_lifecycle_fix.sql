@@ -1,11 +1,50 @@
 -- ==============================================================================
 -- ShareBite Production Migration: Complete Rider Delivery Lifecycle Fix
 -- Fixes:
--- 1. accept_donation RPC: Pure MD5 codes (no gen_random_bytes), dynamic active-task check
--- 2. update_donation_status RPC: Multi-role authorization, full direct lifecycle (collected -> completed)
--- 3. confirm_pickup RPC: Pure MD5 code verification gate with donor-rider coordination
--- 4. RLS & Realtime publication guarantees
+-- 1. Helpers: calculate_distance_km & get_auth_user_role (100% self-contained)
+-- 2. accept_donation RPC: Pure MD5 codes (no gen_random_bytes), dynamic active-task check
+-- 3. update_donation_status RPC: Multi-role authorization, full direct lifecycle (collected -> completed)
+-- 4. confirm_pickup RPC: Pure MD5 code verification gate with donor-rider coordination
+-- 5. RLS & Realtime publication guarantees
 -- ==============================================================================
+
+-- ─── 0. Prerequisite Helpers ──────────────────────────────────────────────────
+create or replace function public.calculate_distance_km(
+  lat1 double precision,
+  lon1 double precision,
+  lat2 double precision,
+  lon2 double precision
+)
+returns double precision
+language sql
+immutable
+as $$
+  select 6371.0 * acos(
+    least(1.0, greatest(-1.0,
+      cos(radians(lat1)) * cos(radians(lat2)) * cos(radians(lon2) - radians(lon1)) +
+      sin(radians(lat1)) * sin(radians(lat2))
+    ))
+  );
+$$;
+
+create or replace function public.get_auth_user_role()
+returns text
+security definer
+set search_path = public
+language plpgsql
+stable as $$
+declare
+  v_role text;
+begin
+  select role::text into v_role
+  from public.profiles
+  where id = auth.uid();
+  return coalesce(v_role, 'donor');
+end;
+$$;
+
+grant execute on function public.calculate_distance_km(double precision, double precision, double precision, double precision) to authenticated;
+grant execute on function public.get_auth_user_role() to authenticated;
 
 -- ─── 1. accept_donation RPC (Pure MD5 & Non-blocking availability) ───────────
 drop function if exists public.accept_donation(uuid, integer, timestamptz, text);
@@ -391,6 +430,22 @@ begin
   else
     raise exception 'Your account role (%) is not eligible to accept food donations directly.', v_profile.role;
   end if;
+end;
+$$;
+
+-- 4-argument wrapper for legacy callers
+create or replace function public.accept_donation(
+  p_food_listing_id   uuid,
+  p_servings          integer default null,
+  p_pickup_time       timestamptz default null,
+  p_notes             text default null
+)
+returns jsonb
+security definer
+set search_path = public, extensions
+language plpgsql as $$
+begin
+  return public.accept_donation(p_food_listing_id, p_servings, p_pickup_time, p_notes, 'ngo_delivery');
 end;
 $$;
 
