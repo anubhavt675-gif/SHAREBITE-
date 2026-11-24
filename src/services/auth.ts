@@ -126,6 +126,42 @@ function getReadableRoleAndPortal(role: CanonicalRole): { label: string; portal:
   }
 }
 
+function getScopedRoleOverride(userId?: string | null): CanonicalRole | null {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(ACTIVE_ROLE_OVERRIDE_KEY);
+    if (!raw) return null;
+    // Only honor user-scoped overrides ("<userId>:<role>") so stale roles from
+    // previous accounts or portals can never hijack a newly logged-in NGO/Donor/Rider.
+    const [storedUserId, storedRole] = raw.split(':');
+    if (storedUserId !== userId) return null;
+    const normalized = normalizeRole(storedRole);
+    if (normalized === 'rider' || normalized === 'donor' || normalized === 'ngo') {
+      return normalized;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function setScopedRoleOverride(userId: string, role: CanonicalRole): void {
+  if (!userId || role === 'admin') return;
+  try {
+    localStorage.setItem(ACTIVE_ROLE_OVERRIDE_KEY, `${userId}:${role}`);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function clearRoleOverride(): void {
+  try {
+    localStorage.removeItem(ACTIVE_ROLE_OVERRIDE_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 function mapProfileToUser(profile: Record<string, any>): User {
   const bio = typeof profile.bio === 'string' ? profile.bio : '';
   const dobMatch = bio.startsWith('DOB: ') ? bio.replace('DOB: ', '').trim() : undefined;
@@ -136,15 +172,8 @@ function mapProfileToUser(profile: Record<string, any>): User {
     (typeof profile.organization_name === 'string' && profile.organization_name.trim()) ||
     fallbackName;
 
-  let effectiveRole = profile.role as UserRole;
-  try {
-    const override = localStorage.getItem(ACTIVE_ROLE_OVERRIDE_KEY);
-    if (override && (override === 'rider' || override === 'donor' || override === 'ngo')) {
-      effectiveRole = override as UserRole;
-    }
-  } catch {
-    // Ignore storage errors
-  }
+  const scopedOverride = getScopedRoleOverride(profile.id);
+  const effectiveRole: UserRole = (scopedOverride || profile.role) as UserRole;
 
   return {
     id: profile.id,
@@ -286,6 +315,7 @@ export const AuthService = {
     }
 
     clearLegacyAuthCaches();
+    clearRoleOverride();
     isVerifyingLogin = true;
 
     try {
@@ -325,28 +355,29 @@ export const AuthService = {
       const actualCanonical = normalizeRole(loadedUser.role)!;
       const expectedCanonical = expectedRole ? normalizeRole(expectedRole) : null;
 
-      if (expectedCanonical) {
-        try {
-          localStorage.setItem(ACTIVE_ROLE_OVERRIDE_KEY, expectedCanonical);
-        } catch {}
+      if (expectedCanonical && expectedCanonical !== 'admin') {
+        setScopedRoleOverride(loadedUser.id, expectedCanonical);
       }
 
       // Admins have dedicated platform oversight access and can sign in through any portal.
       if (expectedCanonical && actualCanonical !== 'admin' && actualCanonical !== expectedCanonical) {
-        // If a donor attempts to log in as rider, or vice-versa, seamlessly activate the expected role
+        const switchableRoles: Array<'donor' | 'rider' | 'ngo'> = ['donor', 'rider', 'ngo'];
         if (
-          (expectedCanonical === 'rider' && actualCanonical === 'donor') ||
-          (expectedCanonical === 'donor' && actualCanonical === 'rider')
+          switchableRoles.includes(expectedCanonical as any) &&
+          switchableRoles.includes(actualCanonical as any)
         ) {
+          const targetSwitchRole = expectedCanonical as 'donor' | 'rider' | 'ngo';
           try {
-            const switchedUser = await this.switchRole(expectedCanonical);
+            const switchedUser = await this.switchRole(targetSwitchRole);
             return switchedUser;
           } catch (switchErr) {
             console.warn('Auto role switch failed during login:', switchErr);
           }
-          return { ...loadedUser, role: expectedCanonical as UserRole };
+          setScopedRoleOverride(loadedUser.id, targetSwitchRole);
+          return { ...loadedUser, role: targetSwitchRole as UserRole };
         }
 
+        clearRoleOverride();
         await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
         const { label, portal } = getReadableRoleAndPortal(actualCanonical);
         throw new Error(
@@ -354,7 +385,8 @@ export const AuthService = {
         );
       }
 
-      if (expectedCanonical && (expectedCanonical === 'rider' || expectedCanonical === 'donor')) {
+      if (expectedCanonical && (expectedCanonical === 'rider' || expectedCanonical === 'donor' || expectedCanonical === 'ngo')) {
+        setScopedRoleOverride(loadedUser.id, expectedCanonical);
         return { ...loadedUser, role: expectedCanonical as UserRole };
       }
 
@@ -390,6 +422,7 @@ export const AuthService = {
           : canonicalRequested;
 
     clearLegacyAuthCaches();
+    clearRoleOverride();
 
     const { data: authData, error } = await supabase.auth.signUp({
       email: cleanEmail,
@@ -485,7 +518,9 @@ export const AuthService = {
 
       const verifiedProfile = await this.fetchAuthoritativeProfile(userId);
       if (verifiedProfile.status === 'ok') {
-        return { user: verifiedProfile.user, sessionExists: true };
+        const canonicalEff = normalizeRole(effectiveRole);
+        if (canonicalEff) setScopedRoleOverride(userId, canonicalEff);
+        return { user: { ...verifiedProfile.user, role: effectiveRole }, sessionExists: true };
       }
     }
 
@@ -560,24 +595,23 @@ export const AuthService = {
       rawIntendedRole = null;
     }
 
-    // 1. Check existing authoritative DB profile
+    // 1. Clear stale override before loading authoritative DB profile
+    clearRoleOverride();
     const existingResult = await this.fetchAuthoritativeProfile(activeUser.id);
     const parsedIntended = normalizeRole(rawIntendedRole);
 
-    if (parsedIntended && (parsedIntended === 'rider' || parsedIntended === 'donor')) {
-      try {
-        localStorage.setItem(ACTIVE_ROLE_OVERRIDE_KEY, parsedIntended);
-      } catch {}
+    if (parsedIntended && (parsedIntended === 'rider' || parsedIntended === 'donor' || parsedIntended === 'ngo')) {
+      setScopedRoleOverride(activeUser.id, parsedIntended);
     }
 
     if (existingResult.status === 'ok') {
-      // If user signed in via Google on Rider page (or Donor page) with explicit intended role,
-      // seamlessly switch/activate that role so they enter the correct dashboard.
+      // If user signed in via Google on NGO, Rider, or Donor page with explicit intended role,
+      // seamlessly switch/activate that role so they enter the exact portal they signed into.
       if (
         parsedIntended &&
         parsedIntended !== 'admin' &&
-        parsedIntended !== existingResult.user.role &&
-        (parsedIntended === 'rider' || parsedIntended === 'donor')
+        parsedIntended !== normalizeRole(existingResult.user.role) &&
+        (parsedIntended === 'rider' || parsedIntended === 'donor' || parsedIntended === 'ngo')
       ) {
         try {
           const switchedUser = await this.switchRole(parsedIntended);
@@ -585,6 +619,7 @@ export const AuthService = {
         } catch (switchErr) {
           console.warn('OAuth role switch warning:', switchErr);
         }
+        setScopedRoleOverride(activeUser.id, parsedIntended);
         return { ...existingResult.user, role: parsedIntended as UserRole };
       }
       return existingResult.user;
@@ -649,11 +684,7 @@ export const AuthService = {
 
   async logout(): Promise<void> {
     clearLegacyAuthCaches();
-    try {
-      localStorage.removeItem(ACTIVE_ROLE_OVERRIDE_KEY);
-    } catch {
-      // Ignore storage errors
-    }
+    clearRoleOverride();
     try {
       await supabase.auth.signOut({ scope: 'local' });
     } catch {
@@ -706,12 +737,8 @@ export const AuthService = {
 
     const userId = session.user.id;
 
-    // Immediately persist user's chosen active role
-    try {
-      localStorage.setItem(ACTIVE_ROLE_OVERRIDE_KEY, canonical);
-    } catch {
-      // Ignore storage errors
-    }
+    // Immediately persist user-scoped active role
+    setScopedRoleOverride(userId, canonical);
 
     // 1. Try secure RPC function first
     const { data: rpcData, error: rpcError } = await supabase.rpc('switch_user_role', {

@@ -132,13 +132,18 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
-    // If a logged-in user visits a different role portal or role select,
-    // allow them to view the page to activate or switch their role cleanly without redirect loops.
+    // If a logged-in user visits role select or a different role's login/register portal,
+    // allow them to view the page to log in or switch portals cleanly without redirect loops.
+    const currentRole = user.role;
     const isTargetingDifferentRole =
       location.pathname === '/register' ||
       location.pathname === '/login' ||
-      (user.role === 'donor' && location.pathname.includes('/rider')) ||
-      (user.role === 'rider' && (location.pathname.includes('/donor') || location.pathname.includes('/acceptor')));
+      (currentRole !== 'rider' && location.pathname.includes('/rider')) ||
+      (currentRole !== 'donor' && location.pathname.includes('/donor')) ||
+      (currentRole !== 'ngo' &&
+        currentRole !== 'acceptor' &&
+        currentRole !== 'receiver' &&
+        (location.pathname.includes('/acceptor') || location.pathname.includes('/ngo')));
 
     if (!isTargetingDifferentRole) {
       const destination = getRoleDashboardPath(user.role);
