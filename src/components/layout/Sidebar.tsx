@@ -3,7 +3,7 @@ import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutGrid, Search, Utensils, MapPin, ClipboardList,
   BarChart2, User, Settings, ShieldCheck, ShieldAlert, X, Leaf,
-  Truck, Plus, MessageSquare, Heart, Building2, Home, Wallet, LogOut
+  Truck, Plus, MessageSquare, Heart, Building2, Home, Wallet, LogOut, Bike
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { normalizeRole } from '../../services/auth';
@@ -26,7 +26,7 @@ interface Props {
 }
 
 export default function Sidebar({ open, onClose }: Props) {
-  const { user, logout } = useAuth();
+  const { user, logout, switchRole } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const role = normalizeRole(user?.role);
@@ -228,6 +228,22 @@ export default function Sidebar({ open, onClose }: Props) {
             >
               <span className={styles.navIcon}><LogOut size={18} /></span>
               <span className={styles.navLabel}>Logout</span>
+            </button>
+          )}
+
+          {role === 'donor' && (
+            <button
+              type="button"
+              className={styles.navItem}
+              style={{ color: '#EA580C', fontWeight: 700, marginTop: 4 }}
+              onClick={async () => {
+                if (window.innerWidth < 1024) onClose();
+                await switchRole('rider');
+                navigate('/rider-dashboard');
+              }}
+            >
+              <span className={styles.navIcon}><Bike size={18} /></span>
+              <span className={styles.navLabel}>🛵 Switch to Rider Portal</span>
             </button>
           )}
         </nav>

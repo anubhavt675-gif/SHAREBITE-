@@ -127,9 +127,11 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (user) {
-    // If a logged-in user visits a different role portal (e.g., donor visiting rider portal or vice versa),
+    // If a logged-in user visits a different role portal or role select,
     // allow them to view the page to activate or switch their role cleanly without redirect loops.
     const isTargetingDifferentRole =
+      location.pathname === '/register' ||
+      location.pathname === '/login' ||
       (user.role === 'donor' && location.pathname.includes('/rider')) ||
       (user.role === 'rider' && (location.pathname.includes('/donor') || location.pathname.includes('/acceptor')));
 
