@@ -836,11 +836,11 @@ async function fetchFromSupabase(
         }
       }
 
-      // 2. Fallback to direct profiles query (works for authenticated sessions before RPC migration is applied)
+      // 2. Fallback to direct profiles query (uses valid user_role enum values only)
       let query = supabase
         .from('profiles')
         .select('id, organization_name, full_name, bio, address, city, latitude, longitude, phone, operating_hours, is_verified, avatar_url, updated_at')
-        .in('role', ['ngo', 'acceptor', 'receiver'])
+        .in('role', ['ngo', 'acceptor'])
         .limit(40);
 
       if (effectiveCity) {
@@ -863,20 +863,19 @@ async function fetchFromSupabase(
     try {
       const { data: partnerRows, error: partnerErr } = await supabase
         .from('partners')
-        .select('id, organization_name, organization_type, description, address, city, logo_url, is_verified, updated_at')
-        .eq('is_verified', true)
+        .select('*')
         .limit(30);
 
       if (!partnerErr && Array.isArray(partnerRows)) {
         return partnerRows
-          .filter((p: Record<string, any>) => Boolean(p.organization_name))
+          .filter((p: Record<string, any>) => Boolean(p.organization_name || p.name) && p.is_verified !== false)
           .map((p: Record<string, any>): IndiaNGO => ({
             id: `sb-partner-${p.id}`,
             sharebiteProfileId: p.id,
-            name: p.organization_name,
+            name: p.organization_name || p.name,
             description: p.description || 'Registered community partner on ShareBite.',
             categories: ['food_distribution', 'general_charity'],
-            address: p.address || undefined,
+            address: p.address || p.location || undefined,
             city: p.city || undefined,
             imageUrl: p.logo_url || undefined,
             sourceName: 'ShareBite Registered Network',
@@ -1609,7 +1608,7 @@ async function getNGOById(id: string, signal?: AbortSignal): Promise<IndiaNGO | 
         .from('profiles')
         .select('id, organization_name, full_name, bio, address, city, latitude, longitude, phone, operating_hours, is_verified, avatar_url, updated_at')
         .eq('id', uuid)
-        .in('role', ['ngo', 'acceptor', 'receiver'])
+        .in('role', ['ngo', 'acceptor'])
         .maybeSingle();
 
       if (directRow) {

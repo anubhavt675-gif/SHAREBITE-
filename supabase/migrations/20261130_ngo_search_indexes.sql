@@ -5,38 +5,56 @@
 -- SAFE & IDEMPOTENT PRODUCTION MIGRATION:
 -- - Zero destructive DROP TABLE / TRUNCATE statements.
 -- - Preserves all existing accounts, donations, deliveries, and messages.
--- - Never stores external Google Places records in Supabase.
--- - Allows public & logged-in discovery of ShareBite Registered NGOs without
---   exposing private donor/rider fields or personal credentials.
+-- - Uses role::text casting so it works cleanly with enum user_role.
+-- - Guards pg_trgm & optional partner columns so it succeeds in a single run.
 -- ==============================================================================
 
-create extension if not exists pg_trgm;
-
--- ─── 1. Search Performance Indexes on Existing Tables ─────────────────────────
+-- ─── 1. Safe Search Indexes on Existing Tables ────────────────────────────────
 create index if not exists idx_profiles_ngo_role_city
-  on public.profiles (role, city)
-  where role in ('ngo', 'acceptor', 'receiver');
+  on public.profiles (city)
+  where role in ('ngo', 'acceptor');
 
-create index if not exists idx_profiles_org_name_trgm
-  on public.profiles using gin (organization_name gin_trgm_ops)
+create index if not exists idx_profiles_org_name_lower
+  on public.profiles (lower(organization_name))
   where organization_name is not null;
 
-create index if not exists idx_profiles_city_trgm
-  on public.profiles using gin (city gin_trgm_ops)
+create index if not exists idx_profiles_city_lower
+  on public.profiles (lower(city))
   where city is not null;
 
-create index if not exists idx_profiles_address_trgm
-  on public.profiles using gin (address gin_trgm_ops)
-  where address is not null;
+-- Optional trigram GIN indexes (handles Supabase `extensions` schema safely)
+do $$
+begin
+  create extension if not exists pg_trgm;
+  execute 'create index if not exists idx_profiles_org_name_trgm on public.profiles using gin (organization_name gin_trgm_ops) where organization_name is not null';
+  execute 'create index if not exists idx_profiles_city_trgm on public.profiles using gin (city gin_trgm_ops) where city is not null';
+  execute 'create index if not exists idx_profiles_address_trgm on public.profiles using gin (address gin_trgm_ops) where address is not null';
+exception when others then
+  -- If pg_trgm lives in extensions schema, try qualified operator class; otherwise B-tree indexes above remain active
+  begin
+    execute 'create index if not exists idx_profiles_org_name_trgm on public.profiles using gin (organization_name extensions.gin_trgm_ops) where organization_name is not null';
+    execute 'create index if not exists idx_profiles_city_trgm on public.profiles using gin (city extensions.gin_trgm_ops) where city is not null';
+    execute 'create index if not exists idx_profiles_address_trgm on public.profiles using gin (address extensions.gin_trgm_ops) where address is not null';
+  exception when others then
+    null;
+  end;
+end $$;
 
+-- Optional partners indexes (only if columns exist in the current partners table)
 do $$
 begin
   if exists (
-    select 1 from information_schema.tables
-    where table_schema = 'public' and table_name = 'partners'
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'partners' and column_name = 'organization_name'
   ) then
-    execute 'create index if not exists idx_partners_org_name_trgm on public.partners using gin (organization_name gin_trgm_ops)';
-    execute 'create index if not exists idx_partners_city_trgm on public.partners using gin (city gin_trgm_ops)';
+    execute 'create index if not exists idx_partners_org_name_lower on public.partners (lower(organization_name))';
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'partners' and column_name = 'city'
+  ) then
+    execute 'create index if not exists idx_partners_city_lower on public.partners (lower(city))';
   end if;
 end $$;
 
@@ -84,7 +102,7 @@ as $$
     p.avatar_url,
     p.updated_at
   from public.profiles p
-  where p.role in ('ngo', 'acceptor', 'receiver')
+  where p.role::text in ('ngo', 'acceptor', 'receiver')
     and (
       p_query is null
       or trim(p_query) = ''
@@ -152,7 +170,7 @@ as $$
     p.updated_at
   from public.profiles p
   where p.id = p_id
-    and p.role in ('ngo', 'acceptor', 'receiver')
+    and p.role::text in ('ngo', 'acceptor', 'receiver')
   limit 1;
 $$;
 
