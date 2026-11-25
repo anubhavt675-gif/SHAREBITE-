@@ -56,7 +56,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
       setShowUserMenu(false);
       const switched = await switchRole(target);
       const dest = getSafeDashboardPath(switched.role);
-      navigate(dest);
+      navigate(dest, { replace: true });
     } catch (err) {
       console.error('Failed to switch role:', err);
     } finally {
