@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Bell, Menu, ChevronDown, User, LogOut, Settings, Search, MessageSquare } from 'lucide-react';
+import {
+  Bell, Menu, ChevronDown, User, LogOut, Settings, Search, MessageSquare,
+  X, Clock, MapPin, Building2, Sparkles, Crosshair, ArrowUpRight,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getSafeDashboardPath, normalizeRole } from '../../services/auth';
 import { NotificationsService } from '../../services/notifications';
+import { NGODiscoveryService, type SearchSuggestionItem } from '../../services/ngoDiscovery';
 import UserAvatar from '../ui/UserAvatar';
 import styles from './Navbar.module.css';
 
@@ -47,7 +51,130 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
   const [unreadCount, setUnreadCount] = useState(0);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() =>
+    NGODiscoveryService.getRecentSearches()
+  );
+  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState(-1);
   const [switchingRole, setSwitchingRole] = useState(false);
+
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync navbar search input when viewing /ngo-search?q=...
+  useEffect(() => {
+    if (location.pathname === '/ngo-search' || location.pathname === '/ngos') {
+      const sp = new URLSearchParams(location.search);
+      const qParam = sp.get('q') || '';
+      setSearchQuery(qParam);
+    }
+  }, [location.pathname, location.search]);
+
+  // Debounce suggestion computation to prevent excessive work while typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(event.target as Node)
+      ) {
+        setShowSearchDropdown(false);
+        setActiveSuggestionIdx(-1);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const suggestions = useMemo<SearchSuggestionItem[]>(
+    () => NGODiscoveryService.getSuggestions(debouncedQuery),
+    [debouncedQuery]
+  );
+
+  // Build unified keyboard-navigable dropdown list (Recent + Suggestions)
+  const dropdownItems = useMemo<SearchSuggestionItem[]>(() => {
+    const list: SearchSuggestionItem[] = [];
+    if (!debouncedQuery.trim() && recentSearches.length > 0) {
+      for (const recent of recentSearches) {
+        list.push({
+          id: `recent-${recent}`,
+          label: recent,
+          sublabel: 'Recent search',
+          query: recent,
+          kind: 'recent',
+        });
+      }
+    }
+    for (const s of suggestions) {
+      if (!list.some((item) => item.query.toLowerCase() === s.query.toLowerCase())) {
+        list.push(s);
+      }
+    }
+    return list;
+  }, [debouncedQuery, recentSearches, suggestions]);
+
+  const submitNGOSearch = (queryText: string, isNearby = false) => {
+    const trimmed = queryText.trim();
+    setShowSearchDropdown(false);
+    setActiveSuggestionIdx(-1);
+
+    if (isNearby) {
+      setSearchQuery('Nearby NGOs');
+      setRecentSearches(NGODiscoveryService.saveRecentSearch('Nearby NGOs'));
+      navigate('/ngo-search?nearby=1');
+      return;
+    }
+
+    if (!trimmed) {
+      navigate('/ngo-search');
+      return;
+    }
+
+    setSearchQuery(trimmed);
+    setRecentSearches(NGODiscoveryService.saveRecentSearch(trimmed));
+    navigate(`/ngo-search?q=${encodeURIComponent(trimmed)}`);
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSearchDropdown && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      setShowSearchDropdown(true);
+      setActiveSuggestionIdx(0);
+      e.preventDefault();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (dropdownItems.length > 0) {
+        setActiveSuggestionIdx((prev) => (prev + 1) % dropdownItems.length);
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (dropdownItems.length > 0) {
+        setActiveSuggestionIdx((prev) => (prev <= 0 ? dropdownItems.length - 1 : prev - 1));
+      }
+    } else if (e.key === 'Escape') {
+      setShowSearchDropdown(false);
+      setActiveSuggestionIdx(-1);
+      searchInputRef.current?.blur();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (showSearchDropdown && activeSuggestionIdx >= 0 && dropdownItems[activeSuggestionIdx]) {
+        const picked = dropdownItems[activeSuggestionIdx];
+        submitNGOSearch(picked.query, picked.kind === 'nearby');
+      } else {
+        submitNGOSearch(searchQuery);
+      }
+    }
+  };
 
   const handleSwitchRole = async (target: 'donor' | 'rider') => {
     if (switchingRole) return;
@@ -127,9 +254,7 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/discover?q=${encodeURIComponent(searchQuery.trim())}`);
-    }
+    submitNGOSearch(searchQuery);
   };
 
   return (
@@ -221,17 +346,169 @@ export default function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => vo
 
         {/* Right: Search, Notifications, Auth */}
         <div className={styles.navRight}>
-          {/* Search pill */}
-          <form className={styles.searchForm} onSubmit={handleSearch}>
-            <Search size={15} className={styles.searchIcon} />
-            <input
-              type="text"
-              className={styles.searchInput}
-              placeholder="Search food, NGOs, or location..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </form>
+          {/* India-Wide NGO Discovery Search Pill + Dropdown */}
+          <div className={styles.searchWrap} ref={searchContainerRef}>
+            <form
+              className={`${styles.searchForm} ${showSearchDropdown ? styles.searchFormOpen : ''}`}
+              onSubmit={handleSearch}
+              role="search"
+              aria-label="Search NGOs across India"
+            >
+              <Search size={15} className={styles.searchIcon} />
+              <input
+                ref={searchInputRef}
+                type="text"
+                className={styles.searchInput}
+                placeholder="Search NGOs, cities, PIN, or food banks..."
+                value={searchQuery}
+                onFocus={() => {
+                  setRecentSearches(NGODiscoveryService.getRecentSearches());
+                  setShowSearchDropdown(true);
+                }}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setShowSearchDropdown(true);
+                  setActiveSuggestionIdx(-1);
+                }}
+                onKeyDown={handleSearchKeyDown}
+                aria-label="Search NGOs across India"
+                aria-expanded={showSearchDropdown}
+                aria-controls="navbar-ngo-search-dropdown"
+                aria-autocomplete="list"
+                data-testid="navbar-ngo-search-input"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className={styles.searchClearBtn}
+                  onClick={() => {
+                    setSearchQuery('');
+                    setDebouncedQuery('');
+                    setActiveSuggestionIdx(-1);
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="Clear search"
+                  data-testid="navbar-ngo-search-clear"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </form>
+
+            {showSearchDropdown && (
+              <div
+                id="navbar-ngo-search-dropdown"
+                className={styles.searchDropdown}
+                role="listbox"
+                data-testid="navbar-ngo-search-dropdown"
+              >
+                {!debouncedQuery.trim() && recentSearches.length > 0 && (
+                  <div className={styles.dropdownSectionHeader}>
+                    <span>Recent Searches</span>
+                    <button
+                      type="button"
+                      className={styles.clearRecentBtn}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        NGODiscoveryService.clearRecentSearches();
+                        setRecentSearches([]);
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+
+                {dropdownItems.map((item, idx) => {
+                  const isFirstSuggestionAfterRecent =
+                    !debouncedQuery.trim() &&
+                    recentSearches.length > 0 &&
+                    idx === recentSearches.length;
+                  const isActive = idx === activeSuggestionIdx;
+
+                  return (
+                    <div key={item.id}>
+                      {isFirstSuggestionAfterRecent && (
+                        <div className={styles.dropdownSectionHeader}>
+                          <span>Popular India NGO Searches</span>
+                        </div>
+                      )}
+                      {idx === 0 && (debouncedQuery.trim() || recentSearches.length === 0) && (
+                        <div className={styles.dropdownSectionHeader}>
+                          <span>
+                            {debouncedQuery.trim()
+                              ? 'Search Suggestions across India'
+                              : 'Discover NGOs Across India'}
+                          </span>
+                        </div>
+                      )}
+                      <div
+                        role="option"
+                        aria-selected={isActive}
+                        className={`${styles.dropdownItem} ${isActive ? styles.dropdownItemActive : ''}`}
+                        onMouseEnter={() => setActiveSuggestionIdx(idx)}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          submitNGOSearch(item.query, item.kind === 'nearby');
+                        }}
+                        data-testid={`ngo-suggestion-${idx}`}
+                      >
+                        <span className={styles.dropdownItemIcon}>
+                          {item.kind === 'recent' ? (
+                            <Clock size={14} />
+                          ) : item.kind === 'nearby' ? (
+                            <Crosshair size={14} />
+                          ) : item.kind === 'location' ? (
+                            <MapPin size={14} />
+                          ) : item.kind === 'category' ? (
+                            <Sparkles size={14} />
+                          ) : (
+                            <Building2 size={14} />
+                          )}
+                        </span>
+                        <span className={styles.dropdownItemBody}>
+                          <span className={styles.dropdownItemTitle}>{item.label}</span>
+                          {item.sublabel && (
+                            <span className={styles.dropdownItemSub}>{item.sublabel}</span>
+                          )}
+                        </span>
+                        {item.kind === 'recent' ? (
+                          <button
+                            type="button"
+                            className={styles.dropdownRemoveBtn}
+                            aria-label={`Remove ${item.label} from recent searches`}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setRecentSearches(NGODiscoveryService.removeRecentSearch(item.query));
+                            }}
+                          >
+                            <X size={12} />
+                          </button>
+                        ) : (
+                          <ArrowUpRight size={13} className={styles.dropdownArrow} />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div className={styles.dropdownFooter}>
+                  <span>Press Enter to search · ↑↓ to navigate</span>
+                  <button
+                    type="button"
+                    className={styles.dropdownExploreLink}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      submitNGOSearch(searchQuery);
+                    }}
+                  >
+                    Open Full NGO Search →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Bell Icon with red badge */}
           <Link to="/notifications" className={styles.notifBtn} aria-label="Notifications">

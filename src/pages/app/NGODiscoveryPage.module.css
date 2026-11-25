@@ -710,3 +710,133 @@
   .controlRight { justify-content: space-between; }
   .filterPanel { flex-direction: column; gap: 16px; }
 }
+
+
+/* ── India-Wide NGO Search Extensions ─────────────────────── */
+
+.publicShell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #FAF7F2;
+}
+
+.publicMain {
+  flex: 1;
+}
+
+.publicPageOffset {
+  padding-top: 96px;
+}
+
+.cardThumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 1px solid #E8DFD2;
+  flex-shrink: 0;
+}
+
+.cardDesc {
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  color: #574C41;
+  margin: 2px 0 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.filterColumnNarrow {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 240px;
+}
+
+.warningBanner,
+.successBanner,
+.errorBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-radius: 12px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.warningBanner {
+  background: #FFFBEB;
+  border: 1px solid #FDE68A;
+  color: #92400E;
+}
+
+.successBanner {
+  background: #ECFDF3;
+  border: 1px solid #BBF7D0;
+  color: #166534;
+}
+
+.errorBanner {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  color: #991B1B;
+}
+
+.inlineRetryBtn {
+  margin-left: auto;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid #FCA5A5;
+  background: #FFFFFF;
+  color: #991B1B;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.inlineRetryBtn:hover {
+  background: #FEE2E2;
+}
+
+.emptyActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.loadMoreBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 18px;
+  background: #FFFFFF;
+  border: 1.5px solid #DFD4C4;
+  border-radius: 12px;
+  font-family: var(--font-heading);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #4A3D31;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.loadMoreBtn:hover:not(:disabled) {
+  background: #FFF5EC;
+  border-color: #BF5B27;
+  color: #BF5B27;
+}
+
+.loadMoreBtn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}

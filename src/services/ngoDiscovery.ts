@@ -1,1198 +1,1783 @@
 import { supabase } from '../lib/supabase';
 import { LocationService } from './location';
-import type { IndiaNGO, NGOCategory } from '../types';
+import { WE_CARE_FOUNDATION } from '../config/outreachPartners';
+import type { IndiaNGO, NGOCategory, NGODataSource } from '../types';
 
-// ─── Overpass API provider (OpenStreetMap) ────────────────────────────────────
-
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
-
-function buildOverpassQuery(lat: number, lng: number, radiusM: number): string {
-  return `[out:json][timeout:25];
-(
-  node["amenity"="social_facility"]["social_facility"~"food_bank|shelter|outreach|soup_kitchen|emergency"](around:${radiusM},${lat},${lng});
-  node["office"="ngo"](around:${radiusM},${lat},${lng});
-  node["office"="charity"](around:${radiusM},${lat},${lng});
-  node["amenity"="social_facility"](around:${radiusM},${lat},${lng});
-  node["charity"](around:${radiusM},${lat},${lng});
-  way["amenity"="social_facility"](around:${radiusM},${lat},${lng});
-  way["office"="ngo"](around:${radiusM},${lat},${lng});
-  way["office"="charity"](around:${radiusM},${lat},${lng});
-);
-out body;
->;
-out skel qt;`;
-}
-
-
-function osmTagsToCategories(tags: Record<string, string>): NGOCategory[] {
-  const cats: NGOCategory[] = [];
-  const sf = (tags['social_facility'] || '').toLowerCase();
-  const name = (tags['name'] || '').toLowerCase();
-  const desc = (tags['description'] || '').toLowerCase();
-
-  if (sf.includes('food') || sf.includes('soup') || sf.includes('meal') || name.includes('food') || name.includes('anna') || name.includes('bhojan')) cats.push('food_distribution');
-  if (sf.includes('shelter') || sf.includes('homeless') || name.includes('shelter') || name.includes('ashray')) cats.push('homeless_support');
-  if (name.includes('child') || name.includes('orphan') || name.includes('bal') || name.includes('shishu')) cats.push('child_welfare');
-  if (name.includes('mahila') || name.includes('women') || name.includes('nari')) cats.push('women_empowerment');
-  if (name.includes('old age') || name.includes('elder') || name.includes('vriddha') || name.includes('senior')) cats.push('elderly_care');
-  if (name.includes('health') || name.includes('hospital') || name.includes('medical') || name.includes('clinic')) cats.push('healthcare');
-  if (name.includes('education') || name.includes('school') || name.includes('vidya') || name.includes('shiksha')) cats.push('education');
-  if (name.includes('animal') || name.includes('prani')) cats.push('animal_welfare');
-  if (name.includes('environment') || name.includes('green') || name.includes('paryavaran')) cats.push('environment');
-  if (desc.includes('disaster') || desc.includes('relief') || desc.includes('flood')) cats.push('disaster_relief');
-
-  if (cats.length === 0) cats.push('general_charity');
-  return cats;
-}
-
-function osmElementToNGO(element: any): IndiaNGO | null {
-  const tags = element.tags || {};
-  const name = tags['name'] || tags['name:en'] || tags['operator'];
-  if (!name) return null;
-
-  let lat: number | undefined;
-  let lng: number | undefined;
-
-  if (element.type === 'node') {
-    lat = element.lat;
-    lng = element.lon;
-  } else if (element.center) {
-    lat = element.center.lat;
-    lng = element.center.lon;
-  }
-
-  const address = [
-    tags['addr:housenumber'],
-    tags['addr:street'],
-    tags['addr:suburb'],
-  ].filter(Boolean).join(', ');
-
-  const city = tags['addr:city'] || tags['addr:town'] || tags['addr:village'] || '';
-  const state = tags['addr:state'] || '';
-  const pincode = tags['addr:postcode'] || '';
-
-  return {
-    id: `osm-${element.type}-${element.id}`,
-    osmId: `${element.type}/${element.id}`,
-    name: name.trim(),
-    description: tags['description'] || tags['note'] || undefined,
-    categories: osmTagsToCategories(tags),
-    address: address || undefined,
-    city: city || undefined,
-    state: state || undefined,
-    pincode: pincode || undefined,
-    latitude: lat,
-    longitude: lng,
-    phone: tags['phone'] || tags['contact:phone'] || undefined,
-    email: tags['email'] || tags['contact:email'] || undefined,
-    website: tags['website'] || tags['contact:website'] || undefined,
-    sourceName: 'OpenStreetMap',
-    sourceUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
-    verificationStatus: 'source_listed',
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-// ─── Supabase NGOs + Verified Profiles + Partners provider ────────────────────
-
-async function fetchFromSupabase(params: {
-  query?: string;
-  city?: string;
-  state?: string;
-  categories?: NGOCategory[];
-  lat?: number;
-  lng?: number;
-  radiusKm?: number;
-  page?: number;
-  pageSize?: number;
-}): Promise<IndiaNGO[]> {
-  const results: IndiaNGO[] = [];
-
-  // 1. Real verified NGO accounts from profiles table (always exists in ShareBite)
-  try {
-    let pq = supabase
-      .from('profiles')
-      .select('id, full_name, organization_name, bio, address, city, latitude, longitude, phone, email, registration_number, is_verified, operating_hours, updated_at, created_at')
-      .in('role', ['ngo', 'receiver', 'acceptor'])
-      .eq('is_verified', true)
-      .limit(params.pageSize || 50);
-
-    if (params.query) {
-      pq = pq.or(`organization_name.ilike.%${params.query}%,full_name.ilike.%${params.query}%,city.ilike.%${params.query}%`);
-    }
-    if (params.city) pq = pq.ilike('city', `%${params.city}%`);
-
-    const { data: profileNGOs } = await pq;
-    if (profileNGOs) {
-      for (const p of profileNGOs as any[]) {
-        results.push({
-          id: p.id,
-          name: p.organization_name || p.full_name || 'Verified NGO',
-          description: p.bio || undefined,
-          categories: ['food_distribution'],
-          address: p.address || undefined,
-          city: p.city || undefined,
-          latitude: p.latitude ?? undefined,
-          longitude: p.longitude ?? undefined,
-          phone: p.phone || undefined,
-          email: p.email || undefined,
-          registrationNumber: p.registration_number || undefined,
-          sourceName: 'ShareBite Verified NGO',
-          verificationStatus: p.is_verified ? 'sharebite_verified' : 'unverified',
-          acceptsFoodDonations: true,
-          operatingHours: p.operating_hours || undefined,
-          createdAt: p.created_at,
-          updatedAt: p.updated_at,
-        });
-      }
-    }
-  } catch {}
-
-  // 2. Real partners table records
-  try {
-    let partQ = supabase
-      .from('partners')
-      .select('*')
-      .eq('is_verified', true)
-      .limit(params.pageSize || 50);
-
-    if (params.query) {
-      partQ = partQ.or(`organization_name.ilike.%${params.query}%,city.ilike.%${params.query}%`);
-    }
-    if (params.city) partQ = partQ.ilike('city', `%${params.city}%`);
-
-    const { data: partnerRows } = await partQ;
-    if (partnerRows) {
-      for (const row of partnerRows as any[]) {
-        results.push({
-          id: row.profile_id || row.id,
-          name: row.organization_name,
-          description: row.description || undefined,
-          categories: ['food_distribution'],
-          address: row.address || undefined,
-          city: row.city || undefined,
-          latitude: row.latitude ?? undefined,
-          longitude: row.longitude ?? undefined,
-          sourceName: 'ShareBite Partner',
-          verificationStatus: row.is_verified ? 'sharebite_verified' : 'unverified',
-          acceptsFoodDonations: true,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        });
-      }
-    }
-  } catch {}
-
-  return results;
-}
-
-// ─── Overpass query with retry & timeout ─────────────────────────────────────
-
-async function fetchFromOverpass(query: string, signal?: AbortSignal): Promise<any[]> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4-second timeout
-    if (signal) {
-      signal.addEventListener('abort', () => controller.abort());
-    }
-
-    const res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.elements || [];
-  } catch {
-    return [];
-  }
-}
-
-// ─── Curated Verified Indian NGOs Directory ──────────────────────────────────
-
-export const CURATED_INDIA_NGOS: IndiaNGO[] = [
-  {
-    id: 'curated-akshaya-patra-delhi',
-    name: 'The Akshaya Patra Foundation (Delhi NCR)',
-    slug: 'akshaya-patra-delhi',
-    description: "World’s largest NGO-run school meal program, serving millions of wholesome mid-day meals every school day across India.",
-    categories: ['food_distribution', 'child_welfare', 'education'],
-    address: 'C-56/39, Sector 62, Noida, Delhi NCR',
-    city: 'Delhi',
-    district: 'Gautam Buddha Nagar',
-    state: 'Delhi',
-    pincode: '201301',
-    latitude: 28.6280,
-    longitude: 77.3689,
-    phone: '+91 80 3014 3400',
-    email: 'infodesk@akshayapatra.org',
-    website: 'https://www.akshayapatra.org',
-    registrationNumber: 'TRUST/BLR/4502/2001',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.akshayapatra.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 7:00 AM - 6:00 PM',
-  },
-  {
-    id: 'curated-rha-delhi',
-    name: 'Robin Hood Army - Central & South Delhi',
-    slug: 'robin-hood-army-delhi',
-    description: 'Zero-funds volunteer organization redistributing surplus food from restaurants, weddings, and communities to the less fortunate.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: 'Green Park & Hauz Khas, New Delhi',
-    city: 'Delhi',
-    district: 'South Delhi',
-    state: 'Delhi',
-    pincode: '110016',
-    latitude: 28.5535,
-    longitude: 77.2069,
-    phone: '+91 99999 12345',
-    email: 'info@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 9:00 AM - 10:00 PM',
-  },
-  {
-    id: 'curated-rha-najafgarh',
-    name: 'Robin Hood Army - Najafgarh & Dwarka Chapter',
-    slug: 'robin-hood-army-najafgarh',
-    description: 'Active hunger-relief youth network driving food collection drives and education programs across West Delhi and Najafgarh.',
-    categories: ['food_distribution', 'homeless_support', 'child_welfare'],
-    address: 'Sector 12 Dwarka & Najafgarh Road, New Delhi',
-    city: 'Najafgarh',
-    district: 'South West Delhi',
-    state: 'Delhi',
-    pincode: '110043',
-    latitude: 28.5921,
-    longitude: 77.0460,
-    phone: '+91 98111 87654',
-    email: 'delhi@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 8:00 AM - 9:00 PM',
-  },
-  {
-    id: 'curated-deepalaya-najafgarh',
-    name: 'Deepalaya Najafgarh Center',
-    slug: 'deepalaya-najafgarh',
-    description: 'Pioneering Delhi NGO empowering vulnerable children and communities through education, vocational skilling, and daily nutrition.',
-    categories: ['child_welfare', 'education', 'food_distribution', 'women_empowerment'],
-    address: 'Najafgarh - Dhansa Road, Najafgarh, New Delhi',
-    city: 'Najafgarh',
-    district: 'South West Delhi',
-    state: 'Delhi',
-    pincode: '110043',
-    latitude: 28.6090,
-    longitude: 76.9854,
-    phone: '+91 11 2684 4153',
-    email: 'support@deepalaya.org',
-    website: 'https://deepalaya.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://deepalaya.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Fri 9:00 AM - 5:00 PM',
-  },
-  {
-    id: 'curated-uday-foundation',
-    name: 'Uday Foundation',
-    slug: 'uday-foundation-delhi',
-    description: 'Provides cooked food, dry rations, and healthcare support to destitute patients and families outside AIIMS and Safdarjung hospitals.',
-    categories: ['food_distribution', 'healthcare', 'disaster_relief', 'homeless_support'],
-    address: '113-A, Sri Aurobindo Marg, Adchini, New Delhi',
-    city: 'Delhi',
-    district: 'South Delhi',
-    state: 'Delhi',
-    pincode: '110017',
-    latitude: 28.5355,
-    longitude: 77.1955,
-    phone: '+91 11 2656 1444',
-    email: 'info@udayfoundation.org',
-    website: 'https://www.udayfoundation.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.udayfoundation.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 9:30 AM - 6:30 PM',
-  },
-  {
-    id: 'curated-goonj-delhi',
-    name: 'Goonj - Delhi Head Office',
-    slug: 'goonj-delhi',
-    description: 'Ramon Magsaysay award-winning organization channelizing urban surplus to trigger rural community development and disaster relief.',
-    categories: ['disaster_relief', 'women_empowerment', 'homeless_support', 'general_charity'],
-    address: 'J-93, Sarita Vihar, New Delhi',
-    city: 'Delhi',
-    district: 'South East Delhi',
-    state: 'Delhi',
-    pincode: '110076',
-    latitude: 28.5298,
-    longitude: 77.3005,
-    phone: '+91 11 2697 2351',
-    email: 'mail@goonj.org',
-    website: 'https://goonj.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://goonj.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 9:00 AM - 5:30 PM',
-  },
-  {
-    id: 'curated-feeding-india',
-    name: 'Feeding India by Zomato',
-    slug: 'feeding-india-delhi',
-    description: 'National hunger-relief non-profit working towards zero hunger through sustainable daily feeding programs and nutrition kits.',
-    categories: ['food_distribution', 'child_welfare', 'homeless_support'],
-    address: 'Ground Floor, Tower A, DLF Cyber City, Gurugram / Delhi NCR',
-    city: 'Delhi',
-    district: 'Gurugram',
-    state: 'Delhi',
-    pincode: '122002',
-    latitude: 28.4907,
-    longitude: 77.0888,
-    phone: '+91 98711 77744',
-    email: 'contact@feedingindia.org',
-    website: 'https://www.feedingindia.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.feedingindia.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 8:00 AM - 8:00 PM',
-  },
-  {
-    id: 'curated-cry-delhi',
-    name: 'CRY - Child Rights and You (Delhi)',
-    slug: 'cry-delhi',
-    description: 'Dedicated to ensuring happy, healthy, and creative childhoods for underprivileged children through education, nutrition, and safety.',
-    categories: ['child_welfare', 'education', 'healthcare'],
-    address: '632, Lane No. 3, Westend Marg, Saidulajab, New Delhi',
-    city: 'Delhi',
-    district: 'South Delhi',
-    state: 'Delhi',
-    pincode: '110030',
-    latitude: 28.5146,
-    longitude: 77.1986,
-    phone: '+91 11 2953 3451',
-    email: 'cryinfo.del@crymail.org',
-    website: 'https://www.cry.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.cry.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: false,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Fri 9:30 AM - 6:00 PM',
-  },
-  {
-    id: 'curated-delhi-roti-bank',
-    name: 'Delhi Roti Bank Trust',
-    slug: 'delhi-roti-bank',
-    description: 'Dedicated food recovery initiative collecting fresh surplus food from banquets, corporate cafeterias, and kitchens to serve slums.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: 'Azadpur Mandi, GT Road, Delhi',
-    city: 'Delhi',
-    district: 'North Delhi',
-    state: 'Delhi',
-    pincode: '110033',
-    latitude: 28.7118,
-    longitude: 77.1772,
-    phone: '+91 86555 80001',
-    email: 'info@rotibanktrust.org',
-    website: 'https://rotibanktrust.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://rotibanktrust.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 10:00 AM - 9:00 PM',
-  },
-  {
-    id: 'curated-aasra-delhi',
-    name: 'Aasra Food & Care Foundation',
-    slug: 'aasra-food-delhi',
-    description: 'Grassroots community trust operating community kitchens and evening meals distribution along the Najafgarh-Uttam Nagar corridor.',
-    categories: ['food_distribution', 'homeless_support', 'child_welfare'],
-    address: 'Main Najafgarh Road, Near Metro Pillar 680, Uttam Nagar, New Delhi',
-    city: 'Najafgarh',
-    district: 'West Delhi',
-    state: 'Delhi',
-    pincode: '110059',
-    latitude: 28.6219,
-    longitude: 77.0624,
-    phone: '+91 11 2555 4321',
-    email: 'delhiaasra@gmail.com',
-    website: 'https://aasra.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://aasra.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 9:00 AM - 7:00 PM',
-  },
-  {
-    id: 'curated-smile-foundation',
-    name: 'Smile Foundation National Headquarters',
-    slug: 'smile-foundation-delhi',
-    description: 'Directly benefiting over 1.5 million children and families through education, healthcare, livelihood, and women empowerment.',
-    categories: ['child_welfare', 'healthcare', 'education', 'women_empowerment'],
-    address: '161 B/4, 3rd Floor, Gulmohar House, Yusuf Sarai Community Centre, New Delhi',
-    city: 'Delhi',
-    district: 'South Delhi',
-    state: 'Delhi',
-    pincode: '110049',
-    latitude: 28.5603,
-    longitude: 77.2104,
-    phone: '+91 11 4312 3700',
-    email: 'info@smilefoundationindia.org',
-    website: 'https://www.smilefoundationindia.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.smilefoundationindia.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Fri 9:30 AM - 6:00 PM',
-  },
-  {
-    id: 'curated-mumbai-roti-bank',
-    name: 'Mumbai Roti Bank',
-    slug: 'mumbai-roti-bank',
-    description: 'Founded by Mumbai Police Ex-DGP D. Sivanandhan, serving over 10,000 fresh cooked meals daily across Mumbai and suburban stations.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: 'Chhabildas Road, Dadar West, Mumbai',
-    city: 'Mumbai',
-    district: 'Mumbai City',
-    state: 'Maharashtra',
-    pincode: '400028',
-    latitude: 19.0178,
-    longitude: 72.8478,
-    phone: '+91 86555 80001',
-    email: 'info@rotibanktrust.org',
-    website: 'https://rotibanktrust.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://rotibanktrust.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 8:30 AM - 9:30 PM',
-  },
-  {
-    id: 'curated-rha-mumbai',
-    name: 'Robin Hood Army - Mumbai',
-    slug: 'robin-hood-army-mumbai',
-    description: 'Citywide chapters mobilizing young professionals to rescue surplus food from wedding halls, caterers, and bakeries.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: 'Hill Road, Bandra West, Mumbai',
-    city: 'Mumbai',
-    district: 'Mumbai Suburban',
-    state: 'Maharashtra',
-    pincode: '400050',
-    latitude: 19.0596,
-    longitude: 72.8295,
-    phone: '+91 99999 12345',
-    email: 'mumbai@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 8:00 AM - 10:00 PM',
-  },
-  {
-    id: 'curated-annamrita-mumbai',
-    name: 'Annamrita Foundation - Mumbai',
-    slug: 'annamrita-foundation-mumbai',
-    description: 'ISO-certified mega kitchens serving hygienic, warm, and nutritious mid-day meals to municipal school children daily.',
-    categories: ['food_distribution', 'child_welfare'],
-    address: 'MIDC Industrial Area, Taloja, Navi Mumbai',
-    city: 'Mumbai',
-    district: 'Thane',
-    state: 'Maharashtra',
-    pincode: '410208',
-    latitude: 19.0330,
-    longitude: 73.0297,
-    phone: '+91 22 2741 2345',
-    email: 'contact@annamrita.org',
-    website: 'https://annamrita.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://annamrita.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 6:00 AM - 4:00 PM',
-  },
-  {
-    id: 'curated-salaam-baalak-mumbai',
-    name: 'Salaam Baalak Trust Mumbai',
-    slug: 'salaam-baalak-mumbai',
-    description: 'Comprehensive care, shelter, nutrition, and formal schooling for runaway and street children around Mumbai railway terminals.',
-    categories: ['child_welfare', 'homeless_support', 'education'],
-    address: 'Grant Road East, Mumbai',
-    city: 'Mumbai',
-    district: 'Mumbai City',
-    state: 'Maharashtra',
-    pincode: '400007',
-    latitude: 18.9633,
-    longitude: 72.8170,
-    phone: '+91 22 2387 1978',
-    email: 'sbtmumbai@yahoo.com',
-    website: 'https://salaambaalaktrust.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://salaambaalaktrust.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 24 Hours',
-  },
-  {
-    id: 'curated-rha-pune',
-    name: 'Robin Hood Army - Pune',
-    slug: 'robin-hood-army-pune',
-    description: 'Distributing food and smiles across slum settlements, construction sites, and old-age shelters throughout Pune.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: 'Paud Road, Kothrud, Pune',
-    city: 'Pune',
-    district: 'Pune',
-    state: 'Maharashtra',
-    pincode: '411038',
-    latitude: 18.5074,
-    longitude: 73.8077,
-    phone: '+91 98220 54321',
-    email: 'pune@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 9:00 AM - 9:00 PM',
-  },
-  {
-    id: 'curated-akshaya-patra-bengaluru',
-    name: 'The Akshaya Patra Foundation - Bengaluru',
-    slug: 'akshaya-patra-bengaluru',
-    description: 'Headquartered in Bengaluru, delivering over 1.8 lakh fresh mid-day meals every morning across Karnataka schools.',
-    categories: ['food_distribution', 'child_welfare', 'education'],
-    address: 'ISKCON Hill, Chord Road, Rajajinagar, Bengaluru',
-    city: 'Bengaluru',
-    district: 'Bengaluru Urban',
-    state: 'Karnataka',
-    pincode: '560010',
-    latitude: 13.0098,
-    longitude: 77.5511,
-    phone: '+91 80 3014 3400',
-    email: 'bangalore@akshayapatra.org',
-    website: 'https://www.akshayapatra.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.akshayapatra.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 7:00 AM - 6:00 PM',
-  },
-  {
-    id: 'curated-rha-bengaluru',
-    name: 'Robin Hood Army - Bengaluru',
-    slug: 'robin-hood-army-bengaluru',
-    description: 'Hyperlocal volunteer drives mapping IT corridors, event halls, and restaurants to feed migrant worker settlements and shelter homes.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: '100ft Road, Indiranagar, Bengaluru',
-    city: 'Bengaluru',
-    district: 'Bengaluru Urban',
-    state: 'Karnataka',
-    pincode: '560038',
-    latitude: 12.9784,
-    longitude: 77.6408,
-    phone: '+91 98860 12345',
-    email: 'blr@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 9:00 AM - 10:00 PM',
-  },
-  {
-    id: 'curated-hasiru-dala-blr',
-    name: 'Hasiru Dala (Bengaluru)',
-    slug: 'hasiru-dala-bengaluru',
-    description: 'Social impact organization ensuring dignified livelihoods, social security, and emergency dry food distribution for waste pickers.',
-    categories: ['environment', 'homeless_support', 'women_empowerment'],
-    address: 'No 8, 2nd Cross, Sampige Road, Malleshwaram, Bengaluru',
-    city: 'Bengaluru',
-    district: 'Bengaluru Urban',
-    state: 'Karnataka',
-    pincode: '560003',
-    latitude: 13.0031,
-    longitude: 77.5701,
-    phone: '+91 80 4112 5590',
-    email: 'info@hasirudala.in',
-    website: 'https://hasirudala.in',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://hasirudala.in',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Fri 9:30 AM - 5:30 PM',
-  },
-  {
-    id: 'curated-goonj-bengaluru',
-    name: 'Goonj - Bengaluru Processing Center',
-    slug: 'goonj-bengaluru',
-    description: 'Regional center collecting urban surplus materials, dry food items, and school kits for distribution in Karnataka villages.',
-    categories: ['disaster_relief', 'women_empowerment', 'homeless_support'],
-    address: 'Hosur Main Road, Kudlu Gate, Bengaluru',
-    city: 'Bengaluru',
-    district: 'Bengaluru Urban',
-    state: 'Karnataka',
-    pincode: '560068',
-    latitude: 12.8931,
-    longitude: 77.6436,
-    phone: '+91 80 4851 8604',
-    email: 'bangalore@goonj.org',
-    website: 'https://goonj.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://goonj.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 9:30 AM - 5:30 PM',
-  },
-  {
-    id: 'curated-bhoomika-chennai',
-    name: 'Bhoomika Trust - Chennai',
-    slug: 'bhoomika-trust-chennai',
-    description: 'Pioneering disaster rehabilitation, food relief kitchens during cyclones and floods, and support for special-needs children.',
-    categories: ['disaster_relief', 'education', 'healthcare'],
-    address: '12, Subbaraya Avenue, Abhiramapuram, Chennai',
-    city: 'Chennai',
-    district: 'Chennai',
-    state: 'Tamil Nadu',
-    pincode: '600018',
-    latitude: 13.0339,
-    longitude: 80.2520,
-    phone: '+91 44 2498 7480',
-    email: 'contact@bhoomikatrust.org',
-    website: 'https://bhoomikatrust.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://bhoomikatrust.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 9:30 AM - 6:00 PM',
-  },
-  {
-    id: 'curated-akshaya-patra-hyderabad',
-    name: 'The Akshaya Patra Foundation - Hyderabad',
-    slug: 'akshaya-patra-hyderabad',
-    description: 'High-tech centralized kitchen serving thousands of hot, hygienic mid-day meals across government schools in Telangana.',
-    categories: ['food_distribution', 'child_welfare'],
-    address: 'Gandipet Main Road, Narsingi, Hyderabad',
-    city: 'Hyderabad',
-    district: 'Ranga Reddy',
-    state: 'Telangana',
-    pincode: '500075',
-    latitude: 17.3850,
-    longitude: 78.3610,
-    phone: '+91 40 2341 5500',
-    email: 'hyderabad@akshayapatra.org',
-    website: 'https://www.akshayapatra.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.akshayapatra.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 7:00 AM - 5:00 PM',
-  },
-  {
-    id: 'curated-calcutta-rescue',
-    name: 'Calcutta Rescue',
-    slug: 'calcutta-rescue',
-    description: 'Providing primary healthcare clinics, street schools, and high-protein nutrition to the poorest slum communities across Kolkata.',
-    categories: ['healthcare', 'education', 'homeless_support', 'food_distribution'],
-    address: '85, Collin Street, 4th Floor, Kolkata',
-    city: 'Kolkata',
-    district: 'Kolkata',
-    state: 'West Bengal',
-    pincode: '700016',
-    latitude: 22.5539,
-    longitude: 88.3582,
-    phone: '+91 33 2217 5675',
-    email: 'info@calcuttarescue.org',
-    website: 'https://calcuttarescue.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://calcuttarescue.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 9:00 AM - 5:00 PM',
-  },
-  {
-    id: 'curated-rha-kolkata',
-    name: 'Robin Hood Army - Kolkata',
-    slug: 'robin-hood-army-kolkata',
-    description: 'Volunteers collecting nightly surpluses from Kolkata restaurants, catering events, and clubs to feed people in need.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: 'Park Street Area, Kolkata',
-    city: 'Kolkata',
-    district: 'Kolkata',
-    state: 'West Bengal',
-    pincode: '700016',
-    latitude: 22.5513,
-    longitude: 88.3526,
-    phone: '+91 98300 12345',
-    email: 'kolkata@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 9:00 AM - 9:00 PM',
-  },
-  {
-    id: 'curated-akshaya-patra-jaipur',
-    name: 'The Akshaya Patra Foundation - Jaipur',
-    slug: 'akshaya-patra-jaipur',
-    description: 'State-of-the-art kitchen feeding over 1.2 lakh children every school day across Jaipur and surrounding rural areas.',
-    categories: ['food_distribution', 'child_welfare'],
-    address: 'Mahal Road, Jagatpura, Jaipur',
-    city: 'Jaipur',
-    district: 'Jaipur',
-    state: 'Rajasthan',
-    pincode: '302017',
-    latitude: 26.8206,
-    longitude: 75.8569,
-    phone: '+91 141 275 8888',
-    email: 'jaipur@akshayapatra.org',
-    website: 'https://www.akshayapatra.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.akshayapatra.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 7:00 AM - 5:30 PM',
-  },
-  {
-    id: 'curated-jaipur-foot',
-    name: 'Jaipur Foot (BMVSS)',
-    slug: 'jaipur-foot-bmvss',
-    description: 'World’s largest organization for the disabled, providing artificial limbs, calipers, and mobility aids completely free of cost.',
-    categories: ['disability_support', 'healthcare', 'general_charity'],
-    address: '13-A, Gurunank Path, Near Airport, Sanganer, Jaipur',
-    city: 'Jaipur',
-    district: 'Jaipur',
-    state: 'Rajasthan',
-    pincode: '302029',
-    latitude: 26.8143,
-    longitude: 75.8016,
-    phone: '+91 141 252 2404',
-    email: 'bmvss@jaipurfoot.org',
-    website: 'https://jaipurfoot.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://jaipurfoot.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: false,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 9:00 AM - 5:00 PM',
-  },
-  {
-    id: 'curated-rha-ahmedabad',
-    name: 'Robin Hood Army - Ahmedabad',
-    slug: 'robin-hood-army-ahmedabad',
-    description: 'Food rescue and community development drives partnering with city hotels, wedding halls, and colleges.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: 'C.G. Road, Navrangpura, Ahmedabad',
-    city: 'Ahmedabad',
-    district: 'Ahmedabad',
-    state: 'Gujarat',
-    pincode: '380009',
-    latitude: 23.0365,
-    longitude: 72.5611,
-    phone: '+91 98250 11223',
-    email: 'ahmedabad@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 9:00 AM - 9:30 PM',
-  },
-  {
-    id: 'curated-rha-bhopal',
-    name: 'Robin Hood Army - Bhopal',
-    slug: 'robin-hood-army-bhopal',
-    description: 'Volunteer chapter conducting daily surplus food collections and weekend Academy teaching sessions for kids in Bhopal.',
-    categories: ['food_distribution', 'child_welfare', 'homeless_support'],
-    address: 'E-3, Arera Colony, Bhopal',
-    city: 'Bhopal',
-    district: 'Bhopal',
-    state: 'Madhya Pradesh',
-    pincode: '462016',
-    latitude: 23.2167,
-    longitude: 77.4333,
-    phone: '+91 98260 99887',
-    email: 'bhopal@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 9:00 AM - 8:30 PM',
-  },
-  {
-    id: 'curated-akshaya-patra-lucknow',
-    name: 'The Akshaya Patra Foundation - Lucknow',
-    slug: 'akshaya-patra-lucknow',
-    description: 'Feeds over 100,000 students daily in government primary and secondary schools across Lucknow district.',
-    categories: ['food_distribution', 'child_welfare'],
-    address: 'Amar Shaheed Path, Sector 11, Vrindavan Colony, Lucknow',
-    city: 'Lucknow',
-    district: 'Lucknow',
-    state: 'Uttar Pradesh',
-    pincode: '226029',
-    latitude: 26.7845,
-    longitude: 80.9542,
-    phone: '+91 522 249 5500',
-    email: 'lucknow@akshayapatra.org',
-    website: 'https://www.akshayapatra.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.akshayapatra.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 7:00 AM - 5:00 PM',
-  },
-  {
-    id: 'curated-akshaya-patra-patna',
-    name: 'The Akshaya Patra Foundation - Patna',
-    slug: 'akshaya-patra-patna',
-    description: 'Centralized mega kitchen serving hot mid-day meals to school students across Patna and surrounding districts.',
-    categories: ['food_distribution', 'child_welfare'],
-    address: 'Bailey Road, Danapur, Patna',
-    city: 'Patna',
-    district: 'Patna',
-    state: 'Bihar',
-    pincode: '801503',
-    latitude: 25.6174,
-    longitude: 85.0478,
-    phone: '+91 612 250 8800',
-    email: 'patna@akshayapatra.org',
-    website: 'https://www.akshayapatra.org',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://www.akshayapatra.org',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Mon-Sat 7:00 AM - 5:00 PM',
-  },
-  {
-    id: 'curated-rha-chandigarh',
-    name: 'Robin Hood Army - Chandigarh',
-    slug: 'robin-hood-army-chandigarh',
-    description: 'Active tri-city chapter feeding hundreds of underprivileged citizens across Chandigarh, Mohali, and Panchkula.',
-    categories: ['food_distribution', 'homeless_support'],
-    address: 'Sector 17, Chandigarh',
-    city: 'Chandigarh',
-    district: 'Chandigarh',
-    state: 'Chandigarh',
-    pincode: '160017',
-    latitude: 30.7398,
-    longitude: 76.7827,
-    phone: '+91 98140 33445',
-    email: 'chandigarh@robinhoodarmy.com',
-    website: 'https://robinhoodarmy.com',
-    sourceName: 'India NGO Registry',
-    sourceUrl: 'https://robinhoodarmy.com',
-    verificationStatus: 'sharebite_verified',
-    acceptsFoodDonations: true,
-    acceptsVolunteers: true,
-    operatingHours: 'Daily 9:00 AM - 9:00 PM',
-  },
-];
-
-// ─── Deduplication ────────────────────────────────────────────────────────────
-
-function deduplicateNGOs(ngos: IndiaNGO[]): IndiaNGO[] {
-  const seen = new Map<string, IndiaNGO>();
-  for (const ngo of ngos) {
-    const key = `${ngo.name.toLowerCase().replace(/[^a-z0-9]/g, '')}_${(ngo.city || '').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-    if (!seen.has(key)) seen.set(key, ngo);
-  }
-  return Array.from(seen.values());
-}
-
-// ─── Distance enrichment ──────────────────────────────────────────────────────
-
-function enrichWithDistance(ngos: IndiaNGO[], lat?: number, lng?: number): IndiaNGO[] {
-  if (!lat || !lng) return ngos;
-  return ngos.map((ngo) => {
-    if (ngo.latitude && ngo.longitude) {
-      return {
-        ...ngo,
-        distanceKm: LocationService.calculateDistance(lat, lng, ngo.latitude, ngo.longitude),
-      };
-    }
-    return ngo;
-  });
-}
-
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ==============================================================================
+// ShareBite — Hybrid India-Wide NGO Discovery Search Engine
+//
+// Data Sources (Hybrid, Deduplicated & Truthfully Labeled):
+//   1. Supabase Registered NGOs (public.search_registered_ngos RPC / profiles + partners)
+//      -> Labeled: "ShareBite Registered NGO"
+//   2. Google Places API (New) via server-side proxy (/api/ngo-search & /api/ngo-details)
+//      -> Labeled: "External NGO Listing" (never permanently stored in Supabase)
+//   3. OpenStreetMap (Nominatim + Overpass India-scoped) & Verified Public NGO Directory
+//      -> Labeled: "External NGO Listing"
+//
+// Truthfulness & Compliance Guarantees:
+//   - Never invent contact numbers, addresses, or images.
+//   - Never mark external NGOs as ShareBite Verified or official partners.
+//   - Only mark "Government Registration Confirmed" when independently verified.
+//   - External NGOs cannot receive private ShareBite messages or delivery assignments.
+// ==============================================================================
 
 export interface NGOSearchParams {
   query?: string;
   lat?: number;
   lng?: number;
   radiusKm?: number;
-  city?: string;
   state?: string;
+  city?: string;
   categories?: NGOCategory[];
-  sortBy?: 'nearest' | 'name' | 'updated';
-  page?: number;
-  pageSize?: number;
+  onlyShareBiteRegistered?: boolean;
+  onlyGovVerified?: boolean;
+  sortBy?: 'relevance' | 'nearest' | 'name';
+  pageToken?: string;
+  limit?: number;
 }
 
-export interface NGOSearchResult {
+export interface NGOSearchResponse {
   ngos: IndiaNGO[];
   total: number;
-  hasMore: boolean;
   sources: string[];
-  fromCache: boolean;
-  searchedCity?: string;
+  hasMore: boolean;
+  nextPageToken: string | null;
+  quotaExceeded: boolean;
+  quotaMessage?: string;
+  networkError: boolean;
+  networkMessage?: string;
+  googleAttribution: boolean;
+  parsedIntent: ParsedIndiaQuery;
 }
 
-export class NGODiscoveryService {
-  /**
-   * Primary search function — queries Supabase + Curated Verified Directory + OSM
-   * Returns deduplicated, distance-enriched, sorted results.
-   */
-  static async searchNGOs(params: NGOSearchParams, signal?: AbortSignal): Promise<NGOSearchResult> {
-    const pageSize = params.pageSize || 40;
-    const sources: string[] = [];
+export interface ParsedIndiaQuery {
+  raw: string;
+  cleanQuery: string;
+  detectedState?: string;
+  detectedCity?: string;
+  detectedPincode?: string;
+  detectedCategories: NGOCategory[];
+  nameTokens: string[];
+  isNearbyQuery: boolean;
+}
 
-    // 1. Supabase database query
-    const supabaseNGOs = await fetchFromSupabase({
-      query: params.query,
-      city: params.city,
-      state: params.state,
-      categories: params.categories,
-      lat: params.lat,
-      lng: params.lng,
-      radiusKm: params.radiusKm,
-      page: params.page,
-      pageSize,
-    });
-    if (supabaseNGOs.length > 0) sources.push('ShareBite Database');
+export interface SearchSuggestionItem {
+  id: string;
+  label: string;
+  sublabel?: string;
+  query: string;
+  kind: 'recent' | 'ngo' | 'location' | 'category' | 'nearby';
+}
 
-    // 2. Curated verified Indian NGO directory
-    const curatedNGOs = CURATED_INDIA_NGOS.filter((ngo) => {
-      if (params.query) {
-        const q = params.query.toLowerCase().trim();
-        const matchesQuery =
-          ngo.name.toLowerCase().includes(q) ||
-          (ngo.city || '').toLowerCase().includes(q) ||
-          (ngo.district || '').toLowerCase().includes(q) ||
-          (ngo.state || '').toLowerCase().includes(q) ||
-          (ngo.pincode || '').includes(q) ||
-          (ngo.address || '').toLowerCase().includes(q) ||
-          (ngo.description || '').toLowerCase().includes(q);
-        if (!matchesQuery) return false;
-      }
-      if (params.city) {
-        const c = params.city.toLowerCase().trim();
-        const inCity =
-          (ngo.city || '').toLowerCase().includes(c) ||
-          (ngo.address || '').toLowerCase().includes(c) ||
-          (ngo.district || '').toLowerCase().includes(c);
-        if (!inCity) return false;
-      }
-      if (params.state) {
-        const s = params.state.toLowerCase().trim();
-        const inState = (ngo.state || '').toLowerCase().includes(s);
-        if (!inState) return false;
-      }
-      if (params.categories && params.categories.length > 0) {
-        const hasCategory = ngo.categories.some((cat) => params.categories!.includes(cat));
-        if (!hasCategory) return false;
-      }
-      return true;
-    });
-    if (curatedNGOs.length > 0) sources.push('Verified Directory');
+export const INDIA_STATES: string[] = [
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chhattisgarh',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+  'Delhi',
+  'Chandigarh',
+  'Jammu & Kashmir',
+  'Ladakh',
+  'Puducherry',
+];
 
-    // 3. OpenStreetMap Overpass (live geospatial query with 4s timeout)
-    let osmNGOs: IndiaNGO[] = [];
+export const NGO_CATEGORIES: { value: NGOCategory; label: string; emoji: string }[] = [
+  { value: 'food_distribution', label: 'Food Donation & Banks', emoji: '🍱' },
+  { value: 'homeless_support', label: 'Shelters & Homeless Care', emoji: '🏠' },
+  { value: 'child_welfare', label: 'Child Welfare', emoji: '👧' },
+  { value: 'education', label: 'Education & Literacy', emoji: '📚' },
+  { value: 'elderly_care', label: 'Elderly Care', emoji: '👴' },
+  { value: 'healthcare', label: 'Healthcare & Relief', emoji: '🏥' },
+  { value: 'women_empowerment', label: 'Women Empowerment', emoji: '👩' },
+  { value: 'disaster_relief', label: 'Disaster Relief', emoji: '🆘' },
+  { value: 'disability_support', label: 'Disability Support', emoji: '♿' },
+  { value: 'animal_welfare', label: 'Animal Welfare', emoji: '🐾' },
+  { value: 'environment', label: 'Environment', emoji: '🌿' },
+  { value: 'general_charity', label: 'Community Welfare', emoji: '🤝' },
+];
+
+// Major Indian cities & districts with accurate coordinates for location-aware filtering
+const INDIA_CITY_DIRECTORY: Record<string, { city: string; state: string; lat: number; lng: number }> = {
+  delhi: { city: 'New Delhi', state: 'Delhi', lat: 28.6139, lng: 77.209 },
+  'new delhi': { city: 'New Delhi', state: 'Delhi', lat: 28.6139, lng: 77.209 },
+  ncr: { city: 'New Delhi', state: 'Delhi', lat: 28.6139, lng: 77.209 },
+  najafgarh: { city: 'New Delhi', state: 'Delhi', lat: 28.6092, lng: 76.9798 },
+  dwarka: { city: 'New Delhi', state: 'Delhi', lat: 28.5921, lng: 77.046 },
+  gurugram: { city: 'Gurugram', state: 'Haryana', lat: 28.4595, lng: 77.0266 },
+  gurgaon: { city: 'Gurugram', state: 'Haryana', lat: 28.4595, lng: 77.0266 },
+  noida: { city: 'Noida', state: 'Uttar Pradesh', lat: 28.5355, lng: 77.391 },
+  faridabad: { city: 'Faridabad', state: 'Haryana', lat: 28.4089, lng: 77.3178 },
+  ghaziabad: { city: 'Ghaziabad', state: 'Uttar Pradesh', lat: 28.6692, lng: 77.4538 },
+  mumbai: { city: 'Mumbai', state: 'Maharashtra', lat: 19.076, lng: 72.8777 },
+  bombay: { city: 'Mumbai', state: 'Maharashtra', lat: 19.076, lng: 72.8777 },
+  pune: { city: 'Pune', state: 'Maharashtra', lat: 18.5204, lng: 73.8567 },
+  nagpur: { city: 'Nagpur', state: 'Maharashtra', lat: 21.1458, lng: 79.0882 },
+  bengaluru: { city: 'Bengaluru', state: 'Karnataka', lat: 12.9716, lng: 77.5946 },
+  bangalore: { city: 'Bengaluru', state: 'Karnataka', lat: 12.9716, lng: 77.5946 },
+  hyderabad: { city: 'Hyderabad', state: 'Telangana', lat: 17.385, lng: 78.4867 },
+  chennai: { city: 'Chennai', state: 'Tamil Nadu', lat: 13.0827, lng: 80.2707 },
+  coimbatore: { city: 'Coimbatore', state: 'Tamil Nadu', lat: 11.0168, lng: 76.9558 },
+  kolkata: { city: 'Kolkata', state: 'West Bengal', lat: 22.5726, lng: 88.3639 },
+  ahmedabad: { city: 'Ahmedabad', state: 'Gujarat', lat: 23.0225, lng: 72.5714 },
+  surat: { city: 'Surat', state: 'Gujarat', lat: 21.1702, lng: 72.8311 },
+  jaipur: { city: 'Jaipur', state: 'Rajasthan', lat: 26.9124, lng: 75.7873 },
+  lucknow: { city: 'Lucknow', state: 'Uttar Pradesh', lat: 26.8467, lng: 80.9462 },
+  kanpur: { city: 'Kanpur', state: 'Uttar Pradesh', lat: 26.4499, lng: 80.3319 },
+  chandigarh: { city: 'Chandigarh', state: 'Chandigarh', lat: 30.7333, lng: 76.7794 },
+  amritsar: { city: 'Amritsar', state: 'Punjab', lat: 31.634, lng: 74.8723 },
+  ludhiana: { city: 'Ludhiana', state: 'Punjab', lat: 30.901, lng: 75.8573 },
+  jalandhar: { city: 'Jalandhar', state: 'Punjab', lat: 31.326, lng: 75.5762 },
+  patiala: { city: 'Patiala', state: 'Punjab', lat: 30.3398, lng: 76.3869 },
+  mohali: { city: 'Mohali', state: 'Punjab', lat: 30.7046, lng: 76.7179 },
+  bhopal: { city: 'Bhopal', state: 'Madhya Pradesh', lat: 23.2599, lng: 77.4126 },
+  indore: { city: 'Indore', state: 'Madhya Pradesh', lat: 22.7196, lng: 75.8577 },
+  patna: { city: 'Patna', state: 'Bihar', lat: 25.5941, lng: 85.1376 },
+  kochi: { city: 'Kochi', state: 'Kerala', lat: 9.9312, lng: 76.2673 },
+  thiruvananthapuram: { city: 'Thiruvananthapuram', state: 'Kerala', lat: 8.5241, lng: 76.9366 },
+  guwahati: { city: 'Guwahati', state: 'Assam', lat: 26.1445, lng: 91.7362 },
+  bhubaneswar: { city: 'Bhubaneswar', state: 'Odisha', lat: 20.2961, lng: 85.8245 },
+  dehradun: { city: 'Dehradun', state: 'Uttarakhand', lat: 30.3165, lng: 78.0322 },
+  ranchi: { city: 'Ranchi', state: 'Jharkhand', lat: 23.3441, lng: 85.3096 },
+  raipur: { city: 'Raipur', state: 'Chhattisgarh', lat: 21.2514, lng: 81.6296 },
+};
+
+const STATE_COORDS: Record<string, { lat: number; lng: number }> = {
+  Delhi: { lat: 28.6139, lng: 77.209 },
+  Haryana: { lat: 28.4595, lng: 77.0266 },
+  Maharashtra: { lat: 19.076, lng: 72.8777 },
+  Punjab: { lat: 31.1471, lng: 75.3412 },
+  Karnataka: { lat: 12.9716, lng: 77.5946 },
+  'Tamil Nadu': { lat: 13.0827, lng: 80.2707 },
+  'Uttar Pradesh': { lat: 26.8467, lng: 80.9462 },
+  Rajasthan: { lat: 26.9124, lng: 75.7873 },
+  Gujarat: { lat: 23.0225, lng: 72.5714 },
+  'West Bengal': { lat: 22.5726, lng: 88.3639 },
+  Telangana: { lat: 17.385, lng: 78.4867 },
+  Kerala: { lat: 10.8505, lng: 76.2711 },
+  'Madhya Pradesh': { lat: 23.2599, lng: 77.4126 },
+  Bihar: { lat: 25.5941, lng: 85.1376 },
+  Chandigarh: { lat: 30.7333, lng: 76.7794 },
+};
+
+// ==============================================================================
+// Verified Public Indian NGO Reference Listings (Real Public Data Only)
+//
+// Strictly:
+// - Zero invented phone numbers, street numbers, or images.
+// - Every entry is explicitly labeled as "external_listing" (NEVER ShareBite Verified).
+// - Only includes real public organization websites & verified outreach info.
+// ==============================================================================
+
+export const PUBLIC_INDIA_NGO_DIRECTORY: IndiaNGO[] = [
+  {
+    id: 'pub-we-care-foundation',
+    name: WE_CARE_FOUNDATION.name,
+    description:
+      'Community welfare and children education & nutrition center in Sector 57, Gurugram (Udaan Learning Center). Visited by the ShareBite outreach team to understand ground-level food distribution needs.',
+    categories: ['food_distribution', 'child_welfare', 'education', 'general_charity'],
+    address: '1321, Block H, Sector 57, Gurugram, Haryana 122003',
+    city: 'Gurugram',
+    district: 'Gurugram',
+    state: 'Haryana',
+    pincode: '122003',
+    latitude: 28.428123,
+    longitude: 77.077699,
+    phone: '+91-9810221169',
+    website: WE_CARE_FOUNDATION.websiteUrl,
+    imageUrl: WE_CARE_FOUNDATION.photo,
+    sourceName: 'Public Outreach Directory',
+    sourceUrl: WE_CARE_FOUNDATION.websiteUrl,
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-feeding-india',
+    name: 'Feeding India',
+    description:
+      'Non-profit organization working to eradicate hunger and malnutrition across India through daily meal programs and community food banks.',
+    categories: ['food_distribution', 'child_welfare'],
+    address: 'Gurugram, Haryana, India',
+    city: 'Gurugram',
+    district: 'Gurugram',
+    state: 'Haryana',
+    latitude: 28.4595,
+    longitude: 77.0266,
+    website: 'https://www.feedingindia.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.feedingindia.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-earth-saviours-gurugram',
+    name: 'The Earth Saviours Foundation',
+    description:
+      'Charitable foundation providing shelter, daily meals, and care for abandoned senior citizens and homeless individuals in Gurugram.',
+    categories: ['food_distribution', 'elderly_care', 'homeless_support'],
+    address: 'Bandhwari Village, Gurugram, Haryana',
+    city: 'Gurugram',
+    district: 'Gurugram',
+    state: 'Haryana',
+    latitude: 28.4167,
+    longitude: 77.1526,
+    website: 'https://www.earthsaviours.in/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.earthsaviours.in/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-robin-hood-army-delhi',
+    name: 'Robin Hood Army',
+    description:
+      'Volunteer-based zero-funds organization rescuing surplus food from restaurants and events to serve less fortunate communities across Indian cities.',
+    categories: ['food_distribution', 'homeless_support', 'child_welfare'],
+    address: 'New Delhi, Delhi, India',
+    city: 'New Delhi',
+    district: 'New Delhi',
+    state: 'Delhi',
+    latitude: 28.6139,
+    longitude: 77.209,
+    website: 'https://robinhoodarmy.com/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://robinhoodarmy.com/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-goonj-delhi',
+    name: 'Goonj',
+    description:
+      'Indian social welfare NGO addressing basic civic, disaster relief, clothing, and rural community development needs from New Delhi and regional centers.',
+    categories: ['disaster_relief', 'general_charity', 'women_empowerment'],
+    address: 'Sarita Vihar, New Delhi, Delhi',
+    city: 'New Delhi',
+    district: 'South East Delhi',
+    state: 'Delhi',
+    latitude: 28.5322,
+    longitude: 77.2943,
+    website: 'https://goonj.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://goonj.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-uday-foundation-delhi',
+    name: 'Uday Foundation',
+    description:
+      'Non-profit organization in New Delhi supporting underprivileged families, hospital patients, homeless shelters, and nutritious meal drives.',
+    categories: ['food_distribution', 'healthcare', 'homeless_support', 'child_welfare'],
+    address: 'Adchini, New Delhi, Delhi',
+    city: 'New Delhi',
+    district: 'South Delhi',
+    state: 'Delhi',
+    latitude: 28.5364,
+    longitude: 77.2016,
+    website: 'https://www.udayfoundation.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.udayfoundation.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-helpage-india-delhi',
+    name: 'HelpAge India',
+    description:
+      'National non-profit organization working for the cause and care of disadvantaged older persons across India.',
+    categories: ['elderly_care', 'healthcare', 'general_charity'],
+    address: 'Qutab Institutional Area, New Delhi, Delhi',
+    city: 'New Delhi',
+    district: 'South Delhi',
+    state: 'Delhi',
+    latitude: 28.5403,
+    longitude: 77.1855,
+    website: 'https://www.helpageindia.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.helpageindia.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-salaam-baalak-delhi',
+    name: 'Salaam Baalak Trust',
+    description:
+      'Non-profit trust providing shelter homes, nutritious meals, healthcare, and education for street and working children in Delhi NCR.',
+    categories: ['child_welfare', 'homeless_support', 'education', 'food_distribution'],
+    address: 'Paharganj, New Delhi, Delhi',
+    city: 'New Delhi',
+    district: 'Central Delhi',
+    state: 'Delhi',
+    latitude: 28.6448,
+    longitude: 77.2167,
+    website: 'https://www.salaambaalaktrust.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.salaambaalaktrust.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-roti-bank-mumbai',
+    name: 'Roti Bank Foundation',
+    description:
+      'Food rescue foundation in Mumbai collecting fresh surplus food from events, hotels, and kitchens to feed hungry communities and shelters.',
+    categories: ['food_distribution', 'homeless_support'],
+    address: 'Mumbai, Maharashtra, India',
+    city: 'Mumbai',
+    district: 'Mumbai',
+    state: 'Maharashtra',
+    latitude: 19.076,
+    longitude: 72.8777,
+    website: 'https://rotibankfoundation.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://rotibankfoundation.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-khaana-chahiye-mumbai',
+    name: 'Khaana Chahiye Foundation',
+    description:
+      'Citizen-led hunger relief foundation operating community kitchens and food distribution networks across Mumbai.',
+    categories: ['food_distribution', 'homeless_support', 'disaster_relief'],
+    address: 'Mumbai, Maharashtra, India',
+    city: 'Mumbai',
+    district: 'Mumbai',
+    state: 'Maharashtra',
+    latitude: 19.1136,
+    longitude: 72.8697,
+    website: 'https://www.khaanachahiye.com/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.khaanachahiye.com/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-cry-mumbai',
+    name: 'CRY — Child Rights and You',
+    description:
+      'Indian NGO dedicated to ensuring happier childhoods through education, nutrition, health, and child protection programs.',
+    categories: ['child_welfare', 'education', 'healthcare'],
+    address: 'Mumbai, Maharashtra, India',
+    city: 'Mumbai',
+    district: 'Mumbai',
+    state: 'Maharashtra',
+    latitude: 19.0596,
+    longitude: 72.8295,
+    website: 'https://www.cry.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.cry.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-pingalwara-amritsar',
+    name: 'All India Pingalwara Charitable Society',
+    description:
+      'Charitable institution in Amritsar, Punjab offering shelter, free daily meals, medical care, and rehabilitation to the destitute and differently abled.',
+    categories: ['food_distribution', 'homeless_support', 'healthcare', 'disability_support'],
+    address: 'G.T. Road, Amritsar, Punjab',
+    city: 'Amritsar',
+    district: 'Amritsar',
+    state: 'Punjab',
+    latitude: 31.6223,
+    longitude: 74.8891,
+    website: 'https://pingalwara.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://pingalwara.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-khalsa-aid-punjab',
+    name: 'Khalsa Aid India',
+    description:
+      'Humanitarian relief organization providing langar, emergency food rations, and disaster support across Punjab and India.',
+    categories: ['food_distribution', 'disaster_relief', 'general_charity'],
+    address: 'Patiala, Punjab, India',
+    city: 'Patiala',
+    district: 'Patiala',
+    state: 'Punjab',
+    latitude: 30.3398,
+    longitude: 76.3869,
+    website: 'https://www.khalsaaid.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.khalsaaid.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-akshaya-patra-bengaluru',
+    name: 'The Akshaya Patra Foundation',
+    description:
+      'Non-profit organization implementing mid-day meal kitchens and school nutrition programs across Indian states from its Bengaluru headquarters.',
+    categories: ['food_distribution', 'child_welfare', 'education'],
+    address: 'Rajajinagar, Bengaluru, Karnataka',
+    city: 'Bengaluru',
+    district: 'Bengaluru Urban',
+    state: 'Karnataka',
+    latitude: 13.0098,
+    longitude: 77.5511,
+    website: 'https://www.akshayapatra.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://www.akshayapatra.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-no-food-waste-tn',
+    name: 'No Food Waste',
+    description:
+      'Food recovery and redistribution network rescuing edible surplus food and serving hunger spots across Tamil Nadu and partner cities.',
+    categories: ['food_distribution', 'homeless_support'],
+    address: 'Coimbatore, Tamil Nadu, India',
+    city: 'Coimbatore',
+    district: 'Coimbatore',
+    state: 'Tamil Nadu',
+    latitude: 11.0168,
+    longitude: 76.9558,
+    website: 'https://nofoodwaste.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://nofoodwaste.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-bhumi-chennai',
+    name: 'Bhumi',
+    description:
+      'Youth volunteering non-profit organization supporting education, civic welfare, and community nutrition programs across India.',
+    categories: ['education', 'child_welfare', 'general_charity'],
+    address: 'Chennai, Tamil Nadu, India',
+    city: 'Chennai',
+    district: 'Chennai',
+    state: 'Tamil Nadu',
+    latitude: 13.0827,
+    longitude: 80.2707,
+    website: 'https://bhumi.ngo/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://bhumi.ngo/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsVolunteers: true,
+  },
+  {
+    id: 'pub-annakshetra-jaipur',
+    name: 'Annakshetra Foundation Trust',
+    description:
+      'Surplus food rescue initiative collecting excess food from weddings, restaurants, and events to feed underserved communities in Jaipur.',
+    categories: ['food_distribution', 'homeless_support'],
+    address: 'Jaipur, Rajasthan, India',
+    city: 'Jaipur',
+    district: 'Jaipur',
+    state: 'Rajasthan',
+    latitude: 26.9124,
+    longitude: 75.7873,
+    website: 'https://annakshetra.org/',
+    sourceName: 'Public NGO Directory',
+    sourceUrl: 'https://annakshetra.org/',
+    dataSource: 'public_outreach',
+    listingType: 'external_listing',
+    verificationStatus: 'contact_available',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+  },
+];
+
+// ==============================================================================
+// Recent Searches (localStorage) & Transient Detail Cache (sessionStorage)
+// ==============================================================================
+
+const RECENT_SEARCHES_KEY = 'sharebite_ngo_recent_searches_v1';
+const SESSION_NGO_CACHE_KEY = 'sharebite_ngo_session_cache_v1';
+const MAX_RECENT_SEARCHES = 6;
+
+function getRecentSearches(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_SEARCHES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, MAX_RECENT_SEARCHES) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentSearch(query: string): string[] {
+  const cleaned = query.trim();
+  if (!cleaned || cleaned.length < 2) return getRecentSearches();
+  const existing = getRecentSearches().filter((q) => q.toLowerCase() !== cleaned.toLowerCase());
+  const next = [cleaned, ...existing].slice(0, MAX_RECENT_SEARCHES);
+  try {
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore storage quota errors
+  }
+  return next;
+}
+
+function removeRecentSearch(query: string): string[] {
+  const next = getRecentSearches().filter((q) => q.toLowerCase() !== query.toLowerCase());
+  try {
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore
+  }
+  return next;
+}
+
+function clearRecentSearches(): void {
+  try {
+    localStorage.removeItem(RECENT_SEARCHES_KEY);
+  } catch {
+    // Ignore
+  }
+}
+
+// Short-lived tab-session cache strictly for smooth Details Page navigation (never persisted in Supabase)
+function cacheNGOsInSession(ngos: IndiaNGO[]): void {
+  try {
+    const existingRaw = sessionStorage.getItem(SESSION_NGO_CACHE_KEY);
+    const map: Record<string, IndiaNGO> = existingRaw ? JSON.parse(existingRaw) : {};
+    for (const ngo of ngos) {
+      map[ngo.id] = ngo;
+    }
+    const keys = Object.keys(map);
+    if (keys.length > 80) {
+      for (const k of keys.slice(0, keys.length - 80)) {
+        delete map[k];
+      }
+    }
+    sessionStorage.setItem(SESSION_NGO_CACHE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore
+  }
+}
+
+function getCachedNGOFromSession(id: string): IndiaNGO | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_NGO_CACHE_KEY);
+    if (!raw) return null;
+    const map: Record<string, IndiaNGO> = JSON.parse(raw);
+    return map[id] || null;
+  } catch {
+    return null;
+  }
+}
+
+// ==============================================================================
+// Smart Natural-Language Query Parser (India Scope)
+// ==============================================================================
+
+const STOP_WORDS = new Set([
+  'ngo', 'ngos', 'in', 'at', 'near', 'around', 'for', 'of', 'the', 'and', 'with',
+  'india', 'indian', 'list', 'find', 'search', 'best', 'top', 'charity', 'charities',
+  'organization', 'organizations', 'organisation', 'organisations', 'nonprofit', 'non-profit',
+  'me', 'my', 'location', 'area', 'nearby',
+]);
+
+const CATEGORY_KEYWORDS: { pattern: RegExp; category: NGOCategory; stripWords: string[] }[] = [
+  {
+    pattern: /\b(food\s*donation|food\s*bank|food\s*banks|food|meal|meals|hunger|ration|kitchen|feeding|roti|langar)\b/i,
+    category: 'food_distribution',
+    stripWords: ['food', 'donation', 'donations', 'bank', 'banks', 'meal', 'meals', 'hunger', 'ration', 'kitchen', 'feeding'],
+  },
+  {
+    pattern: /\b(shelter|shelters|homeless|night\s*shelter|rain\s*basera|destitute)\b/i,
+    category: 'homeless_support',
+    stripWords: ['shelter', 'shelters', 'homeless', 'night', 'destitute'],
+  },
+  {
+    pattern: /\b(child|children|orphan|orphanage|orphanages|kids|bal)\b/i,
+    category: 'child_welfare',
+    stripWords: ['child', 'children', 'orphan', 'orphanage', 'orphanages', 'kids', 'welfare'],
+  },
+  {
+    pattern: /\b(education|school|literacy|learning)\b/i,
+    category: 'education',
+    stripWords: ['education', 'school', 'literacy', 'learning'],
+  },
+  {
+    pattern: /\b(elderly|old\s*age|senior|seniors)\b/i,
+    category: 'elderly_care',
+    stripWords: ['elderly', 'old', 'age', 'senior', 'seniors', 'care'],
+  },
+  {
+    pattern: /\b(women|mahila|girl|girls)\b/i,
+    category: 'women_empowerment',
+    stripWords: ['women', 'mahila', 'empowerment'],
+  },
+  {
+    pattern: /\b(health|healthcare|medical|hospital|blood)\b/i,
+    category: 'healthcare',
+    stripWords: ['health', 'healthcare', 'medical'],
+  },
+  {
+    pattern: /\b(disaster|relief|emergency|flood)\b/i,
+    category: 'disaster_relief',
+    stripWords: ['disaster', 'relief', 'emergency'],
+  },
+  {
+    pattern: /\b(animal|animals|dog|cow|goshala|gaushala|pet)\b/i,
+    category: 'animal_welfare',
+    stripWords: ['animal', 'animals', 'welfare'],
+  },
+  {
+    pattern: /\b(community\s*welfare|social\s*welfare|welfare)\b/i,
+    category: 'general_charity',
+    stripWords: ['community', 'social', 'welfare'],
+  },
+];
+
+export function parseIndiaQuery(rawQuery: string): ParsedIndiaQuery {
+  const raw = rawQuery.trim();
+  const lower = raw.toLowerCase();
+
+  const isNearbyQuery = /\b(near\s*me|nearby|around\s*me)\b/i.test(lower);
+  const pincodeMatch = raw.match(/\b([1-9]\d{5})\b/);
+  const detectedPincode = pincodeMatch ? pincodeMatch[1] : undefined;
+
+  let detectedCity: string | undefined;
+  let detectedState: string | undefined;
+
+  // Match city keys (longest key first so "new delhi" beats "delhi")
+  const cityKeys = Object.keys(INDIA_CITY_DIRECTORY).sort((a, b) => b.length - a.length);
+  const matchedLocationWords = new Set<string>();
+
+  for (const key of cityKeys) {
+    const regex = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(lower)) {
+      const entry = INDIA_CITY_DIRECTORY[key];
+      detectedCity = entry.city;
+      detectedState = entry.state;
+      key.split(/\s+/).forEach((w) => matchedLocationWords.add(w));
+      break;
+    }
+  }
+
+  // Match Indian state names
+  for (const st of INDIA_STATES) {
+    const regex = new RegExp(`\\b${st.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(lower)) {
+      detectedState = st;
+      st.toLowerCase().split(/\s+/).forEach((w) => matchedLocationWords.add(w));
+      break;
+    }
+  }
+
+  const detectedCategories: NGOCategory[] = [];
+  const matchedCatWords = new Set<string>();
+  for (const ck of CATEGORY_KEYWORDS) {
+    if (ck.pattern.test(lower)) {
+      if (!detectedCategories.includes(ck.category)) {
+        detectedCategories.push(ck.category);
+      }
+      ck.stripWords.forEach((w) => matchedCatWords.add(w));
+    }
+  }
+
+  const rawTokens = lower
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+
+  const nameTokens = rawTokens.filter(
+    (t) =>
+      !STOP_WORDS.has(t) &&
+      !matchedLocationWords.has(t) &&
+      !matchedCatWords.has(t) &&
+      t !== detectedPincode
+  );
+
+  return {
+    raw,
+    cleanQuery: raw,
+    detectedState,
+    detectedCity,
+    detectedPincode,
+    detectedCategories,
+    nameTokens,
+    isNearbyQuery,
+  };
+}
+
+// ==============================================================================
+// Source 1: Supabase ShareBite Registered NGOs
+// ==============================================================================
+
+let searchRpcSupported: boolean | null = null;
+
+function withTimeout<T>(promise: PromiseLike<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    Promise.resolve(promise)
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
+
+async function fetchFromSupabase(
+  params: NGOSearchParams,
+  parsed: ParsedIndiaQuery
+): Promise<IndiaNGO[]> {
+  const effectiveCity = params.city || parsed.detectedCity || null;
+  const effectiveState = params.state || parsed.detectedState || null;
+  const searchTerm = parsed.nameTokens.length > 0 ? parsed.nameTokens.join(' ') : null;
+
+  const fetchProfilesPromise = (async (): Promise<IndiaNGO[]> => {
     try {
-      if (params.lat && params.lng && params.radiusKm && params.radiusKm < 9999) {
-        const radiusM = Math.min((params.radiusKm || 25) * 1000, 50000); // 50km cap for fast OSM
-        const query = buildOverpassQuery(params.lat, params.lng, radiusM);
-        const elements = await fetchFromOverpass(query, signal);
-        osmNGOs = elements.map(osmElementToNGO).filter(Boolean) as IndiaNGO[];
+      // 1. Try privacy-safe public RPC (works for both guests & authenticated users)
+      if (searchRpcSupported !== false) {
+        const { data: rpcRows, error: rpcError } = await supabase.rpc('search_registered_ngos', {
+          p_query: searchTerm,
+          p_city: effectiveCity,
+          p_state: effectiveState,
+          p_limit: 30,
+        });
+
+        if (!rpcError && Array.isArray(rpcRows)) {
+          searchRpcSupported = true;
+          return rpcRows
+            .filter((row: Record<string, any>) => Boolean((row.organization_name || row.full_name || '').trim()))
+            .map((row: Record<string, any>) => mapSupabaseProfileToNGO(row));
+        }
+        if (rpcError?.code === 'PGRST202' || rpcError?.message?.includes('Could not find the function')) {
+          searchRpcSupported = false;
+        }
       }
-      if (params.query && osmNGOs.length > 0) {
-        const q = params.query.toLowerCase();
-        osmNGOs = osmNGOs.filter(
-          (n) => n.name.toLowerCase().includes(q) || (n.city || '').toLowerCase().includes(q)
-        );
+
+      // 2. Fallback to direct profiles query (works for authenticated sessions before RPC migration is applied)
+      let query = supabase
+        .from('profiles')
+        .select('id, organization_name, full_name, bio, address, city, latitude, longitude, phone, operating_hours, is_verified, avatar_url, updated_at')
+        .in('role', ['ngo', 'acceptor', 'receiver'])
+        .limit(40);
+
+      if (effectiveCity) {
+        query = query.or(`city.ilike.%${effectiveCity}%,address.ilike.%${effectiveCity}%`);
       }
-      if (osmNGOs.length > 0) sources.push('OpenStreetMap');
+
+      const { data: profileRows, error: profErr } = await query;
+      if (!profErr && Array.isArray(profileRows)) {
+        return profileRows
+          .filter((row: Record<string, any>) => Boolean((row.organization_name || row.full_name || '').trim()))
+          .map((row: Record<string, any>) => mapSupabaseProfileToNGO(row));
+      }
+    } catch (err) {
+      console.warn('[NGODiscovery] Supabase profiles query skipped:', err);
+    }
+    return [];
+  })();
+
+  const fetchPartnersPromise = (async (): Promise<IndiaNGO[]> => {
+    try {
+      const { data: partnerRows, error: partnerErr } = await supabase
+        .from('partners')
+        .select('id, organization_name, organization_type, description, address, city, logo_url, is_verified, updated_at')
+        .eq('is_verified', true)
+        .limit(30);
+
+      if (!partnerErr && Array.isArray(partnerRows)) {
+        return partnerRows
+          .filter((p: Record<string, any>) => Boolean(p.organization_name))
+          .map((p: Record<string, any>): IndiaNGO => ({
+            id: `sb-partner-${p.id}`,
+            sharebiteProfileId: p.id,
+            name: p.organization_name,
+            description: p.description || 'Registered community partner on ShareBite.',
+            categories: ['food_distribution', 'general_charity'],
+            address: p.address || undefined,
+            city: p.city || undefined,
+            imageUrl: p.logo_url || undefined,
+            sourceName: 'ShareBite Registered Network',
+            dataSource: 'sharebite',
+            listingType: 'sharebite_registered',
+            verificationStatus: p.is_verified ? 'sharebite_verified' : 'source_listed',
+            govRegistrationVerified: false,
+            acceptsFoodDonations: true,
+            updatedAt: p.updated_at || undefined,
+          }));
+      }
     } catch {
-      // Overpass timed out or failed — seamless fallback to verified + Supabase
+      // Partners table optional
     }
+    return [];
+  })();
 
-    // Merge, deduplicate, enrich with distance
-    let all = deduplicateNGOs([...supabaseNGOs, ...curatedNGOs, ...osmNGOs]);
-    all = enrichWithDistance(all, params.lat, params.lng);
+  const [profileNGOs, partnerNGOs] = await Promise.all([
+    withTimeout(fetchProfilesPromise, 3500, []),
+    withTimeout(fetchPartnersPromise, 3500, []),
+  ]);
 
-    // Filter by category
-    if (params.categories && params.categories.length > 0) {
-      all = all.filter((n) =>
-        n.categories.some((c) => params.categories!.includes(c))
-      );
-    }
+  return filterByIntent([...profileNGOs, ...partnerNGOs], params, parsed);
+}
 
-    // Filter by radius if coordinates provided
-    if (params.lat && params.lng && params.radiusKm && params.radiusKm < 9999) {
-      all = all.filter((n) =>
-        n.distanceKm == null || n.distanceKm <= params.radiusKm!
-      );
-    }
+function mapSupabaseProfileToNGO(row: Record<string, any>): IndiaNGO {
+  const orgName = (row.organization_name || row.full_name || 'ShareBite NGO').trim();
+  const cityInfo = row.city ? INDIA_CITY_DIRECTORY[String(row.city).toLowerCase()] : undefined;
 
-    // Sort
-    const sortBy = params.sortBy || 'nearest';
-    all.sort((a, b) => {
-      if (sortBy === 'nearest') {
-        if (a.distanceKm == null && b.distanceKm == null) return 0;
-        if (a.distanceKm == null) return 1;
-        if (b.distanceKm == null) return -1;
-        return a.distanceKm - b.distanceKm;
-      }
-      if (sortBy === 'name') return a.name.localeCompare(b.name);
-      if (sortBy === 'updated') {
-        return (b.updatedAt || '').localeCompare(a.updatedAt || '');
-      }
-      return 0;
+  return {
+    id: `sb-${row.id}`,
+    sharebiteProfileId: row.id,
+    name: orgName,
+    description: row.bio || 'Registered food rescue NGO active on the ShareBite platform.',
+    categories: ['food_distribution', 'general_charity'],
+    address: row.address || undefined,
+    city: row.city || cityInfo?.city || undefined,
+    state: inferStateFromText(`${row.address || ''} ${row.city || ''}`) || cityInfo?.state || undefined,
+    latitude: typeof row.latitude === 'number' ? row.latitude : undefined,
+    longitude: typeof row.longitude === 'number' ? row.longitude : undefined,
+    phone: row.phone || undefined,
+    operatingHours: row.operating_hours || undefined,
+    imageUrl: row.avatar_url || undefined,
+    sourceName: 'ShareBite Registered Network',
+    dataSource: 'sharebite',
+    listingType: 'sharebite_registered',
+    verificationStatus: row.is_verified ? 'sharebite_verified' : 'source_listed',
+    govRegistrationVerified: false,
+    acceptsFoodDonations: true,
+    acceptsVolunteers: true,
+    updatedAt: row.updated_at || undefined,
+  };
+}
+
+// ==============================================================================
+// Source 2: Server-Side Google Places API (New) Proxy (/api/ngo-search)
+// ==============================================================================
+
+interface GoogleProxyResult {
+  ngos: IndiaNGO[];
+  nextPageToken: string | null;
+  apiConfigured: boolean;
+  quotaExceeded: boolean;
+  quotaMessage?: string;
+  networkError: boolean;
+  networkMessage?: string;
+}
+
+async function fetchFromGooglePlacesProxy(
+  params: NGOSearchParams,
+  parsed: ParsedIndiaQuery,
+  signal?: AbortSignal
+): Promise<GoogleProxyResult> {
+  const qs = new URLSearchParams();
+  if (params.query) qs.set('q', params.query);
+  if (params.city || parsed.detectedCity) qs.set('city', params.city || parsed.detectedCity || '');
+  if (params.state || parsed.detectedState) qs.set('state', params.state || parsed.detectedState || '');
+  const primaryCat = params.categories?.[0] || parsed.detectedCategories[0];
+  if (primaryCat) qs.set('category', primaryCat);
+  if (params.lat != null && params.lng != null) {
+    qs.set('lat', String(params.lat));
+    qs.set('lng', String(params.lng));
+  }
+  if (params.radiusKm && params.radiusKm < 500) {
+    qs.set('radiusKm', String(params.radiusKm));
+  }
+  if (params.pageToken) {
+    qs.set('pageToken', params.pageToken);
+  }
+
+  try {
+    const res = await fetch(`/api/ngo-search?${qs.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
     });
 
-    const total = all.length;
-    const page = params.page || 1;
-    const start = (page - 1) * pageSize;
-    const paged = all.slice(0, start + pageSize);
+    const contentType = res.headers.get('content-type') || '';
 
-    return {
-      ngos: paged,
-      total,
-      hasMore: total > start + pageSize,
-      sources,
-      fromCache: false,
-    };
-  }
-
-  /**
-   * Get a single NGO by ID from Curated or Supabase
-   */
-  static async getNGOById(id: string): Promise<IndiaNGO | null> {
-    if (id.startsWith('curated-')) {
-      return CURATED_INDIA_NGOS.find((n) => n.id === id) || null;
+    if (res.status === 429) {
+      const errBody = contentType.includes('application/json') ? await res.json().catch(() => ({})) : {};
+      return {
+        ngos: [],
+        nextPageToken: null,
+        apiConfigured: true,
+        quotaExceeded: true,
+        quotaMessage:
+          errBody.message ||
+          'Google Places API search quota has been temporarily reached. Showing ShareBite registered NGOs and public listings.',
+        networkError: false,
+      };
     }
-    if (id.startsWith('osm-')) return null;
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
+    // In local Vite dev/preview without Vercel serverless runtime, /api/ngo-search may return HTML or 404
+    if (!contentType.includes('application/json')) {
+      return {
+        ngos: [],
+        nextPageToken: null,
+        apiConfigured: false,
+        quotaExceeded: false,
+        networkError: false,
+      };
+    }
 
-    if (error || !data) return null;
+    const data = await res.json();
+
+    if (data.quotaExceeded) {
+      return {
+        ngos: [],
+        nextPageToken: null,
+        apiConfigured: true,
+        quotaExceeded: true,
+        quotaMessage:
+          data.message || 'Google Places API quota reached. Showing available ShareBite & public NGO results.',
+        networkError: false,
+      };
+    }
+
+    if (!res.ok) {
+      return {
+        ngos: [],
+        nextPageToken: null,
+        apiConfigured: Boolean(data.apiConfigured),
+        quotaExceeded: false,
+        networkError: true,
+        networkMessage: data.message || 'External NGO search service is temporarily unreachable.',
+      };
+    }
+
+    const ngos: IndiaNGO[] = Array.isArray(data.ngos)
+      ? data.ngos.map((item: IndiaNGO) => ({
+          ...item,
+          listingType: 'external_listing',
+          dataSource: 'google_places',
+          sourceName: 'Google Places',
+          govRegistrationVerified: false,
+        }))
+      : [];
 
     return {
-      id: data.id,
-      name: data.organization_name || data.full_name || 'Verified NGO',
-      description: data.bio || undefined,
-      categories: ['food_distribution'],
-      address: data.address || undefined,
-      city: data.city || undefined,
-      latitude: data.latitude ?? undefined,
-      longitude: data.longitude ?? undefined,
-      phone: data.phone || undefined,
-      email: data.email || undefined,
-      registrationNumber: data.registration_number || undefined,
-      sourceName: 'ShareBite',
-      verificationStatus: data.is_verified ? 'sharebite_verified' : 'unverified',
-      acceptsFoodDonations: true,
-      operatingHours: data.operating_hours || undefined,
-      createdAt: data.created_at,
-      updatedAt: data.updated_at,
+      ngos,
+      nextPageToken: data.nextPageToken || null,
+      apiConfigured: Boolean(data.apiConfigured),
+      quotaExceeded: false,
+      networkError: false,
     };
-  }
-
-  /**
-   * Geocode a city/PIN and return coordinates + city name for searching
-   */
-  static async geocodeSearchQuery(query: string): Promise<{
-    lat: number;
-    lng: number;
-    city: string;
-    state?: string;
-    displayName: string;
-  } | null> {
-    // Check if it's a PIN code
-    const pinMatch = query.match(/^\d{6}$/);
-    const searchQuery = pinMatch ? `${query}, India` : `${query}, India`;
-
-    const result = await LocationService.geocodeAddress(searchQuery);
-    if (!result) return null;
-
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw err;
     return {
-      lat: result.latitude,
-      lng: result.longitude,
-      city: result.city || query,
-      displayName: result.displayName,
+      ngos: [],
+      nextPageToken: null,
+      apiConfigured: false,
+      quotaExceeded: false,
+      networkError: true,
+      networkMessage: 'Network error while contacting external NGO search service.',
     };
   }
-
-  static readonly NGO_CATEGORIES: { value: NGOCategory; label: string; emoji: string }[] = [
-    { value: 'food_distribution', label: 'Food Distribution', emoji: '🍱' },
-    { value: 'child_welfare', label: 'Child Welfare', emoji: '🧒' },
-    { value: 'education', label: 'Education', emoji: '📚' },
-    { value: 'women_empowerment', label: 'Women Empowerment', emoji: '👩' },
-    { value: 'elderly_care', label: 'Elderly Care', emoji: '👴' },
-    { value: 'disability_support', label: 'Disability Support', emoji: '♿' },
-    { value: 'animal_welfare', label: 'Animal Welfare', emoji: '🐾' },
-    { value: 'healthcare', label: 'Healthcare', emoji: '🏥' },
-    { value: 'disaster_relief', label: 'Disaster Relief', emoji: '🆘' },
-    { value: 'homeless_support', label: 'Homeless Support', emoji: '🏠' },
-    { value: 'environment', label: 'Environment', emoji: '🌱' },
-    { value: 'general_charity', label: 'General Charity', emoji: '💛' },
-  ];
-
-  static readonly INDIA_STATES = [
-    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
-    'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand',
-    'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur',
-    'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab',
-    'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
-    'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
-    'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli',
-    'Daman and Diu', 'Delhi', 'Jammu and Kashmir', 'Ladakh',
-    'Lakshadweep', 'Puducherry',
-  ];
 }
+
+// ==============================================================================
+// Source 3: OpenStreetMap India-Scoped Live Fallback (Nominatim)
+// ==============================================================================
+
+async function fetchFromOpenStreetMapIndia(
+  params: NGOSearchParams,
+  parsed: ParsedIndiaQuery,
+  signal?: AbortSignal
+): Promise<{ ngos: IndiaNGO[]; networkFailed: boolean }> {
+  const city = params.city || parsed.detectedCity;
+  const state = params.state || parsed.detectedState;
+  const locationSuffix = [city, state, parsed.detectedPincode].filter(Boolean).join(' ');
+
+  // Build targeted India-only search query
+  let q = '';
+  if (parsed.nameTokens.length > 0) {
+    q = `${parsed.nameTokens.join(' ')} NGO ${locationSuffix}`.trim();
+  } else if (locationSuffix) {
+    const catHint = parsed.detectedCategories.includes('food_distribution')
+      ? 'food bank charity NGO'
+      : parsed.detectedCategories.includes('homeless_support')
+      ? 'shelter charity NGO'
+      : 'NGO charity foundation';
+    q = `${catHint} ${locationSuffix}`.trim();
+  } else {
+    return { ngos: [], networkFailed: false };
+  }
+
+  try {
+    const timeoutController = new AbortController();
+    const timer = setTimeout(() => timeoutController.abort(), 5500);
+    const onParentAbort = () => timeoutController.abort();
+    signal?.addEventListener('abort', onParentAbort, { once: true });
+
+    const url =
+      `https://nominatim.openstreetmap.org/search?` +
+      new URLSearchParams({
+        q: `${q} India`,
+        format: 'jsonv2',
+        addressdetails: '1',
+        extratags: '1',
+        countrycodes: 'in',
+        limit: '10',
+      }).toString();
+
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: timeoutController.signal,
+    });
+
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onParentAbort);
+
+    if (!res.ok) return { ngos: [], networkFailed: false };
+
+    const items = await res.json();
+    if (!Array.isArray(items)) return { ngos: [], networkFailed: false };
+
+    const mapped: IndiaNGO[] = [];
+    for (const item of items) {
+      const addr = item.address || {};
+      const countryCode = (addr.country_code || '').toLowerCase();
+      if (countryCode && countryCode !== 'in') continue;
+
+      const rawName = (item.name || item.display_name?.split(',')[0] || '').trim();
+      if (!rawName) continue;
+
+      // Filter out generic administrative boundaries / roads when searching for NGOs
+      const itemClass = String(item.class || '').toLowerCase();
+      const itemType = String(item.type || '').toLowerCase();
+      if (itemClass === 'boundary' || itemClass === 'highway' || itemType === 'administrative' || itemType === 'city' || itemType === 'state') {
+        continue;
+      }
+
+      const extratags = item.extratags || {};
+      const phone = extratags.phone || extratags['contact:phone'] || undefined;
+      const website = extratags.website || extratags['contact:website'] || undefined;
+      const email = extratags.email || extratags['contact:email'] || undefined;
+      const resolvedCity = addr.city || addr.town || addr.village || addr.county || city || undefined;
+      const resolvedState = addr.state || state || undefined;
+      const resolvedPincode = addr.postcode || undefined;
+
+      // If user searched a specific org name, verify at least one token matches
+      if (parsed.nameTokens.length > 0) {
+        const hay = `${rawName} ${item.display_name || ''}`.toLowerCase();
+        const matchesName = parsed.nameTokens.some((tok) => hay.includes(tok));
+        if (!matchesName) continue;
+      }
+
+      const categories = inferCategoriesFromText(`${rawName} ${itemType} ${extratags.social_facility || ''}`);
+
+      mapped.push({
+        id: `osm-${item.osm_type || 'n'}-${item.osm_id || item.place_id}`,
+        osmId: String(item.osm_id || item.place_id),
+        name: rawName,
+        description: extratags.description || 'Public organization listing discovered via OpenStreetMap India.',
+        categories,
+        address: item.display_name || undefined,
+        city: resolvedCity,
+        district: addr.state_district || addr.county || undefined,
+        state: resolvedState,
+        pincode: resolvedPincode,
+        latitude: item.lat ? parseFloat(item.lat) : undefined,
+        longitude: item.lon ? parseFloat(item.lon) : undefined,
+        phone,
+        email,
+        website,
+        sourceName: 'OpenStreetMap',
+        sourceUrl: item.osm_id
+          ? `https://www.openstreetmap.org/${item.osm_type === 'W' || item.osm_type === 'way' ? 'way' : 'node'}/${item.osm_id}`
+          : undefined,
+        dataSource: 'openstreetmap',
+        listingType: 'external_listing',
+        verificationStatus: phone || website || email ? 'contact_available' : 'source_listed',
+        govRegistrationVerified: false,
+        acceptsFoodDonations: categories.includes('food_distribution'),
+      });
+    }
+
+    return { ngos: mapped, networkFailed: false };
+  } catch (err: any) {
+    if (signal?.aborted) throw err;
+    return { ngos: [], networkFailed: true };
+  }
+}
+
+// ==============================================================================
+// Filtering, Deduplication & Distance Calculation Helpers
+// ==============================================================================
+
+function inferStateFromText(text: string): string | undefined {
+  const lower = text.toLowerCase();
+  for (const st of INDIA_STATES) {
+    if (lower.includes(st.toLowerCase())) return st;
+  }
+  return undefined;
+}
+
+function inferCategoriesFromText(text: string): NGOCategory[] {
+  const lower = text.toLowerCase();
+  const cats: NGOCategory[] = [];
+  for (const ck of CATEGORY_KEYWORDS) {
+    if (ck.pattern.test(lower) && !cats.includes(ck.category)) {
+      cats.push(ck.category);
+    }
+  }
+  return cats.length > 0 ? cats : ['general_charity'];
+}
+
+const GENERIC_ORG_WORDS = new Set(['foundation', 'trust', 'society', 'charitable', 'mission', 'centre', 'center', 'india']);
+
+function filterByIntent(list: IndiaNGO[], params: NGOSearchParams, parsed: ParsedIndiaQuery): IndiaNGO[] {
+  const targetState = (params.state || parsed.detectedState || '').toLowerCase();
+  const targetCity = (params.city || parsed.detectedCity || '').toLowerCase();
+  const targetPin = parsed.detectedPincode || '';
+  const targetCategories =
+    params.categories && params.categories.length > 0
+      ? params.categories
+      : parsed.detectedCategories;
+
+  const distinctiveTokens = parsed.nameTokens.filter((t) => !GENERIC_ORG_WORDS.has(t));
+  const tokensToCheck = distinctiveTokens.length > 0 ? distinctiveTokens : parsed.nameTokens;
+
+  return list.filter((ngo) => {
+    const nameHaystack = ngo.name.toLowerCase();
+    const haystack = [
+      ngo.name,
+      ngo.description,
+      ngo.address,
+      ngo.city,
+      ngo.district,
+      ngo.state,
+      ngo.pincode,
+      ngo.categories.join(' '),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    // Strict word-boundary token matching: prevents unrelated/false matches for specific NGO names!
+    if (tokensToCheck.length > 0) {
+      const matchesToken = (text: string, tok: string) =>
+        new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(text);
+      const nameMatches = tokensToCheck.filter((tok) => matchesToken(nameHaystack, tok)).length;
+      const fullMatches = tokensToCheck.filter((tok) => matchesToken(haystack, tok)).length;
+      const required = tokensToCheck.length <= 2 ? tokensToCheck.length : Math.ceil(tokensToCheck.length * 0.7);
+      if (nameMatches < required && fullMatches < tokensToCheck.length) return false;
+    }
+
+    if (targetPin) {
+      const pinMatches = (ngo.pincode || '').includes(targetPin) || (ngo.address || '').includes(targetPin);
+      if (!pinMatches && !targetCity && !targetState) return false;
+    }
+
+    if (targetState) {
+      const ngoState = (ngo.state || '').toLowerCase();
+      const stateMatch =
+        ngoState === targetState ||
+        ngoState.includes(targetState) ||
+        haystack.includes(targetState);
+      if (!stateMatch) return false;
+    }
+
+    if (targetCity) {
+      const cityAliases =
+        targetCity === 'gurugram' || targetCity === 'gurgaon'
+          ? ['gurugram', 'gurgaon']
+          : targetCity === 'bengaluru' || targetCity === 'bangalore'
+          ? ['bengaluru', 'bangalore']
+          : targetCity === 'new delhi' || targetCity === 'delhi'
+          ? ['delhi', 'new delhi']
+          : [targetCity];
+
+      const cityMatch = cityAliases.some(
+        (alias) => (ngo.city || '').toLowerCase().includes(alias) || haystack.includes(alias)
+      );
+      if (!cityMatch) return false;
+    }
+
+    if (targetCategories.length > 0) {
+      const hasCat = targetCategories.some((c) => ngo.categories.includes(c));
+      if (!hasCat) return false;
+    }
+
+    if (params.onlyShareBiteRegistered && ngo.listingType !== 'sharebite_registered') {
+      return false;
+    }
+
+    if (params.onlyGovVerified && !ngo.govRegistrationVerified) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function normalizeWebsiteHost(url?: string): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
+    return parsed.hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeNameCityKey(ngo: IndiaNGO): string {
+  const normName = ngo.name
+    .toLowerCase()
+    .replace(/\b(the|ngo|trust|foundation|society|india|charitable|welfare|organization|organisation)\b/g, ' ')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+  const normCity = (ngo.city || ngo.state || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+  return `${normName || ngo.name.toLowerCase().replace(/[^a-z0-9]/g, '')}::${normCity}`;
+}
+
+const SOURCE_PRIORITY: Record<NGODataSource, number> = {
+  sharebite: 4,
+  google_places: 3,
+  public_outreach: 2,
+  openstreetmap: 1,
+};
+
+function deduplicateNGOs(items: IndiaNGO[]): IndiaNGO[] {
+  const byKey = new Map<string, IndiaNGO>();
+  const hostToKey = new Map<string, string>();
+  const placeIdToKey = new Map<string, string>();
+
+  for (const item of items) {
+    const nameKey = normalizeNameCityKey(item);
+    const host = normalizeWebsiteHost(item.website);
+    const existingKey =
+      (item.placeId && placeIdToKey.get(item.placeId)) ||
+      (host && hostToKey.get(host)) ||
+      (byKey.has(nameKey) ? nameKey : undefined);
+
+    if (!existingKey) {
+      byKey.set(nameKey, item);
+      if (host) hostToKey.set(host, nameKey);
+      if (item.placeId) placeIdToKey.set(item.placeId, nameKey);
+      continue;
+    }
+
+    const prev = byKey.get(existingKey)!;
+    const prevPriority = SOURCE_PRIORITY[prev.dataSource || 'openstreetmap'] || 0;
+    const nextPriority = SOURCE_PRIORITY[item.dataSource || 'openstreetmap'] || 0;
+
+    // Prefer ShareBite Registered > Google Places > Public Directory > OSM, merging missing contact fields
+    const primary = nextPriority > prevPriority ? item : prev;
+    const secondary = nextPriority > prevPriority ? prev : item;
+
+    const merged: IndiaNGO = {
+      ...secondary,
+      ...primary,
+      phone: primary.phone || secondary.phone,
+      website: primary.website || secondary.website,
+      address: primary.address || secondary.address,
+      city: primary.city || secondary.city,
+      district: primary.district || secondary.district,
+      state: primary.state || secondary.state,
+      pincode: primary.pincode || secondary.pincode,
+      latitude: primary.latitude ?? secondary.latitude,
+      longitude: primary.longitude ?? secondary.longitude,
+      imageUrl: primary.imageUrl || secondary.imageUrl,
+      googleMapsUri: primary.googleMapsUri || secondary.googleMapsUri,
+      categories: Array.from(new Set([...primary.categories, ...secondary.categories])),
+    };
+
+    byKey.set(existingKey, merged);
+    if (host) hostToKey.set(host, existingKey);
+    if (item.placeId) placeIdToKey.set(item.placeId, existingKey);
+  }
+
+  return Array.from(byKey.values());
+}
+
+// ==============================================================================
+// Public Service API
+// ==============================================================================
+
+async function geocodeSearchQuery(
+  query: string,
+  signal?: AbortSignal
+): Promise<{ lat: number; lng: number; city: string; state?: string } | null> {
+  const lower = query.trim().toLowerCase();
+  if (!lower) return null;
+
+  // Instant match against India city directory
+  for (const key of Object.keys(INDIA_CITY_DIRECTORY)) {
+    if (lower === key || new RegExp(`\\b${key}\\b`, 'i').test(lower)) {
+      const c = INDIA_CITY_DIRECTORY[key];
+      return { lat: c.lat, lng: c.lng, city: c.city, state: c.state };
+    }
+  }
+
+  for (const [st, coords] of Object.entries(STATE_COORDS)) {
+    if (lower === st.toLowerCase() || new RegExp(`\\b${st}\\b`, 'i').test(lower)) {
+      return { lat: coords.lat, lng: coords.lng, city: st, state: st };
+    }
+  }
+
+  // Fallback to Nominatim for PIN codes & smaller towns/districts in India
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?` +
+        new URLSearchParams({
+          q: `${query}, India`,
+          format: 'jsonv2',
+          addressdetails: '1',
+          countrycodes: 'in',
+          limit: '1',
+        }).toString(),
+      { signal }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const top = data[0];
+    return {
+      lat: parseFloat(top.lat),
+      lng: parseFloat(top.lon),
+      city: top.address?.city || top.address?.town || top.address?.state_district || query,
+      state: top.address?.state,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function searchNGOs(
+  params: NGOSearchParams,
+  signal?: AbortSignal
+): Promise<NGOSearchResponse> {
+  const parsed = parseIndiaQuery(params.query || '');
+  const sourcesUsed = new Set<string>();
+
+  // If browser reports completely offline
+  const isBrowserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+
+  // 1. Run Supabase + Google Places Proxy in parallel
+  const [supabaseNGOs, googleResult] = await Promise.all([
+    isBrowserOffline ? Promise.resolve([] as IndiaNGO[]) : fetchFromSupabase(params, parsed),
+    params.onlyShareBiteRegistered || isBrowserOffline
+      ? Promise.resolve<GoogleProxyResult>({
+          ngos: [],
+          nextPageToken: null,
+          apiConfigured: false,
+          quotaExceeded: false,
+          networkError: isBrowserOffline,
+          networkMessage: isBrowserOffline ? 'You appear to be offline. Check your internet connection and retry.' : undefined,
+        })
+      : fetchFromGooglePlacesProxy(params, parsed, signal),
+  ]);
+
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  if (supabaseNGOs.length > 0) {
+    sourcesUsed.add('ShareBite Registered Network');
+  }
+  if (googleResult.ngos.length > 0) {
+    sourcesUsed.add('Google Places');
+  }
+
+  // 2. Local Public Reference Directory (filtered strictly by parsed intent)
+  const directoryMatches = params.onlyShareBiteRegistered
+    ? []
+    : filterByIntent(PUBLIC_INDIA_NGO_DIRECTORY, params, parsed);
+  if (directoryMatches.length > 0) {
+    sourcesUsed.add('Public NGO Directory');
+  }
+
+  // 3. OpenStreetMap India fallback when Google Places is unconfigured/quota-limited or returned few results
+  let osmNGOs: IndiaNGO[] = [];
+  let osmNetworkFailed = false;
+  const shouldQueryOsm =
+    !params.onlyShareBiteRegistered &&
+    !isBrowserOffline &&
+    !params.pageToken &&
+    (!googleResult.apiConfigured || googleResult.quotaExceeded || googleResult.ngos.length < 3) &&
+    Boolean(params.query || params.city || params.state || parsed.detectedPincode);
+
+  if (shouldQueryOsm) {
+    const osmRes = await fetchFromOpenStreetMapIndia(params, parsed, signal);
+    osmNGOs = filterByIntent(osmRes.ngos, params, parsed);
+    osmNetworkFailed = osmRes.networkFailed;
+    if (osmNGOs.length > 0) {
+      sourcesUsed.add('OpenStreetMap India');
+    }
+  }
+
+  // 4. Filter Google results for explicit user toggles (onlyGovVerified / category / state)
+  const filteredGoogle = googleResult.ngos.filter((ngo) => {
+    if (params.onlyShareBiteRegistered) return false;
+    if (params.onlyGovVerified && !ngo.govRegistrationVerified) return false;
+    if (params.state) {
+      const st = params.state.toLowerCase();
+      const hay = `${ngo.state || ''} ${ngo.address || ''}`.toLowerCase();
+      if (!hay.includes(st)) return false;
+    }
+    return true;
+  });
+
+  // 5. Merge & Deduplicate (ShareBite Registered always prioritized)
+  let combined = deduplicateNGOs([
+    ...supabaseNGOs,
+    ...filteredGoogle,
+    ...directoryMatches,
+    ...osmNGOs,
+  ]);
+
+  // 6. Compute distances when coordinates are available
+  if (params.lat != null && params.lng != null) {
+    combined = combined.map((ngo) => {
+      if (ngo.latitude != null && ngo.longitude != null) {
+        const dist = LocationService.calculateDistance(
+          params.lat!,
+          params.lng!,
+          ngo.latitude,
+          ngo.longitude
+        );
+        return { ...ngo, distanceKm: Math.round(dist * 10) / 10 };
+      }
+      return ngo;
+    });
+
+    if (params.radiusKm && params.radiusKm < 5000 && !parsed.detectedState && !params.state && !parsed.nameTokens.length) {
+      combined = combined.filter(
+        (ngo) => ngo.distanceKm == null || ngo.distanceKm <= params.radiusKm!
+      );
+    }
+  }
+
+  // 7. Sort results
+  const sortMode = params.sortBy || (params.lat != null && !params.query ? 'nearest' : 'relevance');
+  combined.sort((a, b) => {
+    if (sortMode === 'name') {
+      return a.name.localeCompare(b.name);
+    }
+    if (sortMode === 'nearest') {
+      if (a.distanceKm != null && b.distanceKm != null) return a.distanceKm - b.distanceKm;
+      if (a.distanceKm != null) return -1;
+      if (b.distanceKm != null) return 1;
+    }
+
+    // Relevance: ShareBite Registered first, then exact query match, then distance
+    const aSb = a.listingType === 'sharebite_registered' ? 1 : 0;
+    const bSb = b.listingType === 'sharebite_registered' ? 1 : 0;
+    if (aSb !== bSb) return bSb - aSb;
+
+    if (params.query) {
+      const qLow = params.query.trim().toLowerCase();
+      const aExact = a.name.toLowerCase().includes(qLow) ? 1 : 0;
+      const bExact = b.name.toLowerCase().includes(qLow) ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+    }
+
+    if (a.distanceKm != null && b.distanceKm != null) return a.distanceKm - b.distanceKm;
+    return a.name.localeCompare(b.name);
+  });
+
+  // Cache transiently in sessionStorage for instant Details Page loading
+  cacheNGOsInSession(combined);
+
+  const networkError =
+    isBrowserOffline || (googleResult.networkError && osmNetworkFailed && combined.length === 0);
+
+  return {
+    ngos: combined,
+    total: combined.length,
+    sources: Array.from(sourcesUsed),
+    hasMore: Boolean(googleResult.nextPageToken),
+    nextPageToken: googleResult.nextPageToken,
+    quotaExceeded: googleResult.quotaExceeded,
+    quotaMessage: googleResult.quotaMessage,
+    networkError,
+    networkMessage: networkError
+      ? googleResult.networkMessage || 'Unable to connect to NGO search services. Please check your internet connection and retry.'
+      : undefined,
+    googleAttribution: combined.some((n) => n.dataSource === 'google_places'),
+    parsedIntent: parsed,
+  };
+}
+
+async function getNGOById(id: string, signal?: AbortSignal): Promise<IndiaNGO | null> {
+  // 1. Check verified public directory
+  const pubMatch = PUBLIC_INDIA_NGO_DIRECTORY.find((n) => n.id === id);
+  if (pubMatch) return pubMatch;
+
+  // 2. Check transient session cache first
+  const cached = getCachedNGOFromSession(id);
+
+  // 3. ShareBite Registered NGO (UUID or sb-<uuid>)
+  if (id.startsWith('sb-') && !id.startsWith('sb-partner-')) {
+    const uuid = id.replace(/^sb-/, '');
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('get_registered_ngo_by_id', {
+        p_id: uuid,
+      });
+      if (!rpcErr && Array.isArray(rpcData) && rpcData[0]) {
+        const mapped = mapSupabaseProfileToNGO(rpcData[0]);
+        cacheNGOsInSession([mapped]);
+        return mapped;
+      }
+
+      const { data: directRow } = await supabase
+        .from('profiles')
+        .select('id, organization_name, full_name, bio, address, city, latitude, longitude, phone, operating_hours, is_verified, avatar_url, updated_at')
+        .eq('id', uuid)
+        .in('role', ['ngo', 'acceptor', 'receiver'])
+        .maybeSingle();
+
+      if (directRow) {
+        const mapped = mapSupabaseProfileToNGO(directRow);
+        cacheNGOsInSession([mapped]);
+        return mapped;
+      }
+    } catch {
+      // Fallback to cached
+    }
+  }
+
+  // 4. Google Places listing: fetch fresh live details on demand (never stored in Supabase)
+  if (id.startsWith('gplace-')) {
+    const placeId = id.replace(/^gplace-/, '');
+    try {
+      const res = await fetch(`/api/ngo-details?placeId=${encodeURIComponent(placeId)}`, {
+        headers: { Accept: 'application/json' },
+        signal,
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.ngo) {
+          const merged: IndiaNGO = {
+            ...(cached || {}),
+            ...data.ngo,
+            listingType: 'external_listing',
+            dataSource: 'google_places',
+            sourceName: 'Google Places',
+            govRegistrationVerified: false,
+          };
+          cacheNGOsInSession([merged]);
+          return merged;
+        }
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') throw err;
+    }
+  }
+
+  return cached;
+}
+
+const POPULAR_SUGGESTIONS: SearchSuggestionItem[] = [
+  { id: 'sug-wecare', label: 'We Care Foundation', sublabel: 'Gurugram, Haryana · NGO Outreach', query: 'We Care Foundation', kind: 'ngo' },
+  { id: 'sug-delhi', label: 'NGOs in Delhi', sublabel: 'Food banks, shelters & welfare orgs', query: 'NGOs in Delhi', kind: 'location' },
+  { id: 'sug-gurugram-food', label: 'Food donation NGOs in Gurugram', sublabel: 'Haryana · Food Rescue', query: 'Food donation NGOs in Gurugram', kind: 'category' },
+  { id: 'sug-mumbai', label: 'NGOs in Mumbai', sublabel: 'Maharashtra · Community & Food Relief', query: 'NGOs in Mumbai', kind: 'location' },
+  { id: 'sug-punjab', label: 'NGOs in Punjab', sublabel: 'Amritsar, Patiala, Ludhiana & more', query: 'NGOs in Punjab', kind: 'location' },
+  { id: 'sug-nearby', label: 'Nearby NGOs near me', sublabel: 'Uses your device location with permission', query: 'Nearby NGOs', kind: 'nearby' },
+];
+
+function getSuggestions(rawInput: string): SearchSuggestionItem[] {
+  const q = rawInput.trim().toLowerCase();
+  if (!q) {
+    return POPULAR_SUGGESTIONS;
+  }
+
+  const suggestions: SearchSuggestionItem[] = [];
+  const seen = new Set<string>();
+
+  const pushUnique = (item: SearchSuggestionItem) => {
+    const key = item.query.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    suggestions.push(item);
+  };
+
+  // 1. Matching NGOs from public directory
+  for (const ngo of PUBLIC_INDIA_NGO_DIRECTORY) {
+    const hay = `${ngo.name} ${ngo.city || ''} ${ngo.state || ''}`.toLowerCase();
+    if (hay.includes(q)) {
+      pushUnique({
+        id: `dir-${ngo.id}`,
+        label: ngo.name,
+        sublabel: [ngo.city, ngo.state].filter(Boolean).join(', '),
+        query: ngo.name,
+        kind: 'ngo',
+      });
+    }
+    if (suggestions.length >= 4) break;
+  }
+
+  // 2. Matching cities
+  for (const [key, entry] of Object.entries(INDIA_CITY_DIRECTORY)) {
+    if (key.includes(q) || entry.city.toLowerCase().includes(q)) {
+      pushUnique({
+        id: `city-${key}`,
+        label: `NGOs in ${entry.city}`,
+        sublabel: `${entry.state} · City search`,
+        query: `NGOs in ${entry.city}`,
+        kind: 'location',
+      });
+      pushUnique({
+        id: `city-food-${key}`,
+        label: `Food donation NGOs in ${entry.city}`,
+        sublabel: `${entry.state} · Food Banks & Meals`,
+        query: `Food donation NGOs in ${entry.city}`,
+        kind: 'category',
+      });
+    }
+    if (suggestions.length >= 7) break;
+  }
+
+  // 3. Matching Indian States
+  for (const st of INDIA_STATES) {
+    if (st.toLowerCase().includes(q)) {
+      pushUnique({
+        id: `state-${st}`,
+        label: `NGOs in ${st}`,
+        sublabel: 'State-wide NGO search',
+        query: `NGOs in ${st}`,
+        kind: 'location',
+      });
+    }
+    if (suggestions.length >= 8) break;
+  }
+
+  // 4. Matching Categories
+  for (const cat of NGO_CATEGORIES) {
+    if (cat.label.toLowerCase().includes(q)) {
+      pushUnique({
+        id: `cat-${cat.value}`,
+        label: `${cat.label} NGOs in India`,
+        sublabel: 'Category filter',
+        query: `${cat.label} NGOs`,
+        kind: 'category',
+      });
+    }
+  }
+
+  // 5. 6-digit PIN code suggestion
+  if (/^\d{4,6}$/.test(q)) {
+    pushUnique({
+      id: `pin-${q}`,
+      label: `Search NGOs near PIN ${q}`,
+      sublabel: 'India Postal Code Search',
+      query: q,
+      kind: 'location',
+    });
+  }
+
+  // Always offer direct search option for custom user text
+  if (suggestions.length === 0 || !seen.has(q)) {
+    pushUnique({
+      id: `direct-${q}`,
+      label: `Search "${rawInput.trim()}" across India`,
+      sublabel: 'ShareBite Registered + External NGO Listings',
+      query: rawInput.trim(),
+      kind: 'ngo',
+    });
+  }
+
+  return suggestions.slice(0, 7);
+}
+
+export const NGODiscoveryService = {
+  INDIA_STATES,
+  NGO_CATEGORIES,
+  PUBLIC_INDIA_NGO_DIRECTORY,
+  parseIndiaQuery,
+  geocodeSearchQuery,
+  searchNGOs,
+  getNGOById,
+  getSuggestions,
+  getRecentSearches,
+  saveRecentSearch,
+  removeRecentSearch,
+  clearRecentSearches,
+};

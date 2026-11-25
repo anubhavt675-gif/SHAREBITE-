@@ -56,6 +56,7 @@ const NGOVolunteersPage = lazyWithRetry(() => import('./pages/app/NGOVolunteersP
 const DonorDonationsStatus = lazyWithRetry(() => import('./pages/app/DonorDonationsStatus'));
 const ChatPage = lazyWithRetry(() => import('./pages/app/ChatPage'));
 const NGODiscoveryPage = lazyWithRetry(() => import('./pages/app/NGODiscoveryPage'));
+const NGODetailsPage = lazyWithRetry(() => import('./pages/public/NGODetailsPage'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -190,6 +191,8 @@ function AppRoutes() {
           <Route path="/how-it-works" element={<HowItWorksPage />} />
           <Route path="/impact" element={<PublicImpactPage />} />
           <Route path="/partners" element={<PartnersPage />} />
+          <Route path="/ngo-search" element={<NGODiscoveryPage embeddedInShell={false} />} />
+          <Route path="/ngo-search/:ngoId" element={<NGODetailsPage embeddedInShell={false} />} />
 
           {/* Role-Based Auth Routes: First Select Role -> Then Dedicated Single Form */}
           <Route path="/register" element={<PublicOnlyRoute><RoleSelectPage initialMode="signup" /></PublicOnlyRoute>} />
@@ -263,7 +266,8 @@ function AppRoutes() {
             <Route path="/admin" element={<RoleRouteGuard allowedRoles={['admin']}><AdminPage /></RoleRouteGuard>} />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/chat/:conversationId" element={<ChatPage />} />
-            <Route path="/ngos" element={<NGODiscoveryPage />} />
+            <Route path="/ngos" element={<NGODiscoveryPage embeddedInShell={true} />} />
+            <Route path="/ngos/:ngoId" element={<NGODetailsPage embeddedInShell={true} />} />
           </Route>
 
           {/* 404 Fallback */}

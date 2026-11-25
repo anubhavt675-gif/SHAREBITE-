@@ -360,6 +360,10 @@ export interface NearbyNGO {
 
 export type NGOVerificationStatus = 'source_listed' | 'contact_available' | 'sharebite_verified' | 'unverified';
 
+export type NGOListingType = 'sharebite_registered' | 'external_listing';
+
+export type NGODataSource = 'sharebite' | 'google_places' | 'openstreetmap' | 'public_outreach';
+
 export type NGOCategory =
   | 'food_distribution'
   | 'child_welfare'
@@ -392,12 +396,21 @@ export interface IndiaNGO {
   email?: string;
   website?: string;
   registrationNumber?: string;
+  registrationType?: string;
+  govRegistrationVerified?: boolean;
   sourceName: string;
   sourceUrl?: string;
+  dataSource?: NGODataSource;
+  listingType?: NGOListingType;
   verificationStatus: NGOVerificationStatus;
   acceptsFoodDonations?: boolean;
   acceptsVolunteers?: boolean;
   operatingHours?: string;
+  imageUrl?: string;
+  placeId?: string;
+  googleMapsUri?: string;
+  businessStatus?: string;
+  sharebiteProfileId?: string;
   lastVerifiedAt?: string;
   createdAt?: string;
   updatedAt?: string;

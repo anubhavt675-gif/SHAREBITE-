@@ -1,30 +1,33 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Search, MapPin, Phone, Globe, Mail, Heart, Navigation,
+  Search, MapPin, Phone, Globe, Mail, Navigation,
   Filter, X, ChevronDown, SlidersHorizontal, Building2,
   ExternalLink, Loader2, RotateCcw, Map, List, AlertCircle,
-  CheckCircle, Info, Handshake,
-} from "lucide-react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import { divIcon } from "leaflet";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext";
-import { LocationService } from "../../services/location";
-import { NGODiscoveryService, type NGOSearchParams } from "../../services/ngoDiscovery";
-import type { IndiaNGO, NGOCategory } from "../../types";
-import styles from "./NGODiscoveryPage.module.css";
-import "leaflet/dist/leaflet.css";
-import "../../styles/leaflet-fix.css";
+  CheckCircle2, Info, ShieldCheck, Crosshair, Eye, ArrowRight,
+  AlertTriangle, WifiOff,
+} from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { divIcon } from 'leaflet';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import Navbar from '../../components/layout/Navbar';
+import Footer from '../../components/layout/Footer';
+import {
+  NGODiscoveryService,
+  type NGOSearchParams,
+} from '../../services/ngoDiscovery';
+import type { IndiaNGO, NGOCategory } from '../../types';
+import styles from './NGODiscoveryPage.module.css';
+import 'leaflet/dist/leaflet.css';
+import '../../styles/leaflet-fix.css';
 
-// ─── Map helpers ──────────────────────────────────────────────────────────────
+// ─── Map Helpers ──────────────────────────────────────────────────────────────
 
-function createNGOMarker(status: string, selected: boolean) {
-  const color =
-    status === "sharebite_verified" ? "#6b8e3e" :
-    status === "contact_available" ? "#c17b3f" : "#64748b";
-  const scale = selected ? "scale(1.2)" : "scale(1)";
+function createNGOMarker(ngo: IndiaNGO, selected: boolean) {
+  const isRegistered = ngo.listingType === 'sharebite_registered';
+  const color = isRegistered ? '#2E7D32' : '#BF5B27';
+  const scale = selected ? 'scale(1.22)' : 'scale(1)';
   return divIcon({
-    className: "",
+    className: '',
     html: `<div style="width:32px;height:32px;background:${color};border-radius:50% 50% 50% 0;transform:rotate(-45deg) ${scale};border:2.5px solid #fff;box-shadow:0 4px 12px ${color}66;display:flex;align-items:center;justify-content:center;transition:transform 0.2s"><svg style="transform:rotate(45deg);width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg></div>`,
     iconSize: [32, 32],
     iconAnchor: [16, 32],
@@ -34,68 +37,116 @@ function createNGOMarker(status: string, selected: boolean) {
 
 function createUserMarker() {
   return divIcon({
-    className: "",
+    className: '',
     html: `<div style="width:20px;height:20px;background:#2563eb;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 6px rgba(37,99,235,0.2),0 4px 12px rgba(0,0,0,0.2)"></div>`,
     iconSize: [20, 20],
     iconAnchor: [10, 10],
   });
 }
 
-function MapFlyTo({ coords }: { coords: [number, number] | null }) {
+function MapFlyTo({ coords, zoom = 14 }: { coords: [number, number] | null; zoom?: number }) {
   const map = useMap();
   useEffect(() => {
-    if (coords) map.flyTo(coords, 14, { duration: 0.8 });
-  }, [coords, map]);
+    if (coords) {
+      map.flyTo(coords, zoom, { duration: 0.7 });
+    }
+  }, [coords, zoom, map]);
   return null;
 }
 
-// ─── Verification badge ───────────────────────────────────────────────────────
+// ─── Truthful Listing & Registration Badges ───────────────────────────────────
 
-function VerificationBadge({ status }: { status: string }) {
-  const config = {
-    sharebite_verified: { label: "ShareBite Verified", color: "#6b8e3e", bg: "#f0f7e9", icon: CheckCircle },
-    contact_available: { label: "Contact Available", color: "#c17b3f", bg: "#fdf6f0", icon: Info },
-    source_listed: { label: "Source Listed", color: "#64748b", bg: "#f1f5f9", icon: Info },
-    unverified: { label: "Unverified", color: "#94a3b8", bg: "#f8fafc", icon: AlertCircle },
-  }[status] || { label: "Listed", color: "#64748b", bg: "#f1f5f9", icon: Info };
+function ListingStatusBadges({ ngo }: { ngo: IndiaNGO }) {
+  const isRegistered = ngo.listingType === 'sharebite_registered';
 
-  const Icon = config.icon;
   return (
-    <span className={styles.badge} style={{ color: config.color, background: config.bg }}>
-      <Icon size={11} />
-      {config.label}
-    </span>
+    <div className={styles.cardStatusRow}>
+      {isRegistered ? (
+        <span
+          className={styles.badge}
+          style={{ color: '#166534', background: '#ECFDF3', border: '1px solid #BBF7D0' }}
+          data-testid="badge-sharebite-registered"
+        >
+          <CheckCircle2 size={11} />
+          ShareBite Registered NGO
+        </span>
+      ) : (
+        <span
+          className={styles.badge}
+          style={{ color: '#9A3412', background: '#FFF7ED', border: '1px solid #FED7AA' }}
+          data-testid="badge-external-listing"
+        >
+          <Globe size={11} />
+          External NGO Listing
+        </span>
+      )}
+
+      {ngo.govRegistrationVerified === true && (
+        <span
+          className={styles.badge}
+          style={{ color: '#1E40AF', background: '#EFF6FF', border: '1px solid #BFDBFE' }}
+          data-testid="badge-gov-verified"
+        >
+          <ShieldCheck size={11} />
+          Government Registration Confirmed
+        </span>
+      )}
+    </div>
   );
 }
 
-// ─── NGO Card ─────────────────────────────────────────────────────────────────
+// ─── NGO Result Card ──────────────────────────────────────────────────────────
 
 function NGOCard({
-  ngo, selected, saved, onSelect, onOffer, onDirections, onSave,
+  ngo,
+  selected,
+  onSelect,
+  onViewDetails,
+  onViewLocation,
 }: {
   ngo: IndiaNGO;
   selected: boolean;
-  saved?: boolean;
   onSelect: () => void;
-  onOffer: () => void;
-  onDirections: () => void;
-  onSave: () => void;
+  onViewDetails: () => void;
+  onViewLocation: () => void;
 }) {
   const catLabels = NGODiscoveryService.NGO_CATEGORIES
     .filter((c) => ngo.categories.includes(c.value))
-    .slice(0, 2);
+    .slice(0, 3);
+
+  const locationLine = [ngo.address, ngo.city, ngo.state, ngo.pincode]
+    .filter(Boolean)
+    .reduce<string[]>((acc, part) => {
+      const p = String(part).trim();
+      if (!p) return acc;
+      const alreadyIncluded = acc.some((prev) => prev.toLowerCase().includes(p.toLowerCase()));
+      if (!alreadyIncluded) acc.push(p);
+      return acc;
+    }, [])
+    .join(', ');
 
   return (
-    <div
+    <article
       id={`ngo-card-${ngo.id}`}
-      className={`${styles.ngoCard} ${selected ? styles.ngoCardSelected : ""}`}
+      className={`${styles.ngoCard} ${selected ? styles.ngoCardSelected : ''}`}
       onClick={onSelect}
+      data-testid="ngo-result-card"
+      data-listing-type={ngo.listingType || 'external_listing'}
     >
       {/* Header row */}
       <div className={styles.cardHeader}>
-        <div className={styles.cardIcon}>
-          <Building2 size={20} />
-        </div>
+        {ngo.imageUrl ? (
+          <img
+            src={ngo.imageUrl}
+            alt={ngo.name}
+            className={styles.cardThumb}
+            loading="lazy"
+          />
+        ) : (
+          <div className={styles.cardIcon}>
+            <Building2 size={20} />
+          </div>
+        )}
         <div className={styles.cardMeta}>
           <h3 className={styles.cardName}>{ngo.name}</h3>
           <div className={styles.cardTagRow}>
@@ -106,111 +157,131 @@ function NGOCard({
             ))}
           </div>
         </div>
-        <button
-          className={`${styles.saveBtn} ${saved ? styles.saveBtnActive : ""}`}
-          onClick={(e) => { e.stopPropagation(); onSave(); }}
-          title={saved ? "Remove from saved" : "Save NGO"}
-        >
-          <Heart size={16} fill={saved ? "currentColor" : "none"} />
-        </button>
       </div>
 
-      {/* Location + distance */}
+      {/* Status badges */}
+      <ListingStatusBadges ngo={ngo} />
+
+      {/* Description (if real) */}
+      {ngo.description && (
+        <p className={styles.cardDesc}>{ngo.description}</p>
+      )}
+
+      {/* Available public organization details */}
       <div className={styles.cardInfo}>
-        {(ngo.city || ngo.state) && (
+        {locationLine && (
           <div className={styles.infoRow}>
             <MapPin size={13} />
-            <span>
-              {[ngo.address, ngo.city, ngo.state, ngo.pincode].filter(Boolean).join(", ")}
-            </span>
+            <span>{locationLine}</span>
           </div>
         )}
         {ngo.distanceKm != null && (
           <div className={styles.infoRow}>
             <Navigation size={13} />
-            <span>{ngo.distanceKm} km away</span>
+            <span>{ngo.distanceKm} km from your location</span>
           </div>
         )}
         {ngo.phone && (
           <div className={styles.infoRow}>
             <Phone size={13} />
-            <a href={`tel:${ngo.phone}`} onClick={(e) => e.stopPropagation()}>{ngo.phone}</a>
+            <a href={`tel:${ngo.phone}`} onClick={(e) => e.stopPropagation()}>
+              {ngo.phone}
+            </a>
           </div>
         )}
         {ngo.email && (
           <div className={styles.infoRow}>
             <Mail size={13} />
-            <a href={`mailto:${ngo.email}`} onClick={(e) => e.stopPropagation()}>{ngo.email}</a>
+            <a href={`mailto:${ngo.email}`} onClick={(e) => e.stopPropagation()}>
+              {ngo.email}
+            </a>
           </div>
         )}
         {ngo.website && (
           <div className={styles.infoRow}>
             <Globe size={13} />
-            <a href={ngo.website} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-              {ngo.website.replace(/^https?:\/\//, "").replace(/\/$/, "").slice(0, 40)}
-              <ExternalLink size={10} style={{ marginLeft: 3 }} />
+            <a
+              href={ngo.website}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {ngo.website.replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 46)}
+              <ExternalLink size={10} style={{ marginLeft: 4 }} />
             </a>
+          </div>
+        )}
+        {ngo.govRegistrationVerified && ngo.registrationNumber && (
+          <div className={styles.infoRow}>
+            <ShieldCheck size={13} />
+            <span>Reg. ID: {ngo.registrationNumber}</span>
           </div>
         )}
       </div>
 
-      {/* Status pills */}
-      <div className={styles.cardStatusRow}>
-        <VerificationBadge status={ngo.verificationStatus} />
-        {ngo.acceptsFoodDonations && (
-          <span className={styles.badge} style={{ color: "#6b8e3e", background: "#f0f7e9" }}>
-            🍱 Accepts Food
-          </span>
-        )}
-        {ngo.acceptsVolunteers && (
-          <span className={styles.badge} style={{ color: "#2563eb", background: "#eff6ff" }}>
-            🤝 Volunteers OK
-          </span>
-        )}
-      </div>
-
-      {/* Source */}
+      {/* Source attribution */}
       <div className={styles.cardSource}>
-        Source: {ngo.sourceName}
-        {ngo.updatedAt && ` · ${new Date(ngo.updatedAt).toLocaleDateString("en-IN", { year: "numeric", month: "short" })}`}
+        Data Source: <strong>{ngo.sourceName}</strong>
+        {ngo.updatedAt &&
+          ` · Updated ${new Date(ngo.updatedAt).toLocaleDateString('en-IN', {
+            year: 'numeric',
+            month: 'short',
+          })}`}
       </div>
 
-      {/* Actions */}
+      {/* Functional actions — strictly View Details, Visit Website, View Location */}
       <div className={styles.cardActions}>
         <button
+          type="button"
           className={`${styles.actionBtn} ${styles.actionBtnPrimary}`}
-          onClick={(e) => { e.stopPropagation(); onOffer(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewDetails();
+          }}
+          data-testid="ngo-view-details-btn"
         >
-          <Handshake size={14} />
-          Offer Food
+          <Eye size={14} />
+          View Details
         </button>
-        <button
-          className={styles.actionBtn}
-          onClick={(e) => { e.stopPropagation(); onDirections(); }}
-        >
-          <Navigation size={14} />
-          Directions
-        </button>
-        {ngo.phone && (
+
+        {ngo.website && (
           <a
-            href={`tel:${ngo.phone}`}
+            href={ngo.website}
+            target="_blank"
+            rel="noopener noreferrer"
             className={styles.actionBtn}
             onClick={(e) => e.stopPropagation()}
+            data-testid="ngo-visit-website-btn"
           >
-            <Phone size={14} />
-            Call
+            <ExternalLink size={14} />
+            Visit Website
           </a>
         )}
+
+        {ngo.latitude != null && ngo.longitude != null && (
+          <button
+            type="button"
+            className={styles.actionBtn}
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewLocation();
+            }}
+            data-testid="ngo-view-location-btn"
+          >
+            <MapPin size={14} />
+            View Location
+          </button>
+        )}
       </div>
-    </div>
+    </article>
   );
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
+// ─── Skeleton Loader ──────────────────────────────────────────────────────────
 
 function NGOSkeleton() {
   return (
-    <div className={styles.skeletonCard}>
+    <div className={styles.skeletonCard} aria-hidden="true">
       <div className={styles.skeletonRow}>
         <div className={`${styles.skeleton} ${styles.skeletonIcon}`} />
         <div className={styles.skeletonLines}>
@@ -226,188 +297,351 @@ function NGOSkeleton() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 const RADII = [
-  { label: "5 km", value: 5 },
-  { label: "10 km", value: 10 },
-  { label: "25 km", value: 25 },
-  { label: "50 km", value: 50 },
-  { label: "100 km", value: 100 },
-  { label: "All India", value: 9999 },
+  { label: 'All India', value: 9999 },
+  { label: '5 km', value: 5 },
+  { label: '10 km', value: 10 },
+  { label: '25 km', value: 25 },
+  { label: '50 km', value: 50 },
+  { label: '100 km', value: 100 },
 ];
 
-export default function NGODiscoveryPage() {
+const QUICK_SEARCH_CHIPS = [
+  'We Care Foundation',
+  'NGOs in Delhi',
+  'Food donation NGOs in Gurugram',
+  'NGOs in Mumbai',
+  'NGOs in Punjab',
+  '122003',
+];
+
+const INITIAL_PAGE_SIZE = 10;
+
+export default function NGODiscoveryPage({
+  embeddedInShell = false,
+}: {
+  embeddedInShell?: boolean;
+}) {
   const navigate = useNavigate();
-  const { user: _user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  // Search state
-  const [searchInput, setSearchInput] = useState("");
-  const [activeQuery, setActiveQuery] = useState("");
-  const [selectedState, setSelectedState] = useState("");
+  const urlQuery = searchParams.get('q') || '';
+  const urlNearby = searchParams.get('nearby') === '1';
+
+  // Search & filter state
+  const [searchInput, setSearchInput] = useState(urlQuery);
+  const [activeQuery, setActiveQuery] = useState(urlQuery);
+  const [selectedState, setSelectedState] = useState(searchParams.get('state') || '');
+  const [selectedCity, setSelectedCity] = useState(searchParams.get('city') || '');
   const [selectedCategories, setSelectedCategories] = useState<NGOCategory[]>([]);
-  const [radiusKm, setRadiusKm] = useState(25);
-  const [sortBy, setSortBy] = useState<"nearest" | "name" | "updated">("nearest");
+  const [radiusKm, setRadiusKm] = useState<number>(urlNearby ? 25 : 9999);
+  const [onlyShareBiteRegistered, setOnlyShareBiteRegistered] = useState(false);
+  const [onlyGovVerified, setOnlyGovVerified] = useState(false);
+  const [sortBy, setSortBy] = useState<'relevance' | 'nearest' | 'name'>('relevance');
   const [showFilters, setShowFilters] = useState(false);
-  const [viewMode, setViewMode] = useState<"list" | "map">("list");
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
 
-  // Location state
+  // Location permission state (explicit user opt-in only)
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [searchCoords, setSearchCoords] = useState<{ lat: number; lng: number; city: string } | null>(null);
-  const [locPermission, setLocPermission] = useState<"unknown" | "granted" | "denied">("unknown");
+  const [locPermission, setLocPermission] = useState<'idle' | 'requesting' | 'granted' | 'denied' | 'unsupported'>('idle');
+  const [locStatusMessage, setLocStatusMessage] = useState<string | null>(null);
 
   // Results state
   const [ngos, setNgos] = useState<IndiaNGO[]>([]);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_PAGE_SIZE);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [sources, setSources] = useState<string[]>([]);
+  const [googleAttribution, setGoogleAttribution] = useState(false);
+  const [quotaNotice, setQuotaNotice] = useState<string | null>(null);
+  const [networkError, setNetworkError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
-  const searchRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapSectionRef = useRef<HTMLDivElement>(null);
 
-  // Effective coords for search: prefer explicit search, then user location
+  // Keep local state in sync when URL query changes (e.g., from Navbar search)
+  useEffect(() => {
+    setSearchInput(urlQuery);
+    setActiveQuery(urlQuery);
+    setVisibleCount(INITIAL_PAGE_SIZE);
+    setSelectedId(null);
+  }, [urlQuery]);
+
+  // Explicit geolocation permission request
+  const requestUserLocation = useCallback(() => {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setLocPermission('unsupported');
+      setLocStatusMessage('Geolocation is not supported in this browser. Search by city, state, or PIN code instead.');
+      return;
+    }
+
+    setLocPermission('requesting');
+    setLocStatusMessage(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserCoords({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        });
+        setLocPermission('granted');
+        setLocStatusMessage('Location enabled — distances calculated from your current position.');
+        setSortBy('nearest');
+        if (radiusKm === 9999) {
+          setRadiusKm(50);
+        }
+      },
+      (err) => {
+        setLocPermission('denied');
+        if (err.code === err.PERMISSION_DENIED) {
+          setLocStatusMessage(
+            'Location permission was denied. You can still search NGOs across India by city, state, district, or PIN code.'
+          );
+        } else {
+          setLocStatusMessage(
+            'Could not determine your location. Please enter a city, state, or PIN code to search.'
+          );
+        }
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300_000 }
+    );
+  }, [radiusKm]);
+
+  // If user clicked "Nearby NGOs near me" from Navbar dropdown
+  useEffect(() => {
+    if (urlNearby && locPermission === 'idle') {
+      requestUserLocation();
+    }
+  }, [urlNearby, locPermission, requestUserLocation]);
+
   const effectiveCoords = searchCoords
     ? { lat: searchCoords.lat, lng: searchCoords.lng }
     : userCoords
     ? { lat: userCoords.latitude, lng: userCoords.longitude }
     : null;
 
-  // ── Get user location on mount ─────────────────────────────────────────────
+  // Geocode query when it contains a city/state/PIN so map centers properly
   useEffect(() => {
-    (async () => {
-      try {
-        const coords = await LocationService.getCurrentCoordinates();
-        if (coords.latitude !== 20.5937) { // not default center
-          setUserCoords({ latitude: coords.latitude, longitude: coords.longitude });
-          setLocPermission("granted");
-        } else {
-          setLocPermission("denied");
-        }
-      } catch {
-        setLocPermission("denied");
-      }
-    })();
-  }, []);
-
-  // ── Main search function ───────────────────────────────────────────────────
-  const runSearch = useCallback(
-    async (query: string, coords: typeof effectiveCoords, cats: NGOCategory[], state: string, radius: number, sort: string) => {
-      if (abortRef.current) abortRef.current.abort();
-      abortRef.current = new AbortController();
-
-      setLoading(true);
-      setError(null);
-
-      const params: NGOSearchParams = {
-        query: query || undefined,
-        lat: coords?.lat,
-        lng: coords?.lng,
-        radiusKm: radius,
-        state: state || undefined,
-        categories: cats.length > 0 ? cats : undefined,
-        sortBy: sort as any,
-      };
-
-      try {
-        const result = await NGODiscoveryService.searchNGOs(params, abortRef.current.signal);
-        setNgos(result.ngos);
-        setSources(result.sources);
-      } catch (err: any) {
-        if (err?.name !== "AbortError") {
-          setError("Search failed. Please check your connection and try again.");
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    []
-  );
-
-  // ── Auto-search when state/category/radius/sort changes ───────────────────
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      runSearch(activeQuery, effectiveCoords, selectedCategories, selectedState, radiusKm, sortBy);
-    }, 300);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeQuery, effectiveCoords?.lat, effectiveCoords?.lng, selectedCategories, selectedState, radiusKm, sortBy]);
-
-  // ── Geocode and search by typed text ──────────────────────────────────────
-  const handleSearch = async (overrideQuery?: string) => {
-    const q = (overrideQuery !== undefined ? overrideQuery : searchInput).trim();
+    const q = activeQuery.trim();
     if (!q) {
-      setActiveQuery("");
       setSearchCoords(null);
       return;
     }
 
-    setActiveQuery(q);
+    const parsed = NGODiscoveryService.parseIndiaQuery(q);
+    const geoTarget = parsed.detectedPincode || parsed.detectedCity || parsed.detectedState;
+    if (!geoTarget) {
+      setSearchCoords(null);
+      return;
+    }
 
-    // Check if it looks like a location (city, state, PIN)
-    const isPincode = /^\d{6}$/.test(q);
-    const isLikelyLocation =
-      isPincode ||
-      NGODiscoveryService.INDIA_STATES.some((s) => q.toLowerCase().includes(s.toLowerCase())) ||
-      q.split(",").length >= 2 ||
-      ["delhi", "mumbai", "bengaluru", "bangalore", "kolkata", "chennai", "hyderabad", "pune", "ahmedabad", "jaipur", "lucknow", "bhopal", "patna", "chandigarh", "najafgarh", "noida", "gurugram"].some((c) => q.toLowerCase().includes(c));
+    const controller = new AbortController();
+    setGeocoding(true);
+    NGODiscoveryService.geocodeSearchQuery(geoTarget, controller.signal)
+      .then((geo) => {
+        if (!controller.signal.aborted) {
+          setSearchCoords(geo ? { lat: geo.lat, lng: geo.lng, city: geo.city } : null);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setGeocoding(false);
+      });
 
-    if (isLikelyLocation || isPincode) {
-      setGeocoding(true);
-      const geo = await NGODiscoveryService.geocodeSearchQuery(q);
-      setGeocoding(false);
-      if (geo) {
-        setSearchCoords({ lat: geo.lat, lng: geo.lng, city: geo.city });
+    return () => controller.abort();
+  }, [activeQuery]);
+
+  // Main debounced hybrid search runner with AbortController
+  const runSearch = useCallback(
+    async (override?: Partial<NGOSearchParams>, append = false) => {
+      if (!append && abortRef.current) {
+        abortRef.current.abort();
       }
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+
+      setNetworkError(null);
+      if (!append) setQuotaNotice(null);
+
+      const params: NGOSearchParams = {
+        query: activeQuery || undefined,
+        state: selectedState || undefined,
+        city: selectedCity || undefined,
+        categories: selectedCategories.length > 0 ? selectedCategories : undefined,
+        lat: userCoords?.latitude ?? searchCoords?.lat,
+        lng: userCoords?.longitude ?? searchCoords?.lng,
+        radiusKm,
+        onlyShareBiteRegistered,
+        onlyGovVerified,
+        sortBy,
+        ...override,
+      };
+
+      try {
+        const res = await NGODiscoveryService.searchNGOs(params, controller.signal);
+        if (controller.signal.aborted) return;
+
+        if (append) {
+          setNgos((prev) => {
+            const seen = new Set(prev.map((p) => p.id));
+            return [...prev, ...res.ngos.filter((n) => !seen.has(n.id))];
+          });
+        } else {
+          setNgos(res.ngos);
+          setVisibleCount(INITIAL_PAGE_SIZE);
+        }
+
+        setSources(res.sources);
+        setNextPageToken(res.nextPageToken);
+        setGoogleAttribution(res.googleAttribution);
+        setQuotaNotice(res.quotaExceeded ? res.quotaMessage || 'API search quota reached.' : null);
+        setNetworkError(res.networkError ? res.networkMessage || 'Network error while searching.' : null);
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          setNetworkError('Unable to complete the search. Please check your internet connection and retry.');
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    },
+    [
+      activeQuery,
+      selectedState,
+      selectedCity,
+      selectedCategories,
+      userCoords?.latitude,
+      userCoords?.longitude,
+      searchCoords?.lat,
+      searchCoords?.lng,
+      radiusKm,
+      onlyShareBiteRegistered,
+      onlyGovVerified,
+      sortBy,
+    ]
+  );
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      runSearch();
+    }, 260);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [runSearch]);
+
+  const handleSubmitSearch = (overrideQuery?: string) => {
+    const q = (overrideQuery !== undefined ? overrideQuery : searchInput).trim();
+    setSearchInput(q);
+    setActiveQuery(q);
+    if (q) {
+      NGODiscoveryService.saveRecentSearch(q);
+      setSearchParams({ q });
+    } else {
+      setSearchParams({});
     }
   };
 
-  // ── Map center ─────────────────────────────────────────────────────────────
-  const mapCenter: [number, number] = effectiveCoords
-    ? [effectiveCoords.lat, effectiveCoords.lng]
-    : [20.5937, 78.9629];
+  const handleLoadMore = async () => {
+    if (visibleCount < ngos.length) {
+      setVisibleCount((prev) => prev + INITIAL_PAGE_SIZE);
+      return;
+    }
+    if (nextPageToken && !loadingMore) {
+      await runSearch({ pageToken: nextPageToken }, true);
+      setVisibleCount((prev) => prev + INITIAL_PAGE_SIZE);
+    }
+  };
 
-  const selectedNGO = ngos.find((n) => n.id === selectedId);
-  const flyToCoord: [number, number] | null =
-    selectedNGO?.latitude && selectedNGO?.longitude
-      ? [selectedNGO.latitude, selectedNGO.longitude]
-      : null;
+  const handleReset = () => {
+    setSearchInput('');
+    setActiveQuery('');
+    setSelectedState('');
+    setSelectedCity('');
+    setSelectedCategories([]);
+    setRadiusKm(9999);
+    setOnlyShareBiteRegistered(false);
+    setOnlyGovVerified(false);
+    setSortBy('relevance');
+    setSearchCoords(null);
+    setSearchParams({});
+  };
 
-  // ── Category toggle ────────────────────────────────────────────────────────
   const toggleCategory = (cat: NGOCategory) => {
     setSelectedCategories((prev) =>
       prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
     );
   };
 
-  const handleReset = () => {
-    setSearchInput("");
-    setActiveQuery("");
-    setSearchCoords(null);
-    setSelectedState("");
-    setSelectedCategories([]);
-    setRadiusKm(25);
-    setSortBy("nearest");
+  const isFilterActive = Boolean(
+    selectedState ||
+      selectedCity ||
+      selectedCategories.length > 0 ||
+      radiusKm !== 9999 ||
+      onlyShareBiteRegistered ||
+      onlyGovVerified ||
+      sortBy !== 'relevance'
+  );
+
+  const visibleNGOs = ngos.slice(0, visibleCount);
+  const canLoadMore = visibleCount < ngos.length || Boolean(nextPageToken);
+
+  const selectedNGO = ngos.find((n) => n.id === selectedId);
+  const firstMappedNGO = ngos.find((n) => n.latitude != null && n.longitude != null);
+
+  const mapCenter: [number, number] = effectiveCoords
+    ? [effectiveCoords.lat, effectiveCoords.lng]
+    : firstMappedNGO?.latitude != null && firstMappedNGO?.longitude != null
+    ? [firstMappedNGO.latitude, firstMappedNGO.longitude]
+    : [22.5937, 78.9629];
+
+  const flyToCoord: [number, number] | null =
+    selectedNGO?.latitude != null && selectedNGO?.longitude != null
+      ? [selectedNGO.latitude, selectedNGO.longitude]
+      : effectiveCoords
+      ? [effectiveCoords.lat, effectiveCoords.lng]
+      : null;
+
+  const detailsBasePath = embeddedInShell ? '/ngos' : '/ngo-search';
+
+  const openDetails = (ngo: IndiaNGO) => {
+    navigate(`${detailsBasePath}/${encodeURIComponent(ngo.id)}`, {
+      state: { ngo, backSearch: searchParams.toString() },
+    });
   };
 
-  const isFilterActive = selectedState || selectedCategories.length > 0 || radiusKm !== 25 || sortBy !== "nearest";
+  const focusLocationOnMap = (ngo: IndiaNGO) => {
+    setSelectedId(ngo.id);
+    if (window.innerWidth < 960) {
+      setViewMode('map');
+    } else {
+      mapSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  };
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
-  return (
-    <div className={styles.page}>
+  const pageBody = (
+    <div className={`${styles.page} ${!embeddedInShell ? styles.publicPageOffset : ''}`}>
       {/* ── Header ── */}
       <div className={styles.header}>
         <div className={styles.headerBadge}>
           <Building2 size={12} />
-          <span>INDIA NGO DISCOVERY</span>
+          <span>INDIA-WIDE NGO DISCOVERY</span>
         </div>
         <h1 className={styles.title}>
-          Find NGOs <span className={styles.titleAccent}>across India</span>
+          Discover NGOs <span className={styles.titleAccent}>across India</span>
         </h1>
         <p className={styles.subtitle}>
-          Search food banks, shelters, orphanages & charities — by city, PIN, state, or cause.
-          Results powered by ShareBite database and OpenStreetMap.
+          Search ShareBite Registered NGOs and publicly listed organizations across India by name,
+          city, state, district, PIN code, food bank, or community welfare category.
         </p>
       </div>
 
@@ -416,36 +650,46 @@ export default function NGODiscoveryPage() {
         <div className={styles.searchBar}>
           <Search size={18} className={styles.searchIcon} />
           <input
-            ref={searchRef}
             className={styles.searchInput}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            placeholder="Search NGOs in Najafgarh Delhi, Mumbai, 110042, or by name..."
+            onKeyDown={(e) => e.key === 'Enter' && handleSubmitSearch()}
+            placeholder="Search We Care Foundation, NGOs in Delhi, Gurugram, Mumbai, Punjab, or 6-digit PIN..."
             id="ngo-search-input"
+            data-testid="ngo-page-search-input"
           />
           {geocoding && <Loader2 size={16} className={styles.searchSpinner} />}
           {searchInput && (
-            <button className={styles.clearBtn} onClick={() => { setSearchInput(""); setActiveQuery(""); setSearchCoords(null); }}>
+            <button
+              type="button"
+              className={styles.clearBtn}
+              onClick={() => handleSubmitSearch('')}
+              aria-label="Clear NGO search"
+              data-testid="ngo-page-clear-btn"
+            >
               <X size={15} />
             </button>
           )}
-          <button className={styles.searchBtn} onClick={() => handleSearch()} disabled={geocoding}>
+          <button
+            type="button"
+            className={styles.searchBtn}
+            onClick={() => handleSubmitSearch()}
+            disabled={geocoding}
+            data-testid="ngo-page-search-btn"
+          >
             Search
           </button>
         </div>
 
-        {/* Quick searches */}
+        {/* Quick suggestions */}
         <div className={styles.quickSearches}>
-          <span className={styles.quickLabel}>Try:</span>
-          {["Najafgarh Delhi", "Mumbai", "Bengaluru", "Bhopal", "Chennai", "110001"].map((q) => (
+          <span className={styles.quickLabel}>Try searching:</span>
+          {QUICK_SEARCH_CHIPS.map((q) => (
             <button
               key={q}
+              type="button"
               className={styles.quickChip}
-              onClick={() => {
-                setSearchInput(q);
-                handleSearch(q);
-              }}
+              onClick={() => handleSubmitSearch(q)}
             >
               {q}
             </button>
@@ -453,29 +697,51 @@ export default function NGODiscoveryPage() {
         </div>
       </div>
 
-      {/* ── Filter + View toggle bar ── */}
+      {/* ── Controls & Location Permission Bar ── */}
       <div className={styles.controlBar}>
         <div className={styles.controlLeft}>
           <button
-            className={`${styles.filterToggle} ${showFilters ? styles.filterToggleActive : ""}`}
+            type="button"
+            className={`${styles.filterToggle} ${showFilters ? styles.filterToggleActive : ''}`}
             onClick={() => setShowFilters((v) => !v)}
+            data-testid="ngo-filters-toggle"
           >
             <SlidersHorizontal size={15} />
             Filters
             {isFilterActive && <span className={styles.filterDot} />}
           </button>
 
-          {/* Radius */}
+          {/* Explicit Location Permission Button */}
+          <button
+            type="button"
+            className={`${styles.filterToggle} ${locPermission === 'granted' ? styles.filterToggleActive : ''}`}
+            onClick={requestUserLocation}
+            disabled={locPermission === 'requesting'}
+            data-testid="ngo-use-location-btn"
+          >
+            {locPermission === 'requesting' ? (
+              <Loader2 size={14} className={styles.searchSpinner} />
+            ) : (
+              <Crosshair size={14} />
+            )}
+            {locPermission === 'granted' ? 'Nearby Active' : 'Use My Location'}
+          </button>
+
+          {/* Distance filter */}
           <div className={styles.pillSelect}>
             <Navigation size={13} />
+            <span>{RADII.find((r) => r.value === radiusKm)?.label || 'All India'}</span>
             <select
               className={styles.nativeSelect}
               value={radiusKm}
               onChange={(e) => setRadiusKm(Number(e.target.value))}
               id="ngo-radius-select"
+              aria-label="Distance filter"
             >
               {RADII.map((r) => (
-                <option key={r.value} value={r.value}>{r.label}</option>
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
               ))}
             </select>
             <ChevronDown size={13} />
@@ -484,47 +750,65 @@ export default function NGODiscoveryPage() {
           {/* Sort */}
           <div className={styles.pillSelect}>
             <Filter size={13} />
+            <span>
+              {sortBy === 'relevance' ? 'Relevance' : sortBy === 'nearest' ? 'Nearest First' : 'Name A–Z'}
+            </span>
             <select
               className={styles.nativeSelect}
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
+              onChange={(e) => setSortBy(e.target.value as 'relevance' | 'nearest' | 'name')}
               id="ngo-sort-select"
+              aria-label="Sort NGOs"
             >
+              <option value="relevance">Relevance</option>
               <option value="nearest">Nearest First</option>
               <option value="name">Name A–Z</option>
-              <option value="updated">Recently Updated</option>
             </select>
             <ChevronDown size={13} />
           </div>
 
+          {/* Quick toggle pills */}
+          <button
+            type="button"
+            className={`${styles.filterToggle} ${onlyShareBiteRegistered ? styles.filterToggleActive : ''}`}
+            onClick={() => setOnlyShareBiteRegistered((v) => !v)}
+            data-testid="filter-sharebite-registered"
+          >
+            <CheckCircle2 size={14} />
+            ShareBite Registered
+          </button>
+
+          <button
+            type="button"
+            className={`${styles.filterToggle} ${onlyGovVerified ? styles.filterToggleActive : ''}`}
+            onClick={() => setOnlyGovVerified((v) => !v)}
+            data-testid="filter-gov-verified"
+          >
+            <ShieldCheck size={14} />
+            Gov. Registration Confirmed
+          </button>
+
           {isFilterActive && (
-            <button className={styles.resetBtn} onClick={handleReset}>
+            <button type="button" className={styles.resetBtn} onClick={handleReset}>
               <RotateCcw size={13} /> Reset
             </button>
           )}
         </div>
 
         <div className={styles.controlRight}>
-          {/* Location permission hint */}
-          {locPermission === "denied" && !searchCoords && (
-            <div className={styles.locHint}>
-              <AlertCircle size={13} />
-              <span>Search a city to discover NGOs</span>
-            </div>
-          )}
-
-          {/* View toggle */}
           <div className={styles.viewToggle}>
             <button
-              className={`${styles.viewBtn} ${viewMode === "list" ? styles.viewBtnActive : ""}`}
-              onClick={() => setViewMode("list")}
+              type="button"
+              className={`${styles.viewBtn} ${viewMode === 'list' ? styles.viewBtnActive : ''}`}
+              onClick={() => setViewMode('list')}
               id="ngo-list-view-btn"
             >
               <List size={15} /> List
             </button>
             <button
-              className={`${styles.viewBtn} ${viewMode === "map" ? styles.viewBtnActive : ""}`}
-              onClick={() => setViewMode("map")}
+              type="button"
+              className={`${styles.viewBtn} ${viewMode === 'map' ? styles.viewBtnActive : ''}`}
+              onClick={() => setViewMode('map')}
               id="ngo-map-view-btn"
             >
               <Map size={15} /> Map
@@ -533,17 +817,19 @@ export default function NGODiscoveryPage() {
         </div>
       </div>
 
-      {/* ── Expandable Filter Panel ── */}
+      {/* ── Expandable Filters Panel (State, City, Category) ── */}
       {showFilters && (
-        <div className={styles.filterPanel}>
-          {/* Category grid */}
+        <div className={styles.filterPanel} data-testid="ngo-filters-panel">
           <div className={styles.filterSection}>
-            <p className={styles.filterLabel}>Category</p>
+            <p className={styles.filterLabel}>NGO Category</p>
             <div className={styles.categoryGrid}>
               {NGODiscoveryService.NGO_CATEGORIES.map((cat) => (
                 <button
                   key={cat.value}
-                  className={`${styles.catBtn} ${selectedCategories.includes(cat.value) ? styles.catBtnActive : ""}`}
+                  type="button"
+                  className={`${styles.catBtn} ${
+                    selectedCategories.includes(cat.value) ? styles.catBtnActive : ''
+                  }`}
                   onClick={() => toggleCategory(cat.value)}
                 >
                   <span>{cat.emoji}</span>
@@ -553,39 +839,109 @@ export default function NGODiscoveryPage() {
             </div>
           </div>
 
-          {/* State filter */}
-          <div className={styles.filterSection}>
-            <p className={styles.filterLabel}>State / UT</p>
-            <select
-              className={styles.stateSelect}
-              value={selectedState}
-              onChange={(e) => setSelectedState(e.target.value)}
-              id="ngo-state-select"
-            >
-              <option value="">All India</option>
-              {NGODiscoveryService.INDIA_STATES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+          <div className={styles.filterColumnNarrow}>
+            <div className={styles.filterSection}>
+              <label className={styles.filterLabel} htmlFor="ngo-state-select">
+                State / Union Territory
+              </label>
+              <select
+                className={styles.stateSelect}
+                value={selectedState}
+                onChange={(e) => setSelectedState(e.target.value)}
+                id="ngo-state-select"
+                data-testid="ngo-state-select"
+              >
+                <option value="">All India</option>
+                {NGODiscoveryService.INDIA_STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className={styles.filterSection}>
+              <label className={styles.filterLabel} htmlFor="ngo-city-input">
+                City / District
+              </label>
+              <input
+                id="ngo-city-input"
+                type="text"
+                className={styles.stateSelect}
+                value={selectedCity}
+                onChange={(e) => setSelectedCity(e.target.value)}
+                placeholder="e.g., Gurugram, Delhi, Mumbai, Amritsar..."
+                data-testid="ngo-city-input"
+              />
+            </div>
           </div>
         </div>
       )}
 
-      {/* ── Data transparency notice ── */}
+      {/* ── Status / Permission / Quota / Network Banners ── */}
+      {locStatusMessage && (
+        <div
+          className={
+            locPermission === 'denied' || locPermission === 'unsupported'
+              ? styles.warningBanner
+              : styles.successBanner
+          }
+          role="status"
+          data-testid="ngo-location-banner"
+        >
+          {locPermission === 'denied' || locPermission === 'unsupported' ? (
+            <AlertCircle size={15} />
+          ) : (
+            <CheckCircle2 size={15} />
+          )}
+          <span>{locStatusMessage}</span>
+        </div>
+      )}
+
+      {quotaNotice && (
+        <div className={styles.warningBanner} role="alert" data-testid="ngo-quota-banner">
+          <AlertTriangle size={15} />
+          <span>{quotaNotice}</span>
+        </div>
+      )}
+
+      {networkError && (
+        <div className={styles.errorBanner} role="alert" data-testid="ngo-network-banner">
+          <WifiOff size={15} />
+          <span>{networkError}</span>
+          <button type="button" className={styles.inlineRetryBtn} onClick={() => runSearch()}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* ── Data Transparency & Attribution Notice ── */}
       <div className={styles.dataNotice}>
         <Info size={14} />
         <span>
-          Results depend on available data sources.{" "}
-          {sources.length > 0 ? <>Showing data from: <strong>{sources.join(" + ")}</strong>.</> : null}
-          {" "}Not all NGOs in India may be listed.
+          <strong>ShareBite Registered NGOs</strong> are active on our platform;{' '}
+          <strong>External NGO Listings</strong> are publicly discoverable organizations and are not
+          automatically verified ShareBite partners.
+          {sources.length > 0 ? (
+            <>
+              {' '}
+              Sources in view: <strong>{sources.join(' · ')}</strong>.
+            </>
+          ) : null}
+          {googleAttribution ? ' Powered by Google Maps / Places.' : ''}
         </span>
       </div>
 
-      {/* ── Main Content: Split or Full Map ── */}
-      {viewMode === "map" ? (
+      {/* ── Main Content: Map + Results ── */}
+      {viewMode === 'map' ? (
         <div className={styles.fullMapWrap}>
-          <MapContainer center={mapCenter} zoom={effectiveCoords ? 12 : 5} className={styles.fullMap} zoomControl={true}>
-            <MapFlyTo coords={flyToCoord} />
+          <MapContainer
+            center={mapCenter}
+            zoom={effectiveCoords ? 11 : 5}
+            className={styles.fullMap}
+            zoomControl={true}
+          >
+            <MapFlyTo coords={flyToCoord} zoom={selectedNGO ? 14 : 11} />
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -593,30 +949,41 @@ export default function NGODiscoveryPage() {
             />
             {userCoords && (
               <Marker position={[userCoords.latitude, userCoords.longitude]} icon={createUserMarker()}>
-                <Popup><strong>Your Location</strong></Popup>
+                <Popup>
+                  <strong>Your Current Location</strong>
+                </Popup>
               </Marker>
             )}
             {ngos.map((ngo) =>
-              ngo.latitude && ngo.longitude ? (
+              ngo.latitude != null && ngo.longitude != null ? (
                 <Marker
                   key={ngo.id}
                   position={[ngo.latitude, ngo.longitude]}
-                  icon={createNGOMarker(ngo.verificationStatus, ngo.id === selectedId)}
+                  icon={createNGOMarker(ngo, ngo.id === selectedId)}
                   eventHandlers={{ click: () => setSelectedId(ngo.id) }}
                 >
                   <Popup>
-                    <div style={{ minWidth: 180 }}>
+                    <div style={{ minWidth: 190 }}>
                       <strong>{ngo.name}</strong>
-                      <p style={{ fontSize: 12, marginTop: 4, color: "#64748b" }}>
-                        {ngo.city}{ngo.state ? `, ${ngo.state}` : ""}
-                        {ngo.distanceKm != null ? ` · ${ngo.distanceKm} km` : ""}
+                      <p style={{ fontSize: 12, marginTop: 4, color: '#64748b' }}>
+                        {[ngo.city, ngo.state].filter(Boolean).join(', ')}
+                        {ngo.distanceKm != null ? ` · ${ngo.distanceKm} km` : ''}
                       </p>
-                      {ngo.phone && <p style={{ fontSize: 12 }}><Phone size={10} style={{ display: "inline" }} /> {ngo.phone}</p>}
                       <button
-                        style={{ marginTop: 8, fontSize: 12, padding: "4px 10px", background: "#c17b3f", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
-                        onClick={() => { setSelectedId(ngo.id); setViewMode("list"); }}
+                        type="button"
+                        style={{
+                          marginTop: 8,
+                          fontSize: 12,
+                          padding: '5px 10px',
+                          background: '#BF5B27',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => openDetails(ngo)}
                       >
-                        View Details
+                        View Details →
                       </button>
                     </div>
                   </Popup>
@@ -624,16 +991,21 @@ export default function NGODiscoveryPage() {
               ) : null
             )}
           </MapContainer>
-          <button className={styles.backToList} onClick={() => setViewMode("list")}>
+          <button type="button" className={styles.backToList} onClick={() => setViewMode('list')}>
             <List size={15} /> Back to List
           </button>
         </div>
       ) : (
         <div className={styles.splitLayout}>
-          {/* ── Left: Map ── */}
-          <div className={styles.mapCol}>
-            <MapContainer center={mapCenter} zoom={effectiveCoords ? 12 : 5} className={styles.sideMap} zoomControl={true}>
-              <MapFlyTo coords={flyToCoord} />
+          {/* Left: Interactive Embedded Map */}
+          <div className={styles.mapCol} ref={mapSectionRef}>
+            <MapContainer
+              center={mapCenter}
+              zoom={effectiveCoords ? 11 : 5}
+              className={styles.sideMap}
+              zoomControl={true}
+            >
+              <MapFlyTo coords={flyToCoord} zoom={selectedNGO ? 14 : 11} />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -641,57 +1013,87 @@ export default function NGODiscoveryPage() {
               />
               {userCoords && (
                 <Marker position={[userCoords.latitude, userCoords.longitude]} icon={createUserMarker()}>
-                  <Popup><strong>Your Location</strong></Popup>
+                  <Popup>
+                    <strong>Your Current Location</strong>
+                  </Popup>
                 </Marker>
               )}
               {ngos.map((ngo) =>
-                ngo.latitude && ngo.longitude ? (
+                ngo.latitude != null && ngo.longitude != null ? (
                   <Marker
                     key={ngo.id}
                     position={[ngo.latitude, ngo.longitude]}
-                    icon={createNGOMarker(ngo.verificationStatus, ngo.id === selectedId)}
+                    icon={createNGOMarker(ngo, ngo.id === selectedId)}
                     eventHandlers={{
                       click: () => {
                         setSelectedId(ngo.id);
-                        document.getElementById(`ngo-card-${ngo.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                        document
+                          .getElementById(`ngo-card-${ngo.id}`)
+                          ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                       },
                     }}
                   >
                     <Popup>
-                      <div style={{ minWidth: 180 }}>
+                      <div style={{ minWidth: 185 }}>
                         <strong>{ngo.name}</strong>
-                        <p style={{ fontSize: 12, marginTop: 4, color: "#64748b" }}>
-                          {ngo.city}{ngo.state ? `, ${ngo.state}` : ""}
+                        <p style={{ fontSize: 12, marginTop: 4, color: '#64748b' }}>
+                          {[ngo.city, ngo.state].filter(Boolean).join(', ')}
                         </p>
-                        {ngo.phone && <p style={{ fontSize: 12 }}>{ngo.phone}</p>}
+                        <button
+                          type="button"
+                          style={{
+                            marginTop: 6,
+                            fontSize: 12,
+                            padding: '4px 10px',
+                            background: '#BF5B27',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => openDetails(ngo)}
+                        >
+                          View Details
+                        </button>
                       </div>
                     </Popup>
                   </Marker>
                 ) : null
               )}
             </MapContainer>
-            {/* Map legend */}
             <div className={styles.mapLegend}>
-              <span><span className={styles.dot} style={{ background: "#6b8e3e" }} /> ShareBite Verified</span>
-              <span><span className={styles.dot} style={{ background: "#c17b3f" }} /> Contact Available</span>
-              <span><span className={styles.dot} style={{ background: "#64748b" }} /> Source Listed</span>
+              <span>
+                <span className={styles.dot} style={{ background: '#2E7D32' }} /> ShareBite Registered NGO
+              </span>
+              <span>
+                <span className={styles.dot} style={{ background: '#BF5B27' }} /> External NGO Listing
+              </span>
             </div>
           </div>
 
-          {/* ── Right: List ── */}
+          {/* Right: Search Results List */}
           <div className={styles.listCol}>
             <div className={styles.listHeader}>
               <div>
                 <h2 className={styles.listTitle}>
-                  {searchCoords ? `NGOs near ${searchCoords.city}` : activeQuery ? `Results for "${activeQuery}"` : "NGOs Near You"}
+                  {activeQuery
+                    ? `Results for "${activeQuery}"`
+                    : selectedState
+                    ? `NGOs in ${selectedState}`
+                    : selectedCity
+                    ? `NGOs in ${selectedCity}`
+                    : 'NGOs Across India'}
                 </h2>
-                <p className={styles.listCount}>
-                  {loading ? "Searching..." : `${ngos.length} organisation${ngos.length !== 1 ? "s" : ""} found`}
+                <p className={styles.listCount} data-testid="ngo-results-count">
+                  {loading
+                    ? 'Searching across India...'
+                    : `${ngos.length} organisation${ngos.length !== 1 ? 's' : ''} found`}
                 </p>
               </div>
               <button
+                type="button"
                 className={styles.mapViewMobileBtn}
-                onClick={() => setViewMode("map")}
+                onClick={() => setViewMode('map')}
               >
                 <Map size={14} /> Full Map
               </button>
@@ -700,60 +1102,76 @@ export default function NGODiscoveryPage() {
             <div className={styles.cardsList}>
               {loading ? (
                 Array.from({ length: 4 }).map((_, i) => <NGOSkeleton key={i} />)
-              ) : error ? (
-                <div className={styles.emptyState}>
-                  <AlertCircle size={32} color="#dc2626" />
-                  <p>{error}</p>
-                  <button className={styles.retryBtn} onClick={() => runSearch(activeQuery, effectiveCoords, selectedCategories, selectedState, radiusKm, sortBy)}>
-                    Retry
-                  </button>
-                </div>
               ) : ngos.length === 0 ? (
-                <div className={styles.emptyState}>
-                  <Building2 size={36} color="#c4b49e" />
-                  <h3>No NGOs found</h3>
+                <div className={styles.emptyState} data-testid="ngo-empty-state">
+                  <Building2 size={38} color="#C4B49E" />
+                  <h3>No matching NGOs found</h3>
                   <p>
-                    {locPermission === "denied" && !searchCoords
-                      ? "Search a city name or PIN code to discover NGOs."
-                      : "Try expanding the radius or searching All India."}
+                    {activeQuery
+                      ? `We could not find verified or public NGO listings matching "${activeQuery}". Try searching by city (e.g., Delhi, Mumbai, Gurugram, Amritsar), Indian state, or food donation category.`
+                      : 'Try removing one of your active filters or searching a city or PIN code.'}
                   </p>
-                  {radiusKm < 9999 && (
-                    <button className={styles.retryBtn} onClick={() => setRadiusKm(9999)}>
-                      Search All India
+                  <div className={styles.emptyActions}>
+                    <button type="button" className={styles.retryBtn} onClick={handleReset}>
+                      Reset Search & Filters
                     </button>
-                  )}
+                    {networkError && (
+                      <button type="button" className={styles.retryBtn} onClick={() => runSearch()}>
+                        Retry Search
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : (
-                ngos.map((ngo) => (
-                  <NGOCard
-                    key={ngo.id}
-                    ngo={ngo}
-                    selected={ngo.id === selectedId}
-                    saved={savedIds.has(ngo.id)}
-                    onSelect={() => setSelectedId(ngo.id === selectedId ? null : ngo.id)}
-                    onOffer={() => navigate("/donations/new")}
-                    onDirections={() => {
-                      if (ngo.latitude && ngo.longitude) {
-                        window.open(`https://www.google.com/maps/dir/?api=1&destination=${ngo.latitude},${ngo.longitude}`, "_blank");
-                      } else if (ngo.address) {
-                        window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${ngo.name} ${ngo.address}`)}`, "_blank");
-                      }
-                    }}
-                    onSave={() => {
-                      setSavedIds((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(ngo.id)) next.delete(ngo.id);
-                        else next.add(ngo.id);
-                        return next;
-                      });
-                    }}
-                  />
-                ))
+                <>
+                  {visibleNGOs.map((ngo) => (
+                    <NGOCard
+                      key={ngo.id}
+                      ngo={ngo}
+                      selected={ngo.id === selectedId}
+                      onSelect={() => setSelectedId(ngo.id === selectedId ? null : ngo.id)}
+                      onViewDetails={() => openDetails(ngo)}
+                      onViewLocation={() => focusLocationOnMap(ngo)}
+                    />
+                  ))}
+
+                  {canLoadMore && (
+                    <button
+                      type="button"
+                      className={styles.loadMoreBtn}
+                      onClick={handleLoadMore}
+                      disabled={loadingMore}
+                      data-testid="ngo-load-more-btn"
+                    >
+                      {loadingMore ? (
+                        <>
+                          <Loader2 size={15} className={styles.searchSpinner} /> Loading more NGOs...
+                        </>
+                      ) : (
+                        <>
+                          Load More NGOs <ArrowRight size={15} />
+                        </>
+                      )}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+
+  if (embeddedInShell) {
+    return pageBody;
+  }
+
+  return (
+    <div className={styles.publicShell}>
+      <Navbar />
+      <main className={styles.publicMain}>{pageBody}</main>
+      <Footer />
     </div>
   );
 }
