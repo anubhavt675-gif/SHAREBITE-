@@ -31,7 +31,7 @@ function AutoPlayVisitVideo({ vid }: { vid: OutreachVideoItem }) {
 
     const tryPlay = () => {
       if (el.paused) {
-        el.play().catch(() => {});
+        el.play().catch(() => { });
       }
     };
 

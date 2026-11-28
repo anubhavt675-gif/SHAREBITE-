@@ -1027,12 +1027,12 @@ async function fetchFromGooglePlacesProxy(
 
     const ngos: IndiaNGO[] = Array.isArray(data.ngos)
       ? data.ngos.map((item: IndiaNGO) => ({
-          ...item,
-          listingType: 'external_listing',
-          dataSource: 'google_places',
-          sourceName: 'Google Places',
-          govRegistrationVerified: false,
-        }))
+        ...item,
+        listingType: 'external_listing',
+        dataSource: 'google_places',
+        sourceName: 'Google Places',
+        govRegistrationVerified: false,
+      }))
       : [];
 
     return {
@@ -1076,8 +1076,8 @@ async function fetchFromOpenStreetMapIndia(
     const catHint = parsed.detectedCategories.includes('food_distribution')
       ? 'food bank charity NGO'
       : parsed.detectedCategories.includes('homeless_support')
-      ? 'shelter charity NGO'
-      : 'NGO charity foundation';
+        ? 'shelter charity NGO'
+        : 'NGO charity foundation';
     q = `${catHint} ${locationSuffix}`.trim();
   } else {
     return { ngos: [], networkFailed: false };
@@ -1263,10 +1263,10 @@ function filterByIntent(list: IndiaNGO[], params: NGOSearchParams, parsed: Parse
         targetCity === 'gurugram' || targetCity === 'gurgaon'
           ? ['gurugram', 'gurgaon']
           : targetCity === 'bengaluru' || targetCity === 'bangalore'
-          ? ['bengaluru', 'bangalore']
-          : targetCity === 'new delhi' || targetCity === 'delhi'
-          ? ['delhi', 'new delhi']
-          : [targetCity];
+            ? ['bengaluru', 'bangalore']
+            : targetCity === 'new delhi' || targetCity === 'delhi'
+              ? ['delhi', 'new delhi']
+              : [targetCity];
 
       const cityMatch = cityAliases.some(
         (alias) => (ngo.city || '').toLowerCase().includes(alias) || haystack.includes(alias)
@@ -1403,13 +1403,13 @@ async function geocodeSearchQuery(
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?` +
-        new URLSearchParams({
-          q: `${query}, India`,
-          format: 'jsonv2',
-          addressdetails: '1',
-          countrycodes: 'in',
-          limit: '1',
-        }).toString(),
+      new URLSearchParams({
+        q: `${query}, India`,
+        format: 'jsonv2',
+        addressdetails: '1',
+        countrycodes: 'in',
+        limit: '1',
+      }).toString(),
       { signal }
     );
     if (!res.ok) return null;
@@ -1442,13 +1442,13 @@ async function searchNGOs(
     isBrowserOffline ? Promise.resolve([] as IndiaNGO[]) : fetchFromSupabase(params, parsed),
     params.onlyShareBiteRegistered || isBrowserOffline
       ? Promise.resolve<GoogleProxyResult>({
-          ngos: [],
-          nextPageToken: null,
-          apiConfigured: false,
-          quotaExceeded: false,
-          networkError: isBrowserOffline,
-          networkMessage: isBrowserOffline ? 'You appear to be offline. Check your internet connection and retry.' : undefined,
-        })
+        ngos: [],
+        nextPageToken: null,
+        apiConfigured: false,
+        quotaExceeded: false,
+        networkError: isBrowserOffline,
+        networkMessage: isBrowserOffline ? 'You appear to be offline. Check your internet connection and retry.' : undefined,
+      })
       : fetchFromGooglePlacesProxy(params, parsed, signal),
   ]);
 
